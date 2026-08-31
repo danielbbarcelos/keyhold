@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Bot,
   KeyRound,
@@ -519,46 +519,78 @@ function TrailSettings({ on, onChanged }: { on: boolean; onChanged: () => void }
 }
 
 /**
- * Which vaults a local agent is allowed to see (F7).
+ * The agent surface: which vaults it may see, and whether the door is open at all.
  *
- * Off for every vault until it is switched on, and the switch is *visibility* rather than
- * permission: what is not marked is never listed to an agent, so there is nothing for it to ask
- * about. The warning is permanent because the trade is permanent — a value handed to an assistant
- * leaves this machine, which is the opposite of everything else keyhold promises.
+ * Two switches on purpose. Marking a vault says what *could* be reached; opening the socket says
+ * whether anything can reach it right now. Closing the socket removes the file, so an agent finds
+ * nothing to connect to rather than something that refuses — the difference between an integration
+ * that is off and one that looks broken.
  */
 function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged: () => void }) {
+  const [surface, setSurface] = useState<{
+    listening: boolean
+    socket: string
+    exposed_vaults: number
+    active_grants: number
+    command: string
+  } | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const refresh = () =>
+    api
+      .agentStatus()
+      .then(setSurface)
+      .catch(() => setSurface(null))
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  const marked = vaults.filter((vault) => !vault.archived && vault.agent_access).length
+
   return (
     <Card className="py-6">
       <CardHeader className="px-6">
         <CardTitle className="flex items-center gap-2">
           <Bot className="size-4" />
           Acesso por agente
-          <Badge variant="outline">ainda não conectável</Badge>
+          {surface?.listening ? <Badge>ligado</Badge> : <Badge variant="secondary">desligado</Badge>}
         </CardTitle>
         <CardDescription>
-          Marcar um cofre aqui é dizer, de antemão, o que um assistente rodando nesta máquina poderá
-          consultar. <strong className="text-foreground">A ligação ainda não existe</strong>: hoje
-          isto só guarda a sua escolha, e nada consegue ler o cofre por fora desta janela.
+          Um assistente rodando nesta máquina pode procurar e pedir segredos dos cofres marcados
+          aqui. Cada pedido de valor vira uma pergunta nesta janela, com o processo e o PID à vista.
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-4 px-6">
-        <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm">
-          <p className="font-medium">O que falta para funcionar</p>
-          <p className="text-muted-foreground">
-            Um canal local entre o keyhold e o assistente, e uma pergunta sua a cada leitura: qual
-            processo pediu, qual registro, qual campo — com resposta válida uma vez, ou por alguns
-            minutos. Enquanto isso não existe, esta marcação não abre nada.
-          </p>
-        </div>
-
         <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">
-          Quando existir, vale saber desde já: todo valor entregue a um assistente entra no contexto
-          do modelo e sai desta máquina. É o oposto do que o resto do keyhold promete, e por isso a
-          via preferida será executar o comando com o segredo, em vez de mostrá-lo.
+          Todo valor entregue a um assistente entra no contexto do modelo e sai desta máquina. É o
+          oposto do que o resto do keyhold promete. A via preferida é{' '}
+          <span className="text-foreground">executar um comando</span> com o segredo, em vez de
+          mostrá-lo — o assistente recebe a saída, nunca o valor.
         </p>
 
-        <div className="space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <Label htmlFor="agent-surface" className="font-normal">
+            Aceitar pedidos de um assistente local
+          </Label>
+          <Switch
+            id="agent-surface"
+            checked={surface?.listening ?? false}
+            disabled={marked === 0}
+            onCheckedChange={(on) => void api.setAgentSurface(on).then(refresh)}
+          />
+        </div>
+
+        {marked === 0 && (
+          <p className="text-sm text-muted-foreground">
+            Marque ao menos um cofre abaixo antes de abrir a porta.
+          </p>
+        )}
+
+        <div className="space-y-3 border-t pt-4">
+          <Label>Cofres ao alcance</Label>
+
           {vaults
             .filter((vault) => !vault.archived)
             .map((vault) => (
@@ -566,19 +598,61 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
                 <Label htmlFor={`agent-${vault.id}`} className="font-normal">
                   {vault.name}
                 </Label>
-                <span className="flex items-center gap-2">
-                  {vault.agent_access && (
-                    <span className="text-xs text-muted-foreground">marcado, sem efeito ainda</span>
-                  )}
-                  <Switch
-                    id={`agent-${vault.id}`}
-                    checked={vault.agent_access}
-                    onCheckedChange={(on) => void api.setAgentAccess(vault.id, on).then(onChanged)}
-                  />
-                </span>
+                <Switch
+                  id={`agent-${vault.id}`}
+                  checked={vault.agent_access}
+                  onCheckedChange={(on) =>
+                    void api.setAgentAccess(vault.id, on).then(() => {
+                      onChanged()
+                      void refresh()
+                    })
+                  }
+                />
               </div>
             ))}
         </div>
+
+        {surface && (
+          <div className="space-y-2 border-t pt-4">
+            <Label>Ligar o Claude Code a este cofre</Label>
+            <p className="text-sm text-muted-foreground">
+              Rode isto uma vez no terminal. O keyhold não mexe na configuração de outro programa
+              sozinho.
+            </p>
+
+            <div className="flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded-md border bg-muted/40 px-3 py-2 text-xs">
+                {surface.command}
+              </code>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void navigator.clipboard.writeText(surface.command)
+                  setCopied(true)
+                  window.setTimeout(() => setCopied(false), 2000)
+                }}
+              >
+                {copied ? 'Copiado' : 'Copiar'}
+              </Button>
+            </div>
+
+            {surface.active_grants > 0 && (
+              <div className="flex items-center justify-between gap-4 pt-2">
+                <span className="text-sm text-muted-foreground">
+                  {surface.active_grants} permissão(ões) ainda valendo
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void api.revokeAgentGrants().then(refresh)}
+                >
+                  Revogar todas
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   )

@@ -12,6 +12,7 @@
 //! The library exists so the test suite can exercise the same code the binary runs, rather than a
 //! second implementation that agrees with it on a good day.
 
+pub mod agent;
 pub mod attachments;
 pub mod audit;
 pub mod crypto;
@@ -22,6 +23,7 @@ pub mod health;
 pub mod http;
 pub mod identity;
 pub mod lock;
+pub mod mcp;
 pub mod paths;
 pub mod records;
 pub mod session;

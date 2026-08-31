@@ -38,6 +38,17 @@ export interface Status {
   attemptsLeft: number
 }
 
+export interface AgentRequest {
+  id: string
+  peer: { pid: number; process: string; parent: string | null }
+  record_id: string
+  record_title: string
+  field: string
+  /** `get` — the value enters the conversation; `run` — it does not. */
+  intent: string
+  asked_at: number
+}
+
 export interface AuditActor {
   kind: 'you' | 'agent'
   process?: string
@@ -318,6 +329,26 @@ export const api = {
       `/api/vaults/${vaultId}/import`,
       { from: 'csv', text },
     ),
+
+  agentStatus: () =>
+    call<{
+      listening: boolean
+      socket: string
+      exposed_vaults: number
+      active_grants: number
+      command: string
+    }>('GET', '/api/agent'),
+
+  setAgentSurface: (on: boolean) =>
+    call<{ listening: boolean }>('POST', '/api/agent', { on }),
+
+  agentRequests: () =>
+    call<{ requests: AgentRequest[]; active_grants: number }>('GET', '/api/agent/requests'),
+
+  answerAgentRequest: (id: string, allowed: boolean, minutes = 0) =>
+    call<{ answered: boolean }>('POST', `/api/agent/requests/${id}`, { allowed, minutes }),
+
+  revokeAgentGrants: () => call<{ active_grants: number }>('DELETE', '/api/agent/grants'),
 
   audit: (limit = 200) =>
     call<{ events: AuditEvent[]; log_reads: boolean }>('GET', `/api/audit?limit=${limit}`),

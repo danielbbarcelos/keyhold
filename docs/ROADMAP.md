@@ -12,8 +12,8 @@ promise it does not keep.
 | **F4** | Daily use: masked fields that reveal on a deadline, clipboard hand-off with clearing, generator, favourites, command palette, tabs, lenses | **done** |
 | **F5** | Health, rotation, trash with retention | **done** |
 | **F6** | Encrypted attachments, audit trail with a verifiable hash chain, encrypted export, import | **done** |
-| **F7** | Agent surface: a unix socket and an MCP server so a local coding agent can look things up without the secret passing through a chat transcript | **next** |
-| **F8** | Release: packaging, CI, signed builds | not started |
+| **F7** | Agent surface: a unix socket and an MCP server so a local coding agent can look things up without the secret passing through a chat transcript | **done** |
+| **F8** | Release: packaging, CI, signed builds | **next** |
 
 ## What F1–F4 put in place
 
@@ -36,6 +36,37 @@ shape: how many records exist, how they nest, and when they changed.
 **The additional data binds each payload to its place and version.** Swapping two records' blobs
 fails to open; pasting an old blob over a new one fails to open. Both are covered by tests that do
 exactly that to a real vault file.
+
+## What F7 put in place
+
+```text
+Claude Code ──stdio (MCP)──> `keyhold mcp` ──unix socket, 0600──> the running keyhold
+```
+
+The middle process holds no key and no state; it translates. The daemon is the only thing that can
+open anything, and every decision is made there.
+
+**Why a socket and not a port.** The socket's file permission *is* the authentication: no token in
+a config file, no port for another local process to find, nothing in `/proc/*/cmdline` to read. It
+is created when you switch the surface on and removed when you switch it off, so an agent finds
+nothing to connect to rather than something that refuses.
+
+**What actually protects you**, in order of how much it is worth:
+
+1. **Scope by marking.** A vault an agent may see is marked as such, off by default. What is not
+   marked is not listed — an absence, not a denial.
+2. **Approval per request.** Every value is a question answered in the interface, naming what is
+   asking. The socket reports the process *and its parent*, because the process is always
+   `keyhold mcp` and the parent is what is actually driving. Both come from `/proc`, never from
+   anything the client says about itself.
+3. **A locked vault is a dead integration**, and the socket never accepts a master password.
+4. **The trail records the agent as its own actor**, refusals included.
+5. **`keyhold_run` beats `keyhold_get`.** A command run with the secret in a child process's
+   environment keeps the value out of the model's context entirely — and out of `/proc/*/cmdline`,
+   which is readable by every process of this user, unlike `environ`.
+
+Telling a model not to leak a secret is not on that list. The tool descriptions do say it, and the
+interface never relies on it.
 
 ## What F6 put in place
 

@@ -71,6 +71,7 @@ import {
   MoveFolderDialog,
   RenameFolderDialog,
 } from './FolderDialogs'
+import { AgentApproval } from './AgentApproval'
 import { AuditPanel } from './AuditPanel'
 import { HealthPanel } from './HealthPanel'
 import { Settings } from './Settings'
@@ -832,6 +833,12 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
           onCancel={() => setAsking(null)}
         />
       )}
+
+      {/*
+        * The approval dialog lives above every lens: an agent asks whenever it asks, and a question
+        * that only appeared on one screen would be a question nobody answers.
+        */}
+      <AgentApproval onAnswered={refreshContents} />
 
       <CommandPalette
         records={records.filter((record) => !record.archived)}

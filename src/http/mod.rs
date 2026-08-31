@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::State;
+use axum::extract::Path;
 use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -53,6 +54,8 @@ struct Assets;
 
 pub struct AppState {
     pub token: SessionToken,
+    /// Everything the agent surface remembers, which is nothing that survives a restart (F7).
+    pub agent: crate::agent::AgentState,
     pub store: std::sync::Arc<std::sync::Mutex<Store>>,
     pub lock: Lock,
     /// Failed unlocks since the last success, for the one attack a local app can slow down: a
@@ -78,6 +81,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/settings/log-reads", put(set_log_reads))
         .route("/audit", get(read_audit))
         .route("/audit/integrity", get(audit_integrity))
+        .route("/agent", get(agent_status))
+        .route("/agent", post(set_agent_surface))
+        .route("/agent/requests", get(agent_requests))
+        .route("/agent/requests/:id", post(answer_agent_request))
+        .route("/agent/grants", delete(revoke_agent_grants))
         .route("/protection", put(change_protection))
         .route("/second-factor/begin", post(begin_second_factor))
         .route("/second-factor", post(enable_second_factor))
@@ -369,6 +377,105 @@ async fn visibility(
     state.lock.set_visible(body.visible);
 
     Ok(Json(json!({ "lock": state.lock.status() })))
+}
+
+/// Whether the agent socket is open, and what is on the other side of the decision.
+async fn agent_status(State(state): State<Arc<AppState>>) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    let exposed = state
+        .lock
+        .with_key(|key| {
+            crate::vaults::list_vaults(&store, key)
+                .map(|found| {
+                    found
+                        .into_iter()
+                        .filter(|vault| vault.agent_access && !vault.archived)
+                        .count()
+                })
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+
+    Ok(Json(json!({
+        "listening": crate::agent::listening(),
+        "socket": crate::agent::socket_path().to_string_lossy(),
+        "exposed_vaults": exposed,
+        "active_grants": state.agent.active_grants(),
+        "command": format!(
+            "claude mcp add keyhold --scope user -- {} mcp",
+            std::env::current_exe()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| "keyhold".into())
+        ),
+    })))
+}
+
+#[derive(Deserialize)]
+struct AgentSurface {
+    on: bool,
+}
+
+/// Open or close the socket.
+///
+/// Closing removes the file, so an agent finds nothing to connect to rather than something that
+/// refuses — the difference between an integration that is off and one that is broken.
+async fn set_agent_surface(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<AgentSurface>,
+) -> Answer {
+    if state.lock.with_key(|_| ()).is_none() {
+        return Err(locked());
+    }
+
+    if body.on {
+        crate::agent::listen(state.clone()).map_err(bad_request)?;
+    } else {
+        crate::agent::stop();
+        state.agent.revoke_all();
+    }
+
+    Ok(Json(json!({ "listening": crate::agent::listening() })))
+}
+
+/// What an agent is waiting to be told.
+///
+/// Polled by the interface. A request that nobody answers times out on the daemon's side, so a
+/// closed window cannot leave an agent hanging — or, worse, leave a question that gets answered by
+/// whoever opens the window next.
+async fn agent_requests(State(state): State<Arc<AppState>>) -> Answer {
+    if state.lock.with_key(|_| ()).is_none() {
+        return Ok(Json(json!({ "requests": [] })));
+    }
+
+    Ok(Json(json!({
+        "requests": state.agent.waiting(),
+        "active_grants": state.agent.active_grants(),
+    })))
+}
+
+#[derive(Deserialize)]
+struct Answered {
+    allowed: bool,
+    /// Zero means "just this once".
+    #[serde(default)]
+    minutes: u64,
+}
+
+async fn answer_agent_request(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<Answered>,
+) -> Answer {
+    state.agent.answer(&id, body.allowed, body.minutes.min(60));
+
+    Ok(Json(json!({ "answered": true })))
+}
+
+async fn revoke_agent_grants(State(state): State<Arc<AppState>>) -> Answer {
+    state.agent.revoke_all();
+
+    Ok(Json(json!({ "active_grants": 0 })))
 }
 
 #[derive(Deserialize)]

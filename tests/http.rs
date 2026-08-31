@@ -32,6 +32,7 @@ async fn start() -> Running {
 
     let state = Arc::new(AppState {
         token,
+        agent: Default::default(),
         store: shared.clone(),
         lock: Lock::new(LockPolicy::default()),
         failures: std::sync::Mutex::new(0),

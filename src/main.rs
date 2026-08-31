@@ -40,7 +40,10 @@ struct Cli {
 enum Cmd {
     /// Print where keyhold keeps its files.
     Where,
-    /// Speak the Model Context Protocol on stdin/stdout, for a local agent (F7).
+    /// Speak the Model Context Protocol on stdin/stdout, for a local agent.
+    ///
+    /// Meant to be launched by the agent, not by hand:
+    ///     claude mcp add keyhold --scope user -- keyhold mcp
     Mcp,
 }
 
@@ -55,11 +58,7 @@ async fn main() -> Result<()> {
             println!("config  {}", paths::config_dir().display());
             Ok(())
         }
-        Some(Cmd::Mcp) => {
-            // Deliberately not stubbed with something that half-works: an agent surface that
-            // answers at all is one somebody will wire up and trust.
-            anyhow::bail!("the agent surface is not built yet (see docs/ROADMAP.md, F7)")
-        }
+        Some(Cmd::Mcp) => keyhold::mcp::serve(),
         None => serve(cli).await,
     }
 }
@@ -97,6 +96,7 @@ async fn serve(cli: Cli) -> Result<()> {
 
     let state = Arc::new(AppState {
         token,
+        agent: Default::default(),
         store: std::sync::Arc::new(std::sync::Mutex::new(store)),
         lock: Lock::new(policy),
         failures: std::sync::Mutex::new(0),

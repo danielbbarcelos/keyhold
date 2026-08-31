@@ -75,6 +75,28 @@ keyhold --no-browser # do not open a browser
 keyhold where        # print where the vault and its directories live
 ```
 
+## Letting a local agent use the vault
+
+keyhold can answer a coding agent running on the same machine — searching for a record, describing
+its fields, and handing over a value once you say yes.
+
+```bash
+claude mcp add keyhold --scope user -- ~/.local/bin/keyhold mcp
+```
+
+Then switch the surface on in **Ajustes → Acesso por agente**, and mark the vaults it may see. What
+is not marked is not listed to the agent at all.
+
+The connection is a unix socket at `~/.local/state/keyhold/agent.sock`, mode `0600`: the file's
+permission is the authentication, so there is no token in a config file and no port for another
+process to find. Closing the surface removes the socket, and a locked vault answers nothing.
+
+**Every value handed to an assistant leaves this machine** — it becomes part of the model's
+context. That is the opposite of everything else here, so each request is a question in the
+interface, naming what is asking, answerable once or for a few minutes. Prefer `keyhold_run`, which
+executes a command with the secret in an environment variable and returns only the output: the
+value never enters the conversation.
+
 ## The desktop shortcut
 
 `install.sh` adds **keyhold** to your application launcher. Opening it starts keyhold detached from
