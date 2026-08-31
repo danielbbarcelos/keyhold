@@ -435,6 +435,13 @@ async fn set_agent_surface(
         state.agent.revoke_all();
     }
 
+    // Remembered, so an agent configured once keeps working after keyhold is closed and opened
+    // again. The socket's path never changes; only whether it is there.
+    {
+        let store = state.store.lock().unwrap();
+        settings::set_agent_surface(&store, body.on).map_err(bad_request)?;
+    }
+
     Ok(Json(json!({ "listening": crate::agent::listening() })))
 }
 

@@ -69,6 +69,7 @@ async fn serve(cli: Cli) -> Result<()> {
     // Read the lock policy before anything can change it: the vault starts locked, and the clock
     // it will run on is the one the person chose last time, not the default.
     let policy = keyhold::settings::lock_policy(&store);
+    let agent_wanted = keyhold::settings::agent_surface(&store);
     let token = SessionToken::generate();
 
     // Port 0 asks the OS for a free one. Binding to `127.0.0.1` rather than `0.0.0.0` is not a
@@ -88,6 +89,11 @@ async fn serve(cli: Cli) -> Result<()> {
     println!("  vault   {}", paths::vault_file().display());
     println!();
     println!("  Ctrl+C to stop. Closing keyhold forgets the key.");
+
+    if agent_wanted {
+        println!();
+        println!("  agent   {}", keyhold::agent::socket_path().display());
+    }
     println!();
 
     if !cli.no_browser {
@@ -101,6 +107,18 @@ async fn serve(cli: Cli) -> Result<()> {
         lock: Lock::new(policy),
         failures: std::sync::Mutex::new(0),
     });
+
+    // Reopen the agent socket if it was left on.
+    //
+    // Deliberately before anything is unlocked: the socket answers "o cofre está trancado" to an
+    // agent that connects too early, which is a far better thing for one to hear than "keyhold is
+    // not running". Every operation behind it checks the lock, so an open socket over a locked
+    // vault gives nothing away.
+    if agent_wanted {
+        if let Err(error) = keyhold::agent::listen(state.clone()) {
+            eprintln!("  could not open the agent socket: {error}");
+        }
+    }
 
     axum::serve(listener, http::router(state))
         .with_graceful_shutdown(async {

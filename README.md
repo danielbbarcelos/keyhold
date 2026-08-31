@@ -89,7 +89,15 @@ is not marked is not listed to the agent at all.
 
 The connection is a unix socket at `~/.local/state/keyhold/agent.sock`, mode `0600`: the file's
 permission is the authentication, so there is no token in a config file and no port for another
-process to find. Closing the surface removes the socket, and a locked vault answers nothing.
+process to find.
+
+**The agent never uses the HTTP port.** That one is picked fresh on every run and belongs to your
+browser; the socket's path never changes, so a `claude mcp add` done once keeps working across
+restarts. The setting is remembered too — reopening keyhold reopens the socket. An agent that
+connects before you have unlocked is told the vault is locked, which is a more useful thing to hear
+than that keyhold is not running.
+
+Closing the surface removes the socket, and a locked vault answers nothing.
 
 **Every value handed to an assistant leaves this machine** — it becomes part of the model's
 context. That is the opposite of everything else here, so each request is a question in the

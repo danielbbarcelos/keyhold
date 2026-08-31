@@ -52,6 +52,23 @@ pub fn set_lock_policy(vault: &Store, policy: LockPolicy) -> Result<LockPolicy> 
     Ok(sanitised)
 }
 
+const AGENT_SURFACE: &str = "agent_surface";
+
+/// Whether the agent socket should be opened when keyhold starts.
+///
+/// Remembered rather than asked again every time. The socket's path never changes, so an agent
+/// configured once keeps working across restarts — and a switch that silently resets on every
+/// launch would be a switch nobody trusts.
+pub fn agent_surface(vault: &Store) -> bool {
+    read(vault, AGENT_SURFACE).ok().flatten().map(|raw| raw == "true").unwrap_or(false)
+}
+
+pub fn set_agent_surface(vault: &Store, on: bool) -> Result<bool> {
+    write(vault, AGENT_SURFACE, if on { "true" } else { "false" })?;
+
+    Ok(on)
+}
+
 const LOG_READS: &str = "log_reads";
 
 /// Whether revealing and copying a secret is written to the trail.
@@ -151,6 +168,23 @@ mod tests {
 
         assert_eq!(set_retention_days(&store, -5).unwrap(), 0);
         assert_eq!(set_retention_days(&store, 99_999).unwrap(), 3650);
+    }
+
+    #[test]
+    fn the_agent_surface_is_off_until_asked_for_and_then_remembered() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.db");
+
+        {
+            let store = Store::open(&path).unwrap();
+            assert!(!agent_surface(&store), "the surface should start closed");
+
+            set_agent_surface(&store, true).unwrap();
+        }
+
+        // A restart finds it the way it was left.
+        let store = Store::open(&path).unwrap();
+        assert!(agent_surface(&store));
     }
 
     #[test]
