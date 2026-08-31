@@ -313,7 +313,15 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
                 .map(|found| found.len())
                 .sum();
 
-            Response::Status { unlocked: true, vaults: allowed, records }
+            let may_reveal = crate::settings::agent_may_reveal(&store);
+
+            Response::Status {
+                unlocked: true,
+                vaults: allowed,
+                records,
+                may_reveal,
+                may_copy: crate::clipboard::available(),
+            }
         }
 
         Request::Search { query } => search(state, &query),
@@ -321,6 +329,23 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
         Request::Describe { record } => describe(state, &record),
 
         Request::Get { record, field } => {
+            // The refusal that matters: a value an agent never receives is a value it cannot print
+            // into a conversation, however it was asked and whatever it was told.
+            let allowed = {
+                let store = state.store.lock().unwrap();
+                crate::settings::agent_may_reveal(&store)
+            };
+
+            if !allowed {
+                note_agent(state, peer, audit::action::SECRET_REVEALED, &record, &field, false);
+
+                return Response::refused(
+                    "este cofre não entrega valores a um assistente. Use keyhold_copy para pôr o \
+                     valor na área de transferência da pessoa, ou keyhold_run para executar um \
+                     comando com ele.",
+                );
+            }
+
             match approved(state, peer, &record, &field, "get").await {
                 Err(refusal) => refusal,
                 Ok(()) => match value_of(state, &record, &field) {
@@ -330,6 +355,30 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
                         Response::Value { value }
                     }
                     None => Response::refused("esse campo não existe neste registro"),
+                },
+            }
+        }
+
+        Request::Copy { record, field } => {
+            match approved(state, peer, &record, &field, "copy").await {
+                Err(refusal) => refusal,
+                Ok(()) => match value_of(state, &record, &field) {
+                    None => Response::refused("esse campo não existe neste registro"),
+                    Some(value) => match crate::clipboard::copy_for_a_while(&value) {
+                        Err(error) => Response::refused(error.to_string()),
+                        Ok(seconds) => {
+                            note_agent(
+                                state,
+                                peer,
+                                audit::action::SECRET_COPIED,
+                                &record,
+                                &field,
+                                true,
+                            );
+
+                            Response::Copied { field, seconds }
+                        }
+                    },
                 },
             }
         }

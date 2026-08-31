@@ -45,6 +45,25 @@ enum Cmd {
     /// Meant to be launched by the agent, not by hand:
     ///     claude mcp add keyhold --scope user -- keyhold mcp
     Mcp,
+
+    /// Run a command with a secret from the vault in its environment.
+    ///
+    ///     keyhold run "Banco de dados" Senha -- psql "$KEYHOLD_SECRET"
+    ///
+    /// The value goes to the command and nowhere else — not to a terminal, not to whatever is
+    /// reading this terminal. keyhold asks you to approve it first.
+    Run {
+        /// The record's title, as it appears in the vault.
+        record: String,
+        /// The field's label, for example `Senha`.
+        field: String,
+        /// Environment variable to put it in. Defaults to KEYHOLD_SECRET.
+        #[arg(long, short)]
+        var: Option<String>,
+        /// The command, after `--`.
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
 }
 
 #[tokio::main]
@@ -59,6 +78,12 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Some(Cmd::Mcp) => keyhold::mcp::serve(),
+        Some(Cmd::Run { record, field, var, command }) => {
+            let code = keyhold::mcp::run_command(&record, &field, var.as_deref(), &command)?;
+
+            // The command's own exit code, so this composes in a shell like anything else.
+            std::process::exit(code);
+        }
         None => serve(cli).await,
     }
 }

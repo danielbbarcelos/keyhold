@@ -20,8 +20,11 @@ pub enum Request {
     Search { query: String },
     /// What fields a record has, by label and kind. Never their values.
     Describe { record: String },
-    /// One field's value. Needs the person to say yes.
+    /// One field's value. Needs the person to say yes, and may be switched off entirely.
     Get { record: String, field: String },
+    /// Put one field's value on the desktop clipboard. The agent is told it worked, never what it
+    /// was — which is what somebody asking an assistant for a password usually actually wanted.
+    Copy { record: String, field: String },
     /// Run a command with a field's value in an environment variable. The value never comes back.
     Run { record: String, field: String, command: Vec<String>, variable: String },
 }
@@ -49,10 +52,18 @@ pub struct FieldSummary {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum Response {
-    Status { unlocked: bool, vaults: Vec<String>, records: usize },
+    Status {
+        unlocked: bool,
+        vaults: Vec<String>,
+        records: usize,
+        /// Whether `Get` is allowed at all. When false, the tool is not even offered.
+        may_reveal: bool,
+        may_copy: bool,
+    },
     Records { records: Vec<RecordSummary> },
     Fields { title: String, fields: Vec<FieldSummary> },
     Value { value: String },
+    Copied { field: String, seconds: u64 },
     Ran { code: i32, stdout: String, stderr: String },
     /// Refused, with a reason meant to be read by a person over the agent's shoulder.
     Refused { reason: String },

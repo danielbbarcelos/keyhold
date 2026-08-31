@@ -126,11 +126,34 @@ than that keyhold is not running.
 
 Closing the surface removes the socket, and a locked vault answers nothing.
 
-**Every value handed to an assistant leaves this machine** — it becomes part of the model's
-context. That is the opposite of everything else here, so each request is a question in the
-interface, naming what is asking, answerable once or for a few minutes. Prefer `keyhold_run`, which
-executes a command with the secret in an environment variable and returns only the output: the
-value never enters the conversation.
+### The assistant can use a credential without ever reading it
+
+This is the part worth understanding, because it is not a matter of asking politely.
+
+**A value handed to a model is in that model's session the moment it arrives.** Not when the model
+repeats it — when the tool returns it. Telling an assistant "do not print this" does not undo that,
+and no instruction in a tool description is a control.
+
+So keyhold's answer is to hand the secret to the *process*, never to the model:
+
+```bash
+keyhold run "Banco de dados" Senha -- psql "postgres://deploy@localhost/app"
+```
+
+The password goes into the command's environment; the assistant gets the command's output and never
+the value. It can run that itself, from its terminal, for anything that needs a credential — a CLI
+login, a curl, a deploy script. The same thing is available as the `keyhold_run` tool.
+
+When it is **you** who needs the password — to paste into a login form — the assistant uses
+`keyhold_copy`: keyhold puts it on your clipboard, clears it after 45 seconds, and tells the
+assistant only that it worked.
+
+**Reading a value outright is off by default.** With it off, `keyhold_get` is not even offered, so a
+password cannot end up in a chat transcript at all. You can switch it on in the settings for the
+cases where nothing else fits, and the interface says plainly what that costs.
+
+Every request of any kind still stops and asks you, naming the process that asked, answerable once
+or for a few minutes.
 
 ## The desktop shortcut
 

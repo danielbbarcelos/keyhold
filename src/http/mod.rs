@@ -86,6 +86,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/agent/requests", get(agent_requests))
         .route("/agent/requests/:id", post(answer_agent_request))
         .route("/agent/grants", delete(revoke_agent_grants))
+        .route("/agent/reveal", put(set_agent_may_reveal))
         .route("/protection", put(change_protection))
         .route("/second-factor/begin", post(begin_second_factor))
         .route("/second-factor", post(enable_second_factor))
@@ -401,6 +402,8 @@ async fn agent_status(State(state): State<Arc<AppState>>) -> Answer {
         "listening": crate::agent::listening(),
         "socket": crate::agent::socket_path().to_string_lossy(),
         "exposed_vaults": exposed,
+        "may_reveal": settings::agent_may_reveal(&store),
+        "can_copy": crate::clipboard::available(),
         "active_grants": state.agent.active_grants(),
         "command": format!(
             "claude mcp add keyhold --scope user -- {} mcp",
@@ -477,6 +480,33 @@ async fn answer_agent_request(
     state.agent.answer(&id, body.allowed, body.minutes.min(60));
 
     Ok(Json(json!({ "answered": true })))
+}
+
+#[derive(Deserialize)]
+struct MayReveal {
+    on: bool,
+}
+
+/// Whether an agent may receive a value at all.
+///
+/// The one switch in this app that decides something no amount of instruction can: a value handed
+/// to a model is in that model's session the moment it arrives.
+async fn set_agent_may_reveal(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<MayReveal>,
+) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    let saved = settings::set_agent_may_reveal(&store, body.on).map_err(bad_request)?;
+
+    audit::note(
+        &store,
+        audit::action::PROTECTION_CHANGED,
+        None,
+        Detail::new().with("agent_may_reveal", saved),
+    );
+
+    Ok(Json(json!({ "may_reveal": saved })))
 }
 
 async fn revoke_agent_grants(State(state): State<Arc<AppState>>) -> Answer {

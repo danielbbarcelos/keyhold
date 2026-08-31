@@ -335,9 +335,14 @@ export const api = {
       listening: boolean
       socket: string
       exposed_vaults: number
+      may_reveal: boolean
+      can_copy: boolean
       active_grants: number
       command: string
     }>('GET', '/api/agent'),
+
+  setAgentMayReveal: (on: boolean) =>
+    call<{ may_reveal: boolean }>('PUT', '/api/agent/reveal', { on }),
 
   setAgentSurface: (on: boolean) =>
     call<{ listening: boolean }>('POST', '/api/agent', { on }),

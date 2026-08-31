@@ -15,6 +15,7 @@
 pub mod agent;
 pub mod attachments;
 pub mod audit;
+pub mod clipboard;
 pub mod crypto;
 pub mod db;
 pub mod encoding;

@@ -52,6 +52,28 @@ pub fn set_lock_policy(vault: &Store, policy: LockPolicy) -> Result<LockPolicy> 
     Ok(sanitised)
 }
 
+const AGENT_MAY_REVEAL: &str = "agent_may_reveal";
+
+/// Whether an agent may receive the *value* of a secret.
+///
+/// **Off by default, and that is the whole point of this setting.** Once a value reaches a model it
+/// is in that model's context and out of this machine, and nothing here decides what it writes
+/// afterwards — not a tool description, not a warning appended to the value. The only thing that
+/// reliably stops a password appearing in a chat transcript is not handing it over.
+///
+/// With this off, an agent still has everything it needs for the common cases: it can find records,
+/// read their structure, run a command with the secret in the child's environment, and put a value
+/// on the clipboard for the person to paste. What it cannot do is read one out loud.
+pub fn agent_may_reveal(vault: &Store) -> bool {
+    read(vault, AGENT_MAY_REVEAL).ok().flatten().map(|raw| raw == "true").unwrap_or(false)
+}
+
+pub fn set_agent_may_reveal(vault: &Store, on: bool) -> Result<bool> {
+    write(vault, AGENT_MAY_REVEAL, if on { "true" } else { "false" })?;
+
+    Ok(on)
+}
+
 const AGENT_SURFACE: &str = "agent_surface";
 
 /// Whether the agent socket should be opened when keyhold starts.
@@ -168,6 +190,16 @@ mod tests {
 
         assert_eq!(set_retention_days(&store, -5).unwrap(), 0);
         assert_eq!(set_retention_days(&store, 99_999).unwrap(), 3650);
+    }
+
+    #[test]
+    fn an_agent_may_not_read_values_until_that_is_switched_on() {
+        let (_dir, store) = scratch();
+
+        assert!(!agent_may_reveal(&store), "revealing to an agent must be off by default");
+
+        set_agent_may_reveal(&store, true).unwrap();
+        assert!(agent_may_reveal(&store));
     }
 
     #[test]

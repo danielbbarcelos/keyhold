@@ -97,6 +97,25 @@ output, and never placed in argv or an inherited environment variable — `/proc
 unwind on panic: an unwind mid-operation can drop key material in an order zeroization does not
 cover.
 
+### T9 · A secret an assistant repeats
+
+An agent given a value can write it anywhere it writes: into a chat transcript, a summary, a commit
+message, a file. This is not a failure of the agent — it is what having the value means.
+
+**Defence.** Not instruction. The tool descriptions do ask, and nothing relies on it. What works is
+never handing the value over:
+
+- `keyhold_run` and `keyhold run` execute a command with the secret in the child process's
+  environment. The agent composes the command and reads its output; the value is never in its
+  context, so it cannot be repeated from there.
+- `keyhold_copy` puts a value on the person's clipboard and returns only a confirmation, for the
+  case where a human — not the model — is the one who needs it.
+- Reading a value outright is **off by default**. With it off the tool is not listed and the request
+  is refused, so there is no path from a vault to a transcript.
+
+The environment is used rather than the command line for the same reason throughout: `/proc/*/cmdline`
+is readable by every process of this user, and `/proc/*/environ` is not.
+
 ## What keyhold does not defend against
 
 Stated plainly, because a vault that implies otherwise is lying:

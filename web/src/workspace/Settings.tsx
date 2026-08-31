@@ -531,6 +531,8 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
     listening: boolean
     socket: string
     exposed_vaults: number
+    may_reveal: boolean
+    can_copy: boolean
     active_grants: number
     command: string
   } | null>(null)
@@ -563,12 +565,37 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
       </CardHeader>
 
       <CardContent className="space-y-4 px-6">
-        <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">
-          Todo valor entregue a um assistente entra no contexto do modelo e sai desta máquina. É o
-          oposto do que o resto do keyhold promete. A via preferida é{' '}
-          <span className="text-foreground">executar um comando</span> com o segredo, em vez de
-          mostrá-lo — o assistente recebe a saída, nunca o valor.
-        </p>
+        <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm">
+          <p className="font-medium">Como um assistente usa uma credencial sem lê-la</p>
+          <p className="text-muted-foreground">
+            Ele executa o comando através do keyhold, e o segredo entra numa variável de ambiente do
+            processo — nunca no texto da conversa:
+          </p>
+          <code className="block rounded-md border bg-background px-3 py-2 text-xs">
+            keyhold run "Banco de dados" Senha -- psql "$KEYHOLD_SECRET"
+          </code>
+          <p className="text-muted-foreground">
+            Para quando é <span className="text-foreground">você</span> quem precisa da senha, ele
+            usa <span className="text-foreground">keyhold_copy</span>: o valor vai para a sua área de
+            transferência e ele recebe só a confirmação.
+          </p>
+        </div>
+
+        <div className="flex items-start justify-between gap-4">
+          <Label htmlFor="agent-reveal" className="font-normal">
+            Deixar o assistente ler valores
+            <span className="mt-1 block text-sm text-muted-foreground">
+              Desligado, ele nunca recebe uma senha — e por isso não tem como escrevê-la na conversa.
+              Ligado, o valor entra no histórico da sessão dele assim que chega, e nada aqui decide o
+              que ele faz depois.
+            </span>
+          </Label>
+          <Switch
+            id="agent-reveal"
+            checked={surface?.may_reveal ?? false}
+            onCheckedChange={(on) => void api.setAgentMayReveal(on).then(refresh)}
+          />
+        </div>
 
         <div className="flex items-center justify-between gap-4">
           <Label htmlFor="agent-surface" className="font-normal">
