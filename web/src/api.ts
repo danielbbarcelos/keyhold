@@ -34,7 +34,31 @@ export interface Status {
   identity: IdentityState
   lock: LockState
   retention_days: number
+  log_reads: boolean
   attemptsLeft: number
+}
+
+export interface AuditActor {
+  kind: 'you' | 'agent'
+  process?: string
+  pid?: number
+}
+
+export interface AuditEvent {
+  seq: number
+  at: string
+  actor: AuditActor
+  action: string
+  scope: string | null
+  result: 'allowed' | 'denied'
+  detail: Record<string, unknown>
+  hash: string
+}
+
+export interface AuditIntegrity {
+  intact: boolean
+  checked: number
+  broken_at: number | null
 }
 
 export type HealthIssue = 'compromised' | 'rotation' | 'reused' | 'weak' | 'stale'
@@ -134,6 +158,15 @@ export interface Payload {
 
 /** A row in the list: named, and carrying nothing secret. */
 export type RecordPreview = RecordHeader & { title: string; username: string; url: string }
+
+export interface AttachmentInfo {
+  id: string
+  record_id: string
+  name: string
+  mime: string
+  size: number
+  created_at: string
+}
 
 export type OpenRecord = RecordHeader & { payload: Payload }
 
@@ -249,6 +282,60 @@ export const api = {
 
   restoreVersion: (id: string, version: number) =>
     call<{ record: RecordHeader }>('POST', `/api/records/${id}/versions/${version}/restore`),
+
+  attachments: (recordId: string) =>
+    call<{ attachments: AttachmentInfo[]; max_bytes: number }>(
+      'GET',
+      `/api/records/${recordId}/attachments`,
+    ),
+
+  addAttachment: (recordId: string, name: string, mime: string, data: string) =>
+    call<{ attachment: AttachmentInfo }>('POST', `/api/records/${recordId}/attachments`, {
+      name,
+      mime,
+      data,
+    }),
+
+  openAttachment: (id: string) =>
+    call<{ name: string; mime: string; data: string }>('GET', `/api/attachments/${id}`),
+
+  deleteAttachment: (id: string) =>
+    call<{ deleted: boolean }>('DELETE', `/api/attachments/${id}`),
+
+  exportVault: (vaultId: string, passphrase: string) =>
+    call<{ archive: unknown }>('POST', `/api/vaults/${vaultId}/export`, { passphrase }),
+
+  importArchive: (vaultId: string, envelope: unknown, passphrase: string) =>
+    call<{ imported: { records: number; folders: number } }>(
+      'POST',
+      `/api/vaults/${vaultId}/import`,
+      { from: 'archive', envelope, passphrase },
+    ),
+
+  importCsv: (vaultId: string, text: string) =>
+    call<{ imported: { records: number; folders: number } }>(
+      'POST',
+      `/api/vaults/${vaultId}/import`,
+      { from: 'csv', text },
+    ),
+
+  audit: (limit = 200) =>
+    call<{ events: AuditEvent[]; log_reads: boolean }>('GET', `/api/audit?limit=${limit}`),
+
+  auditIntegrity: () =>
+    call<{ integrity: AuditIntegrity }>('GET', '/api/audit/integrity'),
+
+  setLogReads: (on: boolean) =>
+    call<{ log_reads: boolean }>('PUT', '/api/settings/log-reads', { on }),
+
+  /**
+   * Tell the binary that a secret was looked at.
+   *
+   * Only the field's label travels — never its value. The binary cannot infer this on its own: it
+   * hands over a whole record when a tab opens and has no idea which field was uncovered.
+   */
+  reportAccess: (recordId: string, kind: 'reveal' | 'copy', field: string) =>
+    call<{ noted: boolean }>('POST', `/api/records/${recordId}/accesses`, { kind, field }),
 
   vaultContents: (vaultId: string) =>
     call<{ contents: { records: number; archived_records: number; folders: number } }>(

@@ -4,6 +4,7 @@ import { Check, Copy, Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
+import { api } from '../api'
 import { copyForSeconds } from '../clipboard'
 
 /**
@@ -28,9 +29,16 @@ interface SecretLineProps {
   value: string
   /** `false` for the fields that are not secret — a username is not worth hiding. */
   masked?: boolean
+  /**
+   * The record this field belongs to, so uncovering and copying reach the trail.
+   *
+   * Absent where there is nothing to record against — an old version being previewed, for
+   * instance, which is a read of something that no longer is.
+   */
+  recordId?: string
 }
 
-export function SecretLine({ label, value, masked = true }: SecretLineProps) {
+export function SecretLine({ label, value, masked = true, recordId }: SecretLineProps) {
   const [showing, setShowing] = useState(!masked)
   const [remaining, setRemaining] = useState(0)
   const [copied, setCopied] = useState(0)
@@ -91,7 +99,15 @@ export function SecretLine({ label, value, masked = true }: SecretLineProps) {
                 variant="ghost"
                 size="icon-sm"
                 aria-label={showing ? 'Esconder' : 'Revelar'}
-                onClick={() => setShowing(!showing)}
+                onClick={() => {
+                  if (!showing && masked && recordId) {
+                    // Fire and forget: a trail that could block a reveal would be a trail that
+                    // stands between somebody and their own password.
+                    void api.reportAccess(recordId, 'reveal', label).catch(() => {})
+                  }
+
+                  setShowing(!showing)
+                }}
               >
                 {showing ? <EyeOff /> : <Eye />}
               </Button>
@@ -108,11 +124,15 @@ export function SecretLine({ label, value, masked = true }: SecretLineProps) {
               variant="ghost"
               size="icon-sm"
               aria-label="Copiar"
-              onClick={() =>
+              onClick={() => {
+                if (recordId) {
+                  void api.reportAccess(recordId, 'copy', label).catch(() => {})
+                }
+
                 void copyForSeconds(value, CLIPBOARD_SECONDS, () => setCopied(0)).then(() =>
                   setCopied(CLIPBOARD_SECONDS),
                 )
-              }
+              }}
             >
               {copied > 0 ? <Check className="text-primary" /> : <Copy />}
             </Button>

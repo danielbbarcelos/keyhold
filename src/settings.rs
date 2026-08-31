@@ -52,6 +52,28 @@ pub fn set_lock_policy(vault: &Store, policy: LockPolicy) -> Result<LockPolicy> 
     Ok(sanitised)
 }
 
+const LOG_READS: &str = "log_reads";
+
+/// Whether revealing and copying a secret is written to the trail.
+///
+/// On by default, and switchable off. The trade is real in both directions: with it on, the vault
+/// keeps a record of your own use of it — which is what makes "what did the agent read?" answerable
+/// (F7), and also what makes it a log of you. With it off, writes and security events are still
+/// recorded; only the reads stop.
+pub fn log_reads(vault: &Store) -> bool {
+    read(vault, LOG_READS)
+        .ok()
+        .flatten()
+        .map(|raw| raw != "false")
+        .unwrap_or(true)
+}
+
+pub fn set_log_reads(vault: &Store, on: bool) -> Result<bool> {
+    write(vault, LOG_READS, if on { "true" } else { "false" })?;
+
+    Ok(on)
+}
+
 fn read(vault: &Store, key: &str) -> Result<Option<String>> {
     Ok(vault
         .conn()
@@ -129,6 +151,19 @@ mod tests {
 
         assert_eq!(set_retention_days(&store, -5).unwrap(), 0);
         assert_eq!(set_retention_days(&store, 99_999).unwrap(), 3650);
+    }
+
+    #[test]
+    fn reads_are_logged_until_somebody_says_otherwise() {
+        let (_dir, store) = scratch();
+
+        assert!(log_reads(&store));
+
+        set_log_reads(&store, false).unwrap();
+        assert!(!log_reads(&store));
+
+        set_log_reads(&store, true).unwrap();
+        assert!(log_reads(&store));
     }
 
     #[test]

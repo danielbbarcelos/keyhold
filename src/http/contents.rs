@@ -14,8 +14,11 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::{bad_request, locked, Answer, AppState};
+use crate::audit::{self, Detail};
+use crate::attachments;
 use crate::health;
 use crate::records::{self, Payload};
+use crate::transfer;
 use crate::vaults::{self, FolderMeta, VaultMeta};
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -28,6 +31,8 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/vaults/:id/agent-access", post(agent_access))
         .route("/vaults/:id/health", get(vault_health))
         .route("/vaults/:id/rotate", post(rotate))
+        .route("/vaults/:id/export", post(export_vault))
+        .route("/vaults/:id/import", post(import_into_vault))
         .route("/vaults/:id/trash", get(list_trash))
         .route("/vaults/:id/trash", delete(empty_trash))
         .route("/records/:id/destroy", post(destroy_record))
@@ -42,6 +47,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/records/:id/archive", post(archive_record))
         .route("/records/:id/compromised", post(set_compromised))
         .route("/records/:id/rotation", post(set_rotation))
+        .route("/records/:id/accesses", post(report_access))
+        .route("/records/:id/attachments", get(list_attachments).post(add_attachment))
+        .route("/attachments/:id", get(open_attachment))
+        .route("/attachments/:id", delete(delete_attachment))
         .route("/records/:id/versions", get(list_versions))
         .route("/records/:id/versions/:version", get(read_version))
         .route("/records/:id/versions/:version/restore", post(restore_version))
@@ -72,6 +81,8 @@ async fn create_vault(State(state): State<Arc<AppState>>, Json(meta): Json<Vault
 
     let made = with_key!(state, |key| vaults::create_vault(&store, key, meta))
         .map_err(bad_request)?;
+
+    audit::note(&store, audit::action::VAULT_CREATED, Some(&made.id), Detail::new());
 
     Ok(Json(json!({ "vault": made })))
 }
@@ -118,6 +129,15 @@ async fn delete_vault(
         &body.confirm_name
     ))
     .map_err(bad_request)?;
+
+    audit::note(
+        &store,
+        audit::action::VAULT_DELETED,
+        Some(&id),
+        Detail::new()
+            .with("records", destroyed.records)
+            .with("folders", destroyed.folders),
+    );
 
     Ok(Json(json!({ "deleted": destroyed })))
 }
@@ -176,7 +196,175 @@ async fn rotate(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> A
     let rotated =
         with_key!(state, |key| vaults::rotate_vault(&mut store, key, &id)).map_err(bad_request)?;
 
+    audit::note(
+        &store,
+        audit::action::VAULT_ROTATED,
+        Some(&id),
+        Detail::new().with("generation", rotated.key_version),
+    );
+
     Ok(Json(json!({ "vault": rotated })))
+}
+
+// ── taking it out, and bringing it back (F6) ────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ExportRequest {
+    passphrase: String,
+}
+
+/// Seal this vault into one archive.
+///
+/// The archive is returned rather than written: keyhold does not choose where a copy of your vault
+/// lands on disk. The browser saves it where you say.
+async fn export_vault(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<ExportRequest>,
+) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    let envelope = with_key!(state, |key| transfer::export(&store, key, &id, &body.passphrase))
+        .map_err(bad_request)?;
+
+    audit::note(
+        &store,
+        audit::action::EXPORTED,
+        Some(&id),
+        Detail::new().with("format", transfer::FORMAT),
+    );
+
+    Ok(Json(json!({ "archive": envelope })))
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "from", rename_all = "lowercase")]
+enum ImportRequest {
+    /// keyhold's own sealed archive.
+    Archive { envelope: transfer::Envelope, passphrase: String },
+    /// The CSV every other password manager exports.
+    Csv { text: String },
+}
+
+async fn import_into_vault(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<ImportRequest>,
+) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    let incoming = match &body {
+        ImportRequest::Archive { envelope, passphrase } => {
+            transfer::open_archive(envelope, passphrase).map_err(bad_request)?.records
+        }
+        ImportRequest::Csv { text } => transfer::from_csv(text).map_err(bad_request)?,
+    };
+
+    let done = with_key!(state, |key| transfer::import(&store, key, &id, &incoming))
+        .map_err(bad_request)?;
+
+    audit::note(
+        &store,
+        audit::action::IMPORTED,
+        Some(&id),
+        Detail::new()
+            .with("records", done.records as i64)
+            .with("folders", done.folders as i64)
+            .with(
+                "from",
+                match body {
+                    ImportRequest::Archive { .. } => "archive",
+                    ImportRequest::Csv { .. } => "csv",
+                },
+            ),
+    );
+
+    Ok(Json(json!({ "imported": done })))
+}
+
+// ── attachments (F6) ────────────────────────────────────────────────────────────────────────────
+
+async fn list_attachments(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    let found = with_key!(state, |key| attachments::list(&store, key, &id)).map_err(bad_request)?;
+
+    Ok(Json(json!({ "attachments": found, "max_bytes": attachments::MAX_BYTES })))
+}
+
+#[derive(Deserialize)]
+struct NewAttachment {
+    name: String,
+    #[serde(default)]
+    mime: String,
+    /// The file's bytes, base64url — the same alphabet everything opaque uses here.
+    data: String,
+}
+
+async fn add_attachment(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<NewAttachment>,
+) -> Answer {
+    let bytes = crate::encoding::from_base64url(&body.data)
+        .ok_or_else(|| bad_request("o conteúdo do arquivo não chegou inteiro"))?;
+
+    let store = state.store.lock().unwrap();
+
+    let mime = if body.mime.is_empty() { "application/octet-stream" } else { &body.mime };
+
+    let added = with_key!(state, |key| attachments::add(
+        &store,
+        key,
+        &id,
+        &body.name,
+        mime,
+        &bytes
+    ))
+    .map_err(bad_request)?;
+
+    audit::note(
+        &store,
+        audit::action::RECORD_UPDATED,
+        Some(&id),
+        Detail::new().with("attachment", added.name.clone()).with("bytes", added.size),
+    );
+
+    Ok(Json(json!({ "attachment": added })))
+}
+
+/// Hand back one file's bytes.
+///
+/// Base64 in a JSON body rather than a raw download: a browser download has no way to carry the
+/// session token, and a route that authenticated by query string would put a credential in history
+/// and in every log that URLs land in. The interface turns this back into a file to save.
+async fn open_attachment(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    let file = with_key!(state, |key| attachments::open(&store, key, &id)).map_err(bad_request)?;
+
+    if crate::settings::log_reads(&store) {
+        audit::note(
+            &store,
+            audit::action::SECRET_REVEALED,
+            Some(&id),
+            Detail::new().with("attachment", file.name.clone()),
+        );
+    }
+
+    Ok(Json(json!({
+        "name": file.name,
+        "mime": file.mime,
+        "data": crate::encoding::base64url(&file.bytes),
+    })))
+}
+
+async fn delete_attachment(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    with_key!(state, |_key| attachments::remove(&store, &id)).map_err(bad_request)?;
+
+    Ok(Json(json!({ "deleted": true })))
 }
 
 // ── the trash ───────────────────────────────────────────────────────────────────────────────────
@@ -202,6 +390,8 @@ async fn destroy_record(State(state): State<Arc<AppState>>, Path(id): Path<Strin
 
     with_key!(state, |_key| records::destroy(&store, &id)).map_err(bad_request)?;
 
+    audit::note(&store, audit::action::RECORD_DESTROYED, Some(&id), Detail::new());
+
     Ok(Json(json!({ "destroyed": true })))
 }
 
@@ -225,7 +415,56 @@ async fn empty_trash(State(state): State<Arc<AppState>>, Path(id): Path<String>)
 
     let count = with_key!(state, |key| empty(&store, key, &id)).map_err(bad_request)?;
 
+    audit::note(
+        &store,
+        audit::action::RECORD_DESTROYED,
+        Some(&id),
+        Detail::new().with("count", count as i64),
+    );
+
     Ok(Json(json!({ "destroyed": count })))
+}
+
+#[derive(Deserialize)]
+struct Access {
+    /// `reveal` or `copy`.
+    kind: String,
+    /// The field's label, which is not a secret. Its value never leaves the interface.
+    #[serde(default)]
+    field: String,
+}
+
+/// The interface reporting that somebody looked at a secret.
+///
+/// Reported rather than inferred, because the binary hands over a whole record when a tab opens and
+/// cannot tell which field the person actually uncovered. That makes this the one entry in the
+/// trail that depends on the interface being honest — which is fine for the interface keyhold
+/// ships, and is exactly why the agent surface (F7) will record its own reads on this side instead.
+async fn report_access(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<Access>,
+) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    if state.lock.with_key(|_| ()).is_none() {
+        return Err(locked());
+    }
+
+    if crate::settings::log_reads(&store) {
+        audit::note(
+            &store,
+            if body.kind == "copy" {
+                audit::action::SECRET_COPIED
+            } else {
+                audit::action::SECRET_REVEALED
+            },
+            Some(&id),
+            Detail::new().with("field", body.field),
+        );
+    }
+
+    Ok(Json(json!({ "noted": true })))
 }
 
 // ── folders ─────────────────────────────────────────────────────────────────────────────────────
@@ -361,6 +600,13 @@ async fn create_record(
     ))
     .map_err(bad_request)?;
 
+    audit::note(
+        &store,
+        audit::action::RECORD_CREATED,
+        Some(&made.id),
+        Detail::new().with("kind", made.kind.clone()),
+    );
+
     Ok(Json(json!({ "record": made })))
 }
 
@@ -381,6 +627,13 @@ async fn update_record(
 
     let updated = with_key!(state, |key| records::update(&mut store, key, &id, &payload))
         .map_err(bad_request)?;
+
+    audit::note(
+        &store,
+        audit::action::RECORD_UPDATED,
+        Some(&id),
+        Detail::new().with("version", updated.version),
+    );
 
     Ok(Json(json!({ "record": updated })))
 }
@@ -424,6 +677,13 @@ async fn archive_record(
     let store = state.store.lock().unwrap();
 
     with_key!(state, |_key| records::archive(&store, &id, flag.on)).map_err(bad_request)?;
+
+    audit::note(
+        &store,
+        if flag.on { audit::action::RECORD_DELETED } else { audit::action::RECORD_RESTORED },
+        Some(&id),
+        Detail::new(),
+    );
 
     Ok(Json(json!({ "archived": flag.on })))
 }

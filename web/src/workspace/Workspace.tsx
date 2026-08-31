@@ -7,6 +7,7 @@ import {
   MoreHorizontal,
   Plus,
   Search,
+  ScrollText,
   Settings2,
   Star,
   Trash2,
@@ -70,6 +71,7 @@ import {
   MoveFolderDialog,
   RenameFolderDialog,
 } from './FolderDialogs'
+import { AuditPanel } from './AuditPanel'
 import { HealthPanel } from './HealthPanel'
 import { Settings } from './Settings'
 import { TrashPanel } from './TrashPanel'
@@ -88,13 +90,14 @@ import { kindIcon } from './kinds'
  *    vault has nowhere to navigate to, and a route table would describe the shape of what is inside.
  */
 
-type Lens = 'all' | 'favourites' | 'attention' | 'trash' | 'settings'
+type Lens = 'all' | 'favourites' | 'attention' | 'trash' | 'trail' | 'settings'
 
 const LENSES: Array<{ id: Lens; label: string; icon: typeof Vault }> = [
   { id: 'all', label: 'Tudo', icon: Vault },
   { id: 'favourites', label: 'Favoritos', icon: Star },
   { id: 'attention', label: 'Atenção', icon: AlertTriangle },
   { id: 'trash', label: 'Lixeira', icon: Trash2 },
+  { id: 'trail', label: 'Trilha', icon: ScrollText },
   { id: 'settings', label: 'Ajustes', icon: Settings2 },
 ]
 
@@ -232,7 +235,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
 
   // Two lenses replace the list entirely rather than filtering it: one is a report, the other is a
   // different set of records with different things to do to them.
-  const wholeLens = lens === 'attention' || lens === 'trash'
+  const wholeLens = lens === 'attention' || lens === 'trash' || lens === 'trail'
 
   async function openRecord(id: string) {
     if (tabs.some((tab) => tab.id === id)) {
@@ -528,7 +531,14 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
 
             {wholeLens ? (
               <ScrollArea className="min-h-0 flex-1">
-                {lens === 'attention' ? (
+                {lens === 'trail' ? (
+                  <AuditPanel
+                    onOpenRecord={(recordId) => {
+                      setLens('all')
+                      void openRecord(recordId)
+                    }}
+                  />
+                ) : lens === 'attention' ? (
                   <HealthPanel
                     health={health}
                     onOpen={(recordId) => {

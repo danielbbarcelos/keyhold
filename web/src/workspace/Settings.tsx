@@ -1,5 +1,15 @@
 import { useState } from 'react'
-import { Bot, KeyRound, Loader2, Lock, RefreshCw, ShieldCheck, Trash2, Wand2 } from 'lucide-react'
+import {
+  Bot,
+  KeyRound,
+  Loader2,
+  Lock,
+  RefreshCw,
+  ScrollText,
+  ShieldCheck,
+  Trash2,
+  Wand2,
+} from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -29,6 +39,7 @@ import {
 } from '@/components/ui/alert-dialog'
 
 import { api, ApiError, type LockPolicy, type Status, type VaultSummary } from '../api'
+import { TransferPanel } from './TransferPanel'
 import { VaultsPanel } from './VaultsPanel'
 
 /**
@@ -55,6 +66,8 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged }: Setting
       <VaultsPanel vaults={vaults} onChanged={onVaultsChanged} />
       <Rotation vaults={vaults} onChanged={onVaultsChanged} />
       <Retention days={status.retention_days} onChanged={onChanged} />
+      <TrailSettings on={status.log_reads} onChanged={onChanged} />
+      <TransferPanel vaults={vaults} onChanged={onVaultsChanged} />
       <AgentAccess vaults={vaults} onChanged={onVaultsChanged} />
     </div>
   )
@@ -457,6 +470,49 @@ function Retention({ days, onChanged }: { days: number; onChanged: () => void })
             </Button>
           ))}
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/**
+ * Whether reads go into the trail.
+ *
+ * On by default, because "what did the agent read?" is the question the trail exists to answer.
+ * Switchable off, because with it on the vault also keeps a record of *your* use of it — and on a
+ * machine only you touch, that is a log of you. Writes and security events are recorded either way.
+ */
+function TrailSettings({ on, onChanged }: { on: boolean; onChanged: () => void }) {
+  return (
+    <Card className="py-6">
+      <CardHeader className="px-6">
+        <CardTitle className="flex items-center gap-2">
+          <ScrollText className="size-4" />
+          Trilha
+        </CardTitle>
+        <CardDescription>
+          Destrancar, criar, alterar e excluir são sempre registrados — é o que permite conferir
+          depois se alguma coisa aconteceu sem você. Revelar e copiar um segredo é opcional.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="space-y-4 px-6">
+        <div className="flex items-center justify-between gap-4">
+          <Label htmlFor="log-reads" className="font-normal">
+            Registrar quando um segredo é revelado ou copiado
+          </Label>
+          <Switch
+            id="log-reads"
+            checked={on}
+            onCheckedChange={(next) => void api.setLogReads(next).then(onChanged)}
+          />
+        </div>
+
+        {!on && (
+          <p className="text-sm text-muted-foreground">
+            Com isto desligado, não haverá como responder depois o que um assistente leu.
+          </p>
+        )}
       </CardContent>
     </Card>
   )

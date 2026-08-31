@@ -31,6 +31,7 @@ use rust_embed::RustEmbed;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::audit::{self, Detail};
 use crate::db::Store;
 use crate::generator::{self, Recipe};
 use crate::identity::{self, SetupOptions, UnlockAttempt};
@@ -74,6 +75,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/visibility", post(visibility))
         .route("/settings/lock", put(set_lock_policy))
         .route("/settings/retention", put(set_retention))
+        .route("/settings/log-reads", put(set_log_reads))
+        .route("/audit", get(read_audit))
+        .route("/audit/integrity", get(audit_integrity))
         .route("/protection", put(change_protection))
         .route("/second-factor/begin", post(begin_second_factor))
         .route("/second-factor", post(enable_second_factor))
@@ -130,6 +134,7 @@ async fn status(State(state): State<Arc<AppState>>) -> Answer {
         "identity": identity,
         "lock": lock,
         "retention_days": settings::retention_days(&store),
+        "log_reads": settings::log_reads(&store),
         "attemptsLeft": MAX_FAILURES.saturating_sub(*state.failures.lock().unwrap()),
     })))
 }
@@ -153,16 +158,20 @@ async fn setup(State(state): State<Arc<AppState>>, Json(body): Json<SetupBody>) 
 
     // A vault with no vault in it is a dead end: every screen past this one needs somewhere to put
     // the first record. So setup finishes with one, named plainly and renameable like any other.
-    crate::vaults::create_vault(
+    let first = crate::vaults::create_vault(
         &store,
         &outcome.vault_key,
         crate::vaults::VaultMeta {
             name: "Pessoal".into(),
             description: String::new(),
-            colour: "brand".into(),
+            colour: "default".into(),
         },
     )
     .map_err(bad_request)?;
+
+    // The vault setup makes goes in the trail like any other: the first line of the log should be
+    // the moment this file started existing, not the second thing that happened to it.
+    audit::note(&store, audit::action::VAULT_CREATED, Some(&first.id), Detail::new());
 
     let recovery_key = outcome.recovery_key.clone();
     state.lock.unlock_with(outcome.vault_key);
@@ -246,11 +255,29 @@ async fn unlock(State(state): State<Arc<AppState>>, Json(body): Json<UnlockBody>
                 crate::records::purge_expired(&store, crate::settings::retention_days(&store))
                     .unwrap_or(0);
 
+            audit::note(
+                &store,
+                audit::action::UNLOCK,
+                None,
+                Detail::new().with("purged", purged as i64),
+            );
+
             Ok(Json(json!({ "lock": state.lock.status(), "purged": purged })))
         }
         Err(error) => {
             let mut failures = state.failures.lock().unwrap();
             *failures += 1;
+
+            // A failed unlock is the more interesting half of the trail: it is the shape of
+            // somebody trying. The reason is recorded, never what was typed.
+            let _ = audit::record(
+                &store,
+                audit::Actor::You,
+                audit::action::UNLOCK_FAILED,
+                None,
+                audit::Outcome::Denied,
+                Detail::new().with("attempt", *failures as i64),
+            );
 
             Err(Failure(
                 StatusCode::UNAUTHORIZED,
@@ -263,7 +290,60 @@ async fn unlock(State(state): State<Arc<AppState>>, Json(body): Json<UnlockBody>
 async fn lock_now(State(state): State<Arc<AppState>>) -> Answer {
     state.lock.lock();
 
+    {
+        let store = state.store.lock().unwrap();
+        audit::note(&store, audit::action::LOCK, None, Detail::new());
+    }
+
     Ok(Json(json!({ "lock": state.lock.status() })))
+}
+
+#[derive(Deserialize)]
+struct LogReads {
+    on: bool,
+}
+
+async fn set_log_reads(State(state): State<Arc<AppState>>, Json(body): Json<LogReads>) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    let saved = settings::set_log_reads(&store, body.on).map_err(bad_request)?;
+
+    Ok(Json(json!({ "log_reads": saved })))
+}
+
+#[derive(Deserialize)]
+struct AuditQuery {
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
+/// The trail, newest first.
+///
+/// Behind the lock like everything else — not because the rows are secret (they hold no secret),
+/// but because the shape of somebody's day is not public either.
+async fn read_audit(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(query): axum::extract::Query<AuditQuery>,
+) -> Answer {
+    if state.lock.with_key(|_| ()).is_none() {
+        return Err(locked());
+    }
+
+    let store = state.store.lock().unwrap();
+    let events = audit::recent(&store, query.limit.unwrap_or(200)).map_err(bad_request)?;
+
+    Ok(Json(json!({ "events": events, "log_reads": settings::log_reads(&store) })))
+}
+
+async fn audit_integrity(State(state): State<Arc<AppState>>) -> Answer {
+    if state.lock.with_key(|_| ()).is_none() {
+        return Err(locked());
+    }
+
+    let store = state.store.lock().unwrap();
+    let integrity = audit::verify(&store).map_err(bad_request)?;
+
+    Ok(Json(json!({ "integrity": integrity })))
 }
 
 /// The interface saying "somebody is still here".
@@ -343,6 +423,13 @@ async fn change_protection(
 
     result.map_err(bad_request)?;
 
+    audit::note(
+        &store,
+        audit::action::PROTECTION_CHANGED,
+        None,
+        Detail::new().with("mode", if body.password.is_some() { "password" } else { "device" }),
+    );
+
     Ok(Json(json!({ "changed": true })))
 }
 
@@ -392,6 +479,13 @@ async fn enable_second_factor(
         .ok_or_else(locked)?
         .map_err(bad_request)?;
 
+    audit::note(
+        &store,
+        audit::action::SECOND_FACTOR_CHANGED,
+        None,
+        Detail::new().with("enabled", true),
+    );
+
     Ok(Json(json!({ "enabled": true })))
 }
 
@@ -426,6 +520,13 @@ async fn disable_second_factor(
     }
 
     identity::disable_second_factor(&store).map_err(bad_request)?;
+
+    audit::note(
+        &store,
+        audit::action::SECOND_FACTOR_CHANGED,
+        None,
+        Detail::new().with("enabled", false),
+    );
 
     Ok(Json(json!({ "enabled": false })))
 }

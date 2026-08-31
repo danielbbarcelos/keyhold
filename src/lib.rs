@@ -12,6 +12,8 @@
 //! The library exists so the test suite can exercise the same code the binary runs, rather than a
 //! second implementation that agrees with it on a good day.
 
+pub mod attachments;
+pub mod audit;
 pub mod crypto;
 pub mod db;
 pub mod encoding;
@@ -25,4 +27,5 @@ pub mod records;
 pub mod session;
 pub mod settings;
 pub mod totp;
+pub mod transfer;
 pub mod vaults;

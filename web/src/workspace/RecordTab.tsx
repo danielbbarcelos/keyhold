@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils'
 import { api, ApiError, type FolderNode, type OpenRecord, type VersionEntry } from '../api'
 import { Input } from '@/components/ui/input'
 
+import { Attachments } from './Attachments'
 import { RecordEditor } from './RecordEditor'
 import { SecretLine } from './SecretLine'
 import { VersionDialog } from './VersionDialog'
@@ -166,6 +167,7 @@ export function RecordTab({ record, folders, onReload, onClosed }: RecordTabProp
                 label={field.label || 'Sem rótulo'}
                 value={field.value}
                 masked={field.kind === 'password' || field.kind === 'hidden'}
+                recordId={record.id}
               />
             ))}
 
@@ -305,6 +307,10 @@ export function RecordTab({ record, folders, onReload, onClosed }: RecordTabProp
               </dd>
             </div>
           </dl>
+
+          <Separator />
+
+          <Attachments recordId={record.id} />
 
           {versions.length > 0 && (
             <>

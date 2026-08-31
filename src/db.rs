@@ -19,7 +19,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 
 /// The schema this binary understands. A file claiming more than this is not opened.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 7;
 
 pub struct Store {
     conn: Connection,
@@ -237,6 +237,66 @@ impl Store {
                  ALTER TABLE vaults ADD COLUMN key_version INTEGER NOT NULL DEFAULT 1;
                  ALTER TABLE vaults ADD COLUMN key_rotated_at TEXT;
                  UPDATE meta SET value = '5' WHERE key = 'schema_version';
+                 COMMIT;",
+            )?;
+        }
+
+        // F6: the trail.
+        //
+        // Append-only by construction, not by convention: no `updated_at`, no `deleted_at`, and
+        // nothing in the codebase issues an UPDATE or DELETE against it. Each row carries the hash
+        // of the one before it, so removing or editing a line breaks every hash after it — which is
+        // the only thing that makes a log worth reading back.
+        //
+        // `seq` is the chain's order and an AUTOINCREMENT on purpose: plain rowids get reused after
+        // a delete, and a chain whose positions can repeat is not a chain.
+        if found < 6 {
+            self.conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE audit_events (
+                     seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+                     at        TEXT NOT NULL,
+                     actor     TEXT NOT NULL,
+                     action    TEXT NOT NULL,
+                     scope     TEXT,
+                     result    TEXT NOT NULL,
+                     detail    TEXT,
+                     prev_hash TEXT NOT NULL,
+                     hash      TEXT NOT NULL
+                 ) STRICT;
+
+                 CREATE INDEX audit_by_time ON audit_events (at DESC);
+
+                 UPDATE meta SET value = '6' WHERE key = 'schema_version';
+                 COMMIT;",
+            )?;
+        }
+
+        // F6: attachments.
+        //
+        // The file's name and type are sealed *with* it, not beside it: "id_rsa" and
+        // "contrato-assinado.pdf" say plenty on their own. What stays outside the seal is the byte
+        // count — a length that any observer could infer from the row's size anyway, and that the
+        // interface needs to show a list without opening every file in it.
+        //
+        // The bytes live in this table rather than in a directory: one file to back up, one file to
+        // set permissions on, and no second place where a decrypted temporary could be forgotten.
+        if found < 7 {
+            self.conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE attachments (
+                     id          TEXT    PRIMARY KEY,
+                     record_id   TEXT    NOT NULL REFERENCES records(id) ON DELETE CASCADE,
+                     wrapped_key BLOB    NOT NULL,
+                     sealed_meta BLOB    NOT NULL,
+                     sealed_blob BLOB    NOT NULL,
+                     size        INTEGER NOT NULL,
+                     created_at  TEXT    NOT NULL
+                 ) STRICT;
+
+                 CREATE INDEX attachments_by_record ON attachments (record_id);
+
+                 UPDATE meta SET value = '7' WHERE key = 'schema_version';
                  COMMIT;",
             )?;
         }

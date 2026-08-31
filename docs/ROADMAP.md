@@ -11,8 +11,8 @@ promise it does not keep.
 | **F3** | Records: five kinds as templates rather than schemas, reorderable custom fields, per-record AAD, monotonic versions, restorable history | **done** (attachments deferred to F6) |
 | **F4** | Daily use: masked fields that reveal on a deadline, clipboard hand-off with clearing, generator, favourites, command palette, tabs, lenses | **done** |
 | **F5** | Health, rotation, trash with retention | **done** |
-| **F6** | Encrypted attachments, audit trail with a verifiable hash chain, encrypted export, import | **next** |
-| **F7** | Agent surface: a unix socket and an MCP server so a local coding agent can look things up without the secret passing through a chat transcript | not started |
+| **F6** | Encrypted attachments, audit trail with a verifiable hash chain, encrypted export, import | **done** |
+| **F7** | Agent surface: a unix socket and an MCP server so a local coding agent can look things up without the secret passing through a chat transcript | **next** |
 | **F8** | Release: packaging, CI, signed builds | not started |
 
 ## What F1–F4 put in place
@@ -36,6 +36,26 @@ shape: how many records exist, how they nest, and when they changed.
 **The additional data binds each payload to its place and version.** Swapping two records' blobs
 fails to open; pasting an old blob over a new one fails to open. Both are covered by tests that do
 exactly that to a real vault file.
+
+## What F6 put in place
+
+**A trail that can be checked.** Append-only by construction — no `UPDATE`, no `DELETE`, nowhere —
+with each row carrying the hash of the one before it, so editing or removing a line breaks every
+hash after it and the integrity check names the first break. It records unlocking (and failing to),
+creating, changing and deleting; reads are recorded too, and that half can be switched off. It never
+contains a value: the trail says a field called "Senha" was revealed, never what it said, and a
+deny-list drops anything secret-looking on the way in rather than trusting every caller to remember.
+
+**Attachments, sealed name and all.** A file's name and type are encrypted *with* it, because
+"id_rsa" and "contrato-assinado.pdf" say plenty on their own. The bytes live in the vault file
+rather than a directory: one file to back up, and no place where a decrypted temporary is forgotten.
+
+**Export that is never plaintext, and import that never merges.** The archive is sealed with a
+passphrase of its own — not the master password — and its envelope names the KDF, its parameters,
+the salt and the nonce, because an archive nobody can open in six months protects nothing. Import
+reads that archive or the CSV every other manager exports, and always creates: matching an incoming
+record against an existing one would mean the vault deciding which of two passwords is current, and
+it cannot know.
 
 ## What F5 put in place
 

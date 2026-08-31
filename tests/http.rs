@@ -950,3 +950,261 @@ async fn deleting_a_vault_needs_its_name_and_takes_everything_with_it() {
     assert_eq!(right.json()["deleted"]["records"], 1);
     assert!(app.get("/api/vaults").await.json()["vaults"].as_array().unwrap().is_empty());
 }
+
+// ── the trail (F6) ──────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn the_trail_records_what_happened_and_verifies() {
+    let app = start().await;
+    let vault = with_one_vault(&app).await;
+
+    let id = app
+        .post(
+            &format!("/api/vaults/{vault}/records"),
+            serde_json::json!({
+                "kind": "login",
+                "payload": {
+                    "title": "Servidor",
+                    "fields": [{ "label": "Senha", "kind": "password", "value": "hunter2" }]
+                }
+            }),
+        )
+        .await
+        .json()["record"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    app.post(
+        &format!("/api/records/{id}/accesses"),
+        serde_json::json!({ "kind": "reveal", "field": "Senha" }),
+    )
+    .await;
+
+    let trail = app.get("/api/audit").await;
+    let events = trail.json()["events"].clone();
+    let actions: Vec<&str> =
+        events.as_array().unwrap().iter().map(|e| e["action"].as_str().unwrap()).collect();
+
+    assert!(actions.contains(&"secret.revealed"), "{actions:?}");
+    assert!(actions.contains(&"record.created"), "{actions:?}");
+    assert!(actions.contains(&"vault.created"), "{actions:?}");
+
+    // The trail says a field called "Senha" was revealed, never what it said.
+    assert!(!trail.body.contains("hunter2"), "the trail carried a secret: {}", trail.body);
+    assert_eq!(events[0]["detail"]["field"], "Senha");
+
+    let integrity = app.get("/api/audit/integrity").await;
+    assert_eq!(integrity.json()["integrity"]["intact"], true);
+}
+
+#[tokio::test]
+async fn a_failed_unlock_is_written_down() {
+    let app = start().await;
+    with_one_vault(&app).await;
+
+    app.post("/api/lock", serde_json::json!({})).await;
+    app.post("/api/unlock", serde_json::json!({ "password": "errada" })).await;
+    app.post("/api/unlock", serde_json::json!({ "password": "the master password" })).await;
+
+    let events = app.get("/api/audit").await.json()["events"].clone();
+    let failed = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["action"] == "vault.unlock.failed")
+        .expect("a failed unlock should be recorded");
+
+    assert_eq!(failed["result"], "denied");
+    assert_eq!(failed["detail"]["attempt"], 1);
+}
+
+#[tokio::test]
+async fn editing_the_trail_in_the_file_is_detected() {
+    let app = start().await;
+    let vault = with_one_vault(&app).await;
+
+    app.post(
+        &format!("/api/vaults/{vault}/records"),
+        serde_json::json!({ "kind": "note", "payload": { "title": "Uma nota", "fields": [] } }),
+    )
+    .await;
+
+    assert_eq!(app.get("/api/audit/integrity").await.json()["integrity"]["intact"], true);
+
+    {
+        let store = app.store.lock().unwrap();
+        store
+            .conn()
+            .execute("UPDATE audit_events SET action = 'vault.lock' WHERE seq = 1", [])
+            .unwrap();
+    }
+
+    let integrity = app.get("/api/audit/integrity").await.json();
+
+    assert_eq!(integrity["integrity"]["intact"], false);
+    assert_eq!(integrity["integrity"]["broken_at"], 1);
+}
+
+#[tokio::test]
+async fn reads_stop_being_recorded_when_that_is_switched_off() {
+    let app = start().await;
+    let vault = with_one_vault(&app).await;
+
+    let id = app
+        .post(
+            &format!("/api/vaults/{vault}/records"),
+            serde_json::json!({ "kind": "note", "payload": { "title": "Uma nota", "fields": [] } }),
+        )
+        .await
+        .json()["record"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    http::send(
+        "PUT",
+        &format!("{}/api/settings/log-reads", app.base),
+        Some(&app.token),
+        Some(&serde_json::json!({ "on": false }).to_string()),
+    )
+    .await;
+
+    app.post(
+        &format!("/api/records/{id}/accesses"),
+        serde_json::json!({ "kind": "reveal", "field": "Senha" }),
+    )
+    .await;
+
+    let actions: Vec<String> = app.get("/api/audit").await.json()["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| event["action"].as_str().unwrap().to_string())
+        .collect();
+
+    assert!(!actions.iter().any(|action| action == "secret.revealed"), "{actions:?}");
+    // Writes are still recorded: switching off reads is not switching off the trail.
+    assert!(actions.iter().any(|action| action == "record.created"), "{actions:?}");
+}
+
+#[tokio::test]
+async fn the_trail_says_nothing_while_the_vault_is_locked() {
+    let app = start().await;
+    with_one_vault(&app).await;
+
+    app.post("/api/lock", serde_json::json!({})).await;
+
+    assert_eq!(app.get("/api/audit").await.status, 423);
+    assert_eq!(app.get("/api/audit/integrity").await.status, 423);
+}
+
+#[tokio::test]
+async fn a_vault_can_be_exported_and_brought_back() {
+    let app = start().await;
+    let vault = with_one_vault(&app).await;
+
+    app.post(
+        &format!("/api/vaults/{vault}/records"),
+        serde_json::json!({
+            "kind": "login",
+            "payload": {
+                "title": "Servidor",
+                "username": "deploy",
+                "fields": [{ "label": "Senha", "kind": "password", "value": "hunter2" }]
+            }
+        }),
+    )
+    .await;
+
+    let short = app
+        .post(&format!("/api/vaults/{vault}/export"), serde_json::json!({ "passphrase": "curta" }))
+        .await;
+    assert_eq!(short.status, 400, "a short passphrase should be refused");
+
+    let exported = app
+        .post(
+            &format!("/api/vaults/{vault}/export"),
+            serde_json::json!({ "passphrase": "uma senha de arquivo" }),
+        )
+        .await;
+
+    assert_eq!(exported.status, 200);
+    assert!(!exported.body.contains("hunter2"), "the archive leaked a secret");
+    assert!(!exported.body.contains("Servidor"), "the archive leaked a title");
+
+    let envelope = exported.json()["archive"].clone();
+
+    // Bringing it back into a second vault reproduces the record.
+    let other = app
+        .post("/api/vaults", serde_json::json!({ "name": "Cópia", "description": "", "colour": "default" }))
+        .await
+        .json()["vault"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let wrong = app
+        .post(
+            &format!("/api/vaults/{other}/import"),
+            serde_json::json!({
+                "from": "archive",
+                "envelope": envelope,
+                "passphrase": "outra senha inteira"
+            }),
+        )
+        .await;
+    assert_eq!(wrong.status, 400, "the wrong passphrase opened the archive");
+
+    let brought = app
+        .post(
+            &format!("/api/vaults/{other}/import"),
+            serde_json::json!({
+                "from": "archive",
+                "envelope": envelope,
+                "passphrase": "uma senha de arquivo"
+            }),
+        )
+        .await;
+
+    assert_eq!(brought.status, 200);
+    assert_eq!(brought.json()["imported"]["records"], 1);
+
+    let listed = app.get(&format!("/api/vaults/{other}/records")).await;
+    assert_eq!(listed.json()["records"][0]["title"], "Servidor");
+}
+
+#[tokio::test]
+async fn a_csv_from_another_manager_can_be_imported() {
+    let app = start().await;
+    let vault = with_one_vault(&app).await;
+
+    let done = app
+        .post(
+            &format!("/api/vaults/{vault}/import"),
+            serde_json::json!({
+                "from": "csv",
+                "text": "name,username,password,folder\nServidor,deploy,hunter2,Infra\nBanco,daniel,outra,Infra\n"
+            }),
+        )
+        .await;
+
+    assert_eq!(done.status, 200);
+    assert_eq!(done.json()["imported"]["records"], 2);
+    assert_eq!(done.json()["imported"]["folders"], 1);
+
+    let listed = app.get(&format!("/api/vaults/{vault}/records")).await;
+    assert_eq!(listed.json()["records"].as_array().unwrap().len(), 2);
+
+    // And the import is in the trail, saying where it came from.
+    let events = app.get("/api/audit").await.json()["events"].clone();
+    let imported = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["action"] == "vault.imported")
+        .expect("the import should be recorded");
+
+    assert_eq!(imported["detail"]["from"], "csv");
+    assert_eq!(imported["detail"]["records"], 2);
+}

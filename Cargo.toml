@@ -25,6 +25,7 @@ argon2 = "0.5"
 aes-gcm = "0.10"
 hmac = "0.12"
 sha1 = "0.10"
+sha2 = "0.10"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 thiserror = "1"
 anyhow = "1"
