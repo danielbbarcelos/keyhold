@@ -8,6 +8,8 @@ description = "A strictly local password vault. Nothing leaves the machine."
 readme = "README.md"
 keywords = ["password-manager", "vault", "local-first", "mcp"]
 categories = ["command-line-utilities"]
+repository = "https://github.com/danielbbarcelos/keyhold"
+homepage = "https://github.com/danielbbarcelos/keyhold"
 
 [dependencies]
 axum = "0.7"

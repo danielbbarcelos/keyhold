@@ -1,37 +1,64 @@
+<div align="center">
+
+<img src="assets/icon.png" alt="" width="112" height="112">
+
 # keyhold
 
-A password vault that lives entirely on your machine.
+**A password vault that lives entirely on your machine.**
 
-No server, no account, no sync, no telemetry. keyhold is a single binary that opens a vault file,
-serves an interface to your own browser on loopback, and forgets the key when you close it.
+No server. No account. No sync. Nothing to sign up for.
 
-> **Status: early.** The foundation is in place; the vault does not hold secrets yet. See
-> [docs/ROADMAP.md](docs/ROADMAP.md) for what is built and what is not. Do not put a real password
-> in it until the roadmap says F3 is done.
+</div>
+
+---
+
+## What it is
+
+keyhold keeps your passwords, keys and private notes in a single encrypted file on your own
+computer, and shows them to you in your browser — without any of it ever going anywhere.
+
+You open it, type one master password, and everything is there. You close it, and the key that
+opens it stops existing until you type that password again.
+
+It is a single program. There is no service behind it, no company holding a copy, and no account to
+lose access to. If your internet is down, keyhold works exactly the same.
+
+**It can also answer a coding assistant running on your machine** — so you can ask Claude Code to
+connect to a server without pasting a password into a chat. Every request stops and asks you first,
+naming what is asking, and the preferred way hands the secret to a command instead of to the
+assistant.
+
+> **Status: early.** The vault works and is tested, but it has not been through anyone else's
+> review. If you put something in it, keep a copy somewhere else too. See
+> [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What keyhold promises
 
-**The file on disk is ciphertext.** A backup, a synced folder, or another program reading your home
-directory finds noise. There is no key stored beside it.
+**The file on disk is unreadable without your password.** If someone copies your backup, syncs your
+home folder to a cloud, or walks off with the drive, what they get is noise. The key is not stored
+next to it — it is not stored anywhere.
 
-**The key exists only while the vault is unlocked.** It is derived from your master password when
-you unlock, held in this process's memory, and wiped when you lock or quit. There is no copy —
-including for you, and including for anybody who compels us, because there is no us.
+**The key only exists while the vault is open.** It is built from your master password the moment
+you unlock, kept in memory, and wiped when you lock or quit. Nobody has a copy: not us, not a
+support desk, not someone with a court order — because there is no us and no desk.
 
-**Nothing leaves the machine.** keyhold binds to `127.0.0.1`, fetches nothing at runtime, and ships
-every byte the interface renders inside the binary. There is no CDN, no font host, no update ping.
+**Nothing leaves your machine.** keyhold only listens to your own computer, never fetches anything
+from the internet, and carries everything it displays inside the program itself. No CDN, no fonts
+downloaded, no update check, no analytics.
 
 ## What keyhold does not promise
 
-Being honest about this is part of the design:
+Saying this plainly is part of the design. A vault that implies otherwise is lying to you.
 
-- **Malware on your machine wins.** A keylogger reads your master password as you type it. A
-  program running as you can read this process's memory while the vault is open. keyhold protects
-  the vault at rest and narrows the window when it is open; it cannot outrank the operating system.
-- **A screenshot is a screenshot.** So is a photograph of the screen, and so is a person who
-  memorises the password.
-- **Lose your master password and your recovery key and the data is gone.** There is no escrow, no
-  reset, no support address that can help. That is what makes the first promise true.
+- **If your computer is already compromised, keyhold loses.** Software that records your keystrokes
+  will catch your master password as you type it. A program running as you can read this one's
+  memory while the vault is open. keyhold protects the file when it is closed and narrows the window
+  when it is open; it cannot outrank the operating system it runs on.
+- **A revealed password is revealed.** Screenshots, photos of the screen, and remembering it are all
+  outside anything a program can do.
+- **Lose your master password *and* your recovery key, and the data is gone.** There is no reset
+  link, no backup copy, no email that fixes it. That is not an oversight — it is exactly what makes
+  the first promise above true.
 
 ## Install
 
