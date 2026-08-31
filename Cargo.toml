@@ -1,0 +1,41 @@
+[package]
+name = "keyhold"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "A strictly local password vault. Nothing leaves the machine."
+readme = "README.md"
+keywords = ["password-manager", "vault", "local-first", "mcp"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }
+rust-embed = "8"
+mime_guess = "2"
+rand = "0.8"
+zeroize = { version = "1", features = ["derive"] }
+subtle = "2"
+argon2 = "0.5"
+aes-gcm = "0.10"
+hmac = "0.12"
+sha1 = "0.10"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+thiserror = "1"
+anyhow = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
+
+[profile.release]
+# A panic mid-unwind can drop key material in an order zeroization does not cover.
+# Aborting keeps that window from existing at all.
+panic = "abort"
+strip = true
+lto = true

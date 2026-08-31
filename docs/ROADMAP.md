@@ -1,0 +1,86 @@
+# Roadmap
+
+Each phase ends with its tests green. Nothing moves to the next phase while the previous one has a
+promise it does not keep.
+
+| Phase | Delivers | State |
+|---|---|---|
+| **F0** | Foundation: single binary, loopback bind on a free port, per-run session token in the URL fragment, embedded interface bundle, SQLite vault file with owner-only permissions, strict CSP, and the hardening suite that keeps all of it from eroding | **done** |
+| **F1** | Identity and the lock: master password (optional, generated or your own), second factor, Argon2id, key wrapping, recovery key shown once, unlock and lock, auto-lock on idle and on hidden window, zeroization along every path | **done** |
+| **F2** | Vaults and folders: several vaults with sealed names, folder tree with its own key, archive and restore, per-vault agent visibility | **done** |
+| **F3** | Records: five kinds as templates rather than schemas, reorderable custom fields, per-record AAD, monotonic versions, restorable history | **done** (attachments deferred to F6) |
+| **F4** | Daily use: masked fields that reveal on a deadline, clipboard hand-off with clearing, generator, favourites, command palette, tabs, lenses | **done** |
+| **F5** | Health, rotation, trash with retention | **done** |
+| **F6** | Encrypted attachments, audit trail with a verifiable hash chain, encrypted export, import | **next** |
+| **F7** | Agent surface: a unix socket and an MCP server so a local coding agent can look things up without the secret passing through a chat transcript | not started |
+| **F8** | Release: packaging, CI, signed builds | not started |
+
+## What F1–F4 put in place
+
+**Three layers, each one a choice with a stated cost.** A master password is recommended and
+optional — without one, keyhold falls back to a device key stored beside the vault, and the setup
+screen says plainly that this means anybody who can read your files can open your vault. A second
+factor from an authenticator app is optional, and the interface says what it does and does not
+protect against. Auto-lock is recommended and switchable off, in both of its clocks.
+
+**The lock is real, and it runs in the daemon.** Not a screen: locking drops the key. Every route
+that touches a payload goes through one function that consults the clock first, so a request that
+arrives a second late gets a 423 rather than a secret. A timer in the browser would be a
+suggestion — a throttled or suspended tab simply stops counting.
+
+**Names are sealed, not just passwords.** Vault names, folder names, record titles, usernames and
+addresses all live inside encrypted blobs. On a machine with no server, a readable list of vault
+names is worth reading even when every password in it is ciphertext. What the file still shows is
+shape: how many records exist, how they nest, and when they changed.
+
+**The additional data binds each payload to its place and version.** Swapping two records' blobs
+fails to open; pasting an old blob over a new one fails to open. Both are covered by tests that do
+exactly that to a real vault file.
+
+## What F5 put in place
+
+**Health that names reasons instead of scoring.** `log2(alphabet) × length` is exact for a
+generated password and a lie about an invented one, so the health lens reports checkable findings —
+too short, one class of character, a word with a year on the end, reused elsewhere in the vault,
+repeating the record's own title, or simply untouched for a year. Every line is something a person
+can look at and agree with, which is the bar for a screen whose only job is to get somebody to
+change a password they are attached to.
+
+**Rotation as re-wrapping, not re-encryption.** A vault's key can be replaced and everything that
+hung off it re-wrapped, in one transaction. No payload is touched, which makes rotating cheap
+enough to do on a suspicion. A rotation that stopped halfway would leave records under two
+different keys with the header naming one — so it is all-or-nothing by construction.
+
+**Vaults can be renamed, put away and deleted.** Archiving hides and is undone with a click;
+deleting takes the vault's folders, records and every past version with it, in one cascade. It asks
+for the vault's name typed back rather than a yes/no — a confirmation box is answered from muscle
+memory, a name has to be read and typed — and states a count first, because "this deletes 47
+records" is something somebody can weigh and "cannot be undone" is a sentence everybody clicks past.
+
+**A trash that waits.** Deleting archives; destroying is separate, confirmed, and takes the record's
+whole version history with it. The retention window is configurable, defaults to 30 days, and can
+be switched off entirely. The purge runs on unlock rather than on a timer: keyhold only exists
+while somebody is using it, so a schedule would fire whenever the machine happened to be awake.
+
+## What F0 put in place
+
+- `keyhold` binds `127.0.0.1` on an OS-assigned free port. The bind address is not configurable —
+  there is no setting that makes it listen anywhere else.
+- A 32-byte session token per run, delivered in the URL fragment, compared in constant time,
+  required by every `/api` route, and never written to disk.
+- The interface bundle compiled into the binary. Nothing is read from disk at runtime and nothing
+  is fetched from the network.
+- A strict `Content-Security-Policy` on every response, plus `nosniff`, `no-referrer`,
+  `same-origin` resource policy and a restrictive permissions policy.
+- The vault file at `~/.local/share/keyhold/vault.db`, `0600`, with `WAL` and `secure_delete`, a
+  numbered migration chain, and a refusal to open a file written by a newer build.
+- `tests/hardening.rs` and `tests/http.rs`, which fail the build on a forbidden pattern in the
+  interface or on an API route that answers without the token.
+
+## Deliberately not done yet
+
+`keyhold mcp` exits with an error rather than answering. An agent surface that half-works is one
+somebody wires up and trusts.
+
+Attachments, the audit trail, export and import are not built. Deleting a record archives it, but
+nothing empties the archive yet — that retention window is F5.
