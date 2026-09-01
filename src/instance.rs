@@ -129,74 +129,219 @@ pub fn alive(marker: &Marker) -> bool {
     signal(marker.pid, 0)
 }
 
-/// Put the question to whoever is at the keyboard. A no here is the end of the run.
+/// What to do about a Keyhold that is already open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Choice {
+    /// Leave it running and bring its window to the front. The safe answer, and the default.
+    Present,
+    /// Close it and start over. The vault it holds open locks and its key is forgotten.
+    Replace,
+    /// Neither. This run ends here.
+    Nothing,
+}
+
+/// Put the question to whoever is at the keyboard.
+///
+/// Continuing is offered first and is what a bare Enter picks, because it is the answer that loses
+/// nothing: double-clicking an icon is not a decision to close an open vault, and until this
+/// existed that was the only thing the dialog could offer.
 ///
 /// Two surfaces, each in its own language, because they are read by different people in different
 /// places: the terminal answers to the same audience as `--help` and the startup banner, and the
 /// desktop dialog belongs to the same app as the window it is about.
-pub fn ask_to_replace(other: &Marker) -> bool {
+pub fn ask(other: &Marker) -> Choice {
+    // An older build cannot be brought forward — see `present`. Offering it and then refusing is a
+    // dead end, so the question is asked without it.
+    let can_present = same_build(other.pid);
+
     if std::io::stdin().is_terminal() {
-        return ask_in_terminal(other);
+        return ask_in_terminal(other, can_present);
     }
 
-    ask_on_desktop(other)
+    ask_on_desktop(other, can_present)
 }
 
-fn ask_in_terminal(other: &Marker) -> bool {
+fn ask_in_terminal(other: &Marker, can_present: bool) -> Choice {
     println!();
-    println!("  keyhold is already running (pid {}).", other.pid);
-    println!("  Taking over closes it: that vault locks and the key it holds is forgotten.");
+    println!("  Keyhold is already running (pid {}).", other.pid);
     println!();
-    print!("  Replace it? [y/N] ");
+
+    if can_present {
+        println!("    c  continue in it — opens the vault that is already unlocked");
+    } else {
+        println!("  It is running a different build of this program, which cannot be brought");
+        println!("  forward. Starting over is the only way in.");
+        println!();
+    }
+
+    println!("    r  replace it — that vault locks and the key it holds is forgotten");
+    println!("    n  do nothing");
+    println!();
+    print!("  Which? [{}] ", if can_present { "C/r/n" } else { "r/N" });
     let _ = std::io::stdout().flush();
 
     let mut answer = String::new();
 
     if std::io::stdin().read_line(&mut answer).is_err() {
-        return false;
+        return Choice::Nothing;
     }
 
-    matches!(answer.trim().to_lowercase().as_str(), "y" | "yes" | "s" | "sim")
+    match answer.trim().to_lowercase().as_str() {
+        "" if can_present => Choice::Present,
+        "c" | "continue" if can_present => Choice::Present,
+        "r" | "replace" => Choice::Replace,
+        _ => Choice::Nothing,
+    }
 }
 
-fn ask_on_desktop(other: &Marker) -> bool {
-    let text = format!(
-        "O Keyhold já está aberto (PID {}).\n\nAbrir de novo encerra a instância atual: o cofre \
-         tranca e a chave que ele guarda é esquecida.\n\nEncerrar a instância atual e abrir?",
-        other.pid
-    );
+fn ask_on_desktop(other: &Marker, can_present: bool) -> Choice {
+    const START_OVER: &str = "Encerrar e começar de novo";
 
-    let asked = Command::new("zenity")
+    let text = if can_present {
+        format!(
+            "O Keyhold já está aberto (PID {}).\n\nAbrir e continuar traz para a frente o cofre \
+             que já está destrancado — nada se perde.\n\nComeçar de novo encerra a instância \
+             atual: o cofre tranca e a chave que ele guarda é esquecida.",
+            other.pid
+        )
+    } else {
+        format!(
+            "O Keyhold já está aberto (PID {}), rodando uma versão diferente do programa — ela \
+             não sabe se trazer para a frente.\n\nComeçar de novo encerra a instância atual: o \
+             cofre tranca e a chave que ele guarda é esquecida.",
+            other.pid
+        )
+    };
+
+    // zenity has two buttons plus extras. An extra button exits non-zero and prints its own label,
+    // which is how a three-way question fits into a yes/no dialog.
+    let mut zenity = Command::new("zenity");
+    zenity
         .args(["--question", "--title", "Keyhold", "--no-markup"])
         .arg("--text")
-        .arg(&text)
-        .args(["--ok-label", "Encerrar e abrir", "--cancel-label", "Cancelar"])
-        .status()
-        .or_else(|_| {
-            Command::new("kdialog")
-                .args(["--title", "Keyhold", "--yesno"])
-                .arg(&text)
-                .status()
-        });
+        .arg(&text);
 
-    match asked {
-        Ok(status) => status.success(),
-        // No way to ask means no way to consent. Say what happened where the desktop can show it,
-        // and leave the running vault alone.
-        Err(_) => {
-            let _ = Command::new("notify-send")
-                .arg("Keyhold")
-                .arg(format!(
-                    "O Keyhold já está aberto (PID {}). Feche-o antes de abrir de novo.",
-                    other.pid
-                ))
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-
-            false
-        }
+    if can_present {
+        zenity
+            .args(["--ok-label", "Abrir e continuar", "--cancel-label", "Cancelar"])
+            .arg("--extra-button")
+            .arg(START_OVER);
+    } else {
+        zenity.args(["--ok-label", START_OVER, "--cancel-label", "Cancelar"]);
     }
+
+    if let Ok(output) = zenity.output() {
+        if output.status.success() {
+            return if can_present { Choice::Present } else { Choice::Replace };
+        }
+
+        return if String::from_utf8_lossy(&output.stdout).trim() == START_OVER {
+            Choice::Replace
+        } else {
+            Choice::Nothing
+        };
+    }
+
+    // kdialog counts its buttons for us: yes, no, cancel.
+    let kdialog = if can_present {
+        Command::new("kdialog")
+            .args(["--title", "Keyhold", "--yesnocancel"])
+            .arg(&text)
+            .args(["--yes-label", "Abrir e continuar", "--no-label", START_OVER])
+            .status()
+    } else {
+        Command::new("kdialog")
+            .args(["--title", "Keyhold", "--yesno"])
+            .arg(&text)
+            .args(["--yes-label", START_OVER, "--no-label", "Cancelar"])
+            .status()
+    };
+
+    if let Ok(status) = kdialog {
+        return match (status.code(), can_present) {
+            (Some(0), true) => Choice::Present,
+            (Some(0), false) => Choice::Replace,
+            (Some(1), true) => Choice::Replace,
+            _ => Choice::Nothing,
+        };
+    }
+
+    // No way to ask means no way to consent to the destructive half. Bringing the open vault
+    // forward is not destructive, so that is what happens — and it is said out loud.
+    if can_present {
+        announce(&format!(
+            "O Keyhold já estava aberto (PID {}). Trouxe a janela para o seu navegador.",
+            other.pid
+        ));
+
+        return Choice::Present;
+    }
+
+    announce(&format!(
+        "O Keyhold já está aberto (PID {}), numa versão diferente, e não há como perguntar o que \
+         fazer. Nada foi alterado.",
+        other.pid
+    ));
+
+    Choice::Nothing
+}
+
+/// Ask the running instance to show itself: it opens its own URL in the browser.
+///
+/// `USR1` rather than a second socket. The signal carries nothing, the kernel already restricts it
+/// to this user, and the answer — a session token in a URL — is put where it always goes, into the
+/// browser by the process that owns it. Nothing about the running vault comes back here.
+///
+/// The version check is not caution for its own sake. `USR1` **kills** a process that has not
+/// installed a handler for it, so sending one to a build that predates this feature would close the
+/// vault somebody just asked to keep open — the exact opposite of what they answered. A build that
+/// cannot be asked is one to say so about.
+pub fn present(other: &Marker) -> Result<()> {
+    if !same_build(other.pid) {
+        bail!(
+            "o Keyhold aberto no PID {} é de outra versão do programa e não sabe se trazer para a \
+             frente. Encerre e comece de novo.",
+            other.pid
+        );
+    }
+
+    if !signal(other.pid, libc::SIGUSR1) {
+        bail!("não foi possível falar com o Keyhold no PID {}", other.pid);
+    }
+
+    Ok(())
+}
+
+/// Whether another process is running the very same file this one is.
+///
+/// By device and inode rather than by path: reinstalling writes a new file at the same name, and
+/// the process that was already running keeps the old one open. Two different builds, one path.
+fn same_build(pid: i32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    let ours = match fs::metadata("/proc/self/exe") {
+        Ok(meta) => meta,
+        Err(_) => return false,
+    };
+
+    match fs::metadata(format!("/proc/{pid}/exe")) {
+        Ok(theirs) => theirs.dev() == ours.dev() && theirs.ino() == ours.ino(),
+        Err(_) => false,
+    }
+}
+
+/// Say something where the desktop can show it.
+///
+/// The browser tab is the thing people miss: a window that opens behind the one they are looking at
+/// is a window that did not open, as far as they can tell. A notification lands on top of whatever
+/// has focus, which is the one place this can be sure of.
+pub fn announce(text: &str) {
+    let _ = Command::new("notify-send")
+        .args(["--app-name", "Keyhold", "--icon", "keyhold", "Keyhold"])
+        .arg(text)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 /// Close the other instance and wait for it to actually be gone.
@@ -519,6 +664,15 @@ mod tests {
             }
             Claim::Busy(other) => panic!("a dead pid should not hold the machine, found {other:?}"),
         }
+    }
+
+    #[test]
+    fn only_this_very_binary_can_be_asked_to_show_itself() {
+        // `USR1` kills a process that installed no handler for it, so "same program" is not a
+        // nicety here: a build that predates the handler must never be signalled.
+        assert!(same_build(std::process::id() as i32), "this process is certainly the same build");
+        assert!(!same_build(1), "init is not a Keyhold");
+        assert!(!same_build(dead_pid()), "a reaped process has no /proc/<pid>/exe");
     }
 
     #[test]

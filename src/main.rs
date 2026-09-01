@@ -32,9 +32,15 @@ struct Cli {
     #[arg(long)]
     no_browser: bool,
 
-    /// Close a keyhold that is already running instead of asking first.
-    #[arg(long)]
+    /// Close a Keyhold that is already running instead of asking first.
+    #[arg(long, conflicts_with = "present")]
     replace: bool,
+
+    /// Bring a Keyhold that is already running to the front instead of asking first.
+    ///
+    /// With nothing running, this starts one — it is "open my vault", however that has to happen.
+    #[arg(long)]
+    present: bool,
 
     #[command(subcommand)]
     command: Option<Cmd>,
@@ -93,21 +99,55 @@ async fn main() -> Result<()> {
 }
 
 async fn serve(cli: Cli) -> Result<()> {
+    // Registered before anything can know this process exists: the default action for `USR1` is to
+    // kill it, and the marker `claim` writes is what makes another instance able to send one.
+    let show_yourself = show_yourself_signal();
+
     // Before the vault file is even opened: two processes over one database, both racing for an
     // agent socket whose path is fixed, is a mess nobody sees until an assistant is talking to a
     // vault the window is no longer showing.
+    let mut took_over = false;
+
     let held = match instance::claim()? {
         instance::Claim::Held(held) => held,
         instance::Claim::Busy(other) => {
-            if !cli.replace && !instance::ask_to_replace(&other) {
-                println!();
-                println!("  Keyhold is already running (pid {}). Nothing was changed.", other.pid);
-                println!();
+            let choice = match (cli.replace, cli.present) {
+                (true, _) => instance::Choice::Replace,
+                (_, true) => instance::Choice::Present,
+                _ => instance::ask(&other),
+            };
 
-                return Ok(());
+            match choice {
+                // Nothing to start: the vault is already open, and the process holding it is the
+                // one that can put it back in front of somebody.
+                instance::Choice::Present => {
+                    // Announced as well as printed: this branch is reached from a desktop dialog
+                    // more often than from a terminal, and a desktop launcher has no terminal for a
+                    // refusal to be read in.
+                    if let Err(error) = instance::present(&other) {
+                        instance::announce(&error.to_string());
+
+                        return Err(error);
+                    }
+
+                    println!();
+                    println!("  Keyhold is already running (pid {}). Brought it forward.", other.pid);
+                    println!();
+
+                    return Ok(());
+                }
+                instance::Choice::Nothing => {
+                    println!();
+                    println!("  Keyhold is already running (pid {}). Nothing was changed.", other.pid);
+                    println!();
+
+                    return Ok(());
+                }
+                instance::Choice::Replace => {}
             }
 
             instance::replace(&other)?;
+            took_over = true;
 
             match instance::claim()? {
                 instance::Claim::Held(held) => held,
@@ -154,6 +194,28 @@ async fn serve(cli: Cli) -> Result<()> {
 
     if !cli.no_browser {
         open_browser(&url);
+
+        // Only after a takeover, and only because of how one ends: somebody dismissed a dialog, and
+        // the tab that replaces the one they had lands in a browser window that may well be behind
+        // the dialog they were looking at. On a plain start they clicked the icon and are watching
+        // for exactly this, so saying it would be noise.
+        if took_over {
+            instance::announce("Comecei de novo. O cofre está trancado, na aba nova do navegador.");
+        }
+    }
+
+    // Another instance asking to be seen. It cannot open a browser on this process's behalf — it
+    // does not know the URL, and the URL is where the session token lives — so it asks, and this is
+    // the answer.
+    if let Some(mut signals) = show_yourself {
+        let url = url.clone();
+
+        tokio::spawn(async move {
+            while signals.recv().await.is_some() {
+                open_browser(&url);
+                instance::announce("O cofre já estava aberto. A janela está no seu navegador.");
+            }
+        });
     }
 
     let state = Arc::new(AppState {
@@ -188,7 +250,22 @@ async fn serve(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-/// Ctrl+C, or a `TERM` from another keyhold taking over.
+/// Listen for "show yourself" without letting it be fatal.
+///
+/// `USR1` terminates a process that has not asked for it, so this is registered before the marker
+/// that makes this process findable — and if registration fails the signal is simply never sent,
+/// because the sender only ever signals a pid the marker named.
+#[cfg(unix)]
+fn show_yourself_signal() -> Option<tokio::signal::unix::Signal> {
+    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1()).ok()
+}
+
+#[cfg(not(unix))]
+fn show_yourself_signal() -> Option<std::convert::Infallible> {
+    None
+}
+
+/// Ctrl+C, or a `TERM` from another Keyhold taking over.
 ///
 /// `TERM` is handled rather than left to the kernel for one reason: the default action kills the
 /// process where it stands, which skips wiping the key and skips releasing the claim. A takeover is

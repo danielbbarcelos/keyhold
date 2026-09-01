@@ -99,6 +99,7 @@ tab that was open.
 keyhold              # start the interface
 keyhold --port 7717  # bind a fixed port
 keyhold --no-browser # do not open a browser
+keyhold --present    # bring a running Keyhold forward (or start one)
 keyhold --replace    # close a running Keyhold without asking first
 keyhold where        # print where the vault and its directories live
 ```
@@ -110,9 +111,23 @@ agent socket has a fixed path, so the last one to start owns the integration whi
 keep an unlocked key in memory behind a window you may not be looking at.
 
 So a second start does not happen quietly. It finds the one already running and asks — in the
-terminal, or as a desktop dialog when it was launched from the shortcut — whether to close it.
-Saying no changes nothing. Saying yes closes the other one properly: that vault locks and its key is
-forgotten, which is exactly what closing a vault should mean.
+terminal, or as a desktop dialog when it was launched from the shortcut — and offers three answers:
+
+- **Open and continue** *(the default)* — the running Keyhold puts its own window back in your
+  browser. Nothing is closed, nothing is locked, and the vault you already unlocked is the one you
+  get. Clicking an icon twice is not a decision to close an open vault.
+- **Close it and start over** — the other one is asked to exit properly: that vault locks and its
+  key is forgotten, which is exactly what closing a vault should mean.
+- **Cancel** — nothing changes.
+
+Continuing works by signalling the running process, which then opens its own URL. The session token
+never leaves that process except into your browser, which is where it was always going. Just after
+an upgrade, the Keyhold still running is an older build that does not answer that signal — so it is
+not offered, and the dialog says why.
+
+Because a browser tab can open behind whatever window you are looking at — and on Wayland no
+program gets to force another one to the front — both of those answers also post a desktop
+notification saying where the vault went.
 
 **Instâncias** in the rail lists every Keyhold process running as you — the interface, any `keyhold
 mcp` bridge an assistant opened, any `keyhold run` still holding a secret — with what each one is
@@ -193,6 +208,9 @@ Because there is no terminal to print to, its output goes to a log instead:
 
 That log is where the URL and any startup error end up, which is the first place to look if the
 shortcut appears to do nothing.
+
+Right-clicking the icon skips the question and answers it directly: **Open and continue**, or
+**Close it and start over**.
 
 | File | What |
 |---|---|

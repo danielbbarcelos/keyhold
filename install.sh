@@ -149,7 +149,7 @@ if [ -z "\$BIN" ]; then
   exit 127
 fi
 
-exec "\$BIN" >>"\$STATE_DIR/app.log" 2>&1
+exec "\$BIN" "\$@" >>"\$STATE_DIR/app.log" 2>&1
 LAUNCHER
   chmod +x "$launcher"
 
@@ -167,6 +167,19 @@ Terminal=false
 Categories=$APP_CATEGORIES
 StartupNotify=true
 Keywords=$APP_KEYWORDS
+Actions=present;replace;
+
+# Right-clicking the icon skips the question a plain click asks. The two answers
+# are the two things somebody can mean by clicking it a second time.
+[Desktop Action present]
+Name=Open and continue
+Name[pt_BR]=Abrir e continuar
+Exec=$launcher --present
+
+[Desktop Action replace]
+Name=Close it and start over
+Name[pt_BR]=Encerrar e começar de novo
+Exec=$launcher --replace
 DESKTOP
   chmod 644 "$desktop_file"
 
