@@ -23,6 +23,17 @@ export function adoptTokenFromLocation(): void {
   }
 }
 
+/**
+ * Forget it.
+ *
+ * Called when the binary says the credential is not one of its own — most often a tab left open
+ * across a restart, or one whose instance was replaced by another. Keeping it would leave the
+ * interface asking a lock screen to fix something a master password cannot fix.
+ */
+export function disown(): void {
+  token = ''
+}
+
 export function hasToken(): boolean {
   return token.length > 0
 }

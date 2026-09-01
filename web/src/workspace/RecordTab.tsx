@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  Copy,
   ExternalLink,
   History,
   PanelRightClose,
@@ -45,10 +46,11 @@ interface RecordTabProps {
   record: OpenRecord
   folders: FolderNode[]
   onReload: (id: string) => Promise<void>
+  onClone: (id: string) => void
   onClosed: (id: string) => void
 }
 
-export function RecordTab({ record, folders, onReload, onClosed }: RecordTabProps) {
+export function RecordTab({ record, folders, onReload, onClone, onClosed }: RecordTabProps) {
   const [editing, setEditing] = useState(false)
   const [propertiesOpen, setPropertiesOpen] = useState(true)
   const [draft, setDraft] = useState(record.payload)
@@ -188,6 +190,11 @@ export function RecordTab({ record, folders, onReload, onClosed }: RecordTabProp
             <Button size="sm" onClick={() => setEditing(true)}>
               <Pencil />
               Editar
+            </Button>
+
+            <Button size="sm" variant="outline" onClick={() => onClone(record.id)}>
+              <Copy />
+              Clonar
             </Button>
 
             <Button

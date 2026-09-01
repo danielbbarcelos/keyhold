@@ -20,6 +20,8 @@ import { RecordEditor } from './RecordEditor'
  */
 interface RecordDialogProps {
   open: boolean
+  /** A copy of an existing record, rather than a blank one. */
+  cloning?: boolean
   kind: string
   payload: Payload
   onKindChange: (kind: string) => void
@@ -32,6 +34,7 @@ interface RecordDialogProps {
 
 export function RecordDialog({
   open,
+  cloning,
   kind,
   payload,
   onKindChange,
@@ -45,9 +48,11 @@ export function RecordDialog({
     <Dialog open={open} onOpenChange={(next) => !next && onCancel()}>
       <DialogContent className="max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-2xl">
         <DialogHeader className="border-b px-6 py-4">
-          <DialogTitle>Novo registro</DialogTitle>
+          <DialogTitle>{cloning ? 'Clonar registro' : 'Novo registro'}</DialogTitle>
           <DialogDescription>
-            O conteúdo é selado antes de tocar o disco. Só o título e o usuário voltam na lista.
+            {cloning
+              ? 'Uma cópia idêntica, para você ajustar antes de salvar. Ela nasce na mesma pasta do original — anexos não vêm junto.'
+              : 'O conteúdo é selado antes de tocar o disco. Só o título e o usuário voltam na lista.'}
           </DialogDescription>
         </DialogHeader>
 

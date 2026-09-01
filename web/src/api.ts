@@ -1,4 +1,4 @@
-import { authHeaders } from './session'
+import { authHeaders, disown } from './session'
 
 /**
  * Every call to the binary goes through here.
@@ -121,6 +121,12 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   const payload = text ? JSON.parse(text) : {}
 
   if (!response.ok) {
+    // Not a wrong password — those are a 401 too. This is the gate saying the token itself is not
+    // one of this process's, which no amount of typing will fix.
+    if (response.status === 401 && payload.session === 'invalid') {
+      disown()
+    }
+
     throw new ApiError(response.status, payload.error ?? `${path} answered ${response.status}`)
   }
 

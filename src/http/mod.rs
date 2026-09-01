@@ -765,7 +765,17 @@ async fn require_token(
 
     // No detail, no hint about which part was wrong, and the same answer whether the header was
     // missing or incorrect.
-    (StatusCode::UNAUTHORIZED, Json(json!({ "error": "unauthorised" }))).into_response()
+    //
+    // `session` is the one thing worth distinguishing, and it is about this tab rather than about
+    // the vault: a wrong master password is also a 401, and an interface that treated the two the
+    // same would throw somebody out of the lock screen for a typo. This says "the credential you
+    // are holding is not one of ours" — which, since a takeover became a normal thing to do, is
+    // what an old tab is holding after another instance took over.
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(json!({ "error": "unauthorised", "session": "invalid" })),
+    )
+        .into_response()
 }
 
 /// The one policy that matters, applied to every response.

@@ -24,8 +24,8 @@ export function App() {
     if (!hasToken()) {
       return (
         <Notice title="Esta janela não tem a credencial da sessão">
-          Abra o Keyhold pelo terminal ou pelo atalho. A credencial vive na URL e vale só enquanto o
-          programa estiver aberto.
+          Abra o Keyhold pelo terminal ou pelo atalho. A credencial vive na URL, vale só enquanto o
+          programa estiver aberto, e deixa de valer se outra instância assumir o cofre.
         </Notice>
       )
     }

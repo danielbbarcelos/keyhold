@@ -1257,3 +1257,25 @@ async fn the_instance_list_answers_without_a_key() {
     // Same as every other route: no token, no answer.
     assert_eq!(app.get_without_token("/api/instances").await.status, 401);
 }
+
+#[tokio::test]
+async fn a_stale_credential_is_told_apart_from_a_wrong_password() {
+    let app = start().await;
+
+    // The gate. This is the answer an old tab gets after another instance took over, and the
+    // interface uses it to stop holding a token that is not this process's.
+    let refused = app.get_without_token("/api/status").await;
+
+    assert_eq!(refused.status, 401);
+    assert_eq!(refused.json()["session"], "invalid");
+
+    // A wrong master password is a 401 as well, and must never carry that marker: throwing somebody
+    // out of the lock screen for a typo would be the worst possible reading of it.
+    app.post("/api/setup", serde_json::json!({ "password": "the master password" })).await;
+    app.post("/api/lock", serde_json::json!({})).await;
+
+    let wrong = app.post("/api/unlock", serde_json::json!({ "password": "not it" })).await;
+
+    assert_eq!(wrong.status, 401);
+    assert!(wrong.json()["session"].is_null(), "a typo is not a stale session: {}", wrong.body);
+}

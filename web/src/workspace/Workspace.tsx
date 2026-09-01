@@ -5,7 +5,6 @@ import {
   Folder,
   FolderPlus,
   Lock,
-  MoreHorizontal,
   Plus,
   Search,
   ScrollText,
@@ -28,13 +27,6 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -68,7 +60,8 @@ import { RecordDialog } from './RecordDialog'
 import { emptyPayload } from './RecordEditor'
 import { RecordTab } from './RecordTab'
 import { BulkBar } from './BulkBar'
-import { colourOf } from './colours'
+import { COLOURS, colourOf } from './colours'
+import { MenuButton, RowMenu, type MenuEntry } from './menu'
 import {
   DeleteFolderDialog,
   MoveFolderDialog,
@@ -124,7 +117,14 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   const [query, setQuery] = useState('')
   const [tabs, setTabs] = useState<OpenRecord[]>([])
   const [activeTab, setActiveTab] = useState<string | null>(null)
-  const [creating, setCreating] = useState<{ kind: string; payload: Payload } | null>(null)
+  // `folderId` is fixed when the dialog opens rather than read when it saves: a clone belongs
+  // wherever its original is, which is not necessarily the folder the list happens to be showing.
+  const [creating, setCreating] = useState<{
+    kind: string
+    payload: Payload
+    folderId: string | null
+    cloning?: boolean
+  } | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [asking, setAsking] = useState<
     { what: 'vault' } | { what: 'folder'; parentId: string | null } | null
@@ -267,7 +267,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
     }
 
     try {
-      const made = await api.createRecord(vaultId, creating.kind, folderId, creating.payload)
+      const made = await api.createRecord(vaultId, creating.kind, creating.folderId, creating.payload)
       setCreating(null)
       await refreshContents()
       await openRecord(made.record.id)
@@ -275,6 +275,112 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       setError(describe(cause))
     }
   }
+
+  /**
+   * A copy of a record, opened for editing before it exists.
+   *
+   * The whole record is fetched rather than copied from the row: the list carries a title and a
+   * username, and a clone that quietly dropped every other field would be worse than no clone. The
+   * copy starts identical — same kind, same fields in the same order, including the ones somebody
+   * added by hand — and lands in the original's folder, not in whatever the list is showing.
+   *
+   * Attachments are not copied. They are files, not fields, and duplicating them silently is not
+   * something to decide on somebody's behalf.
+   */
+  async function cloneRecord(id: string) {
+    try {
+      const opened = await api.openRecord(id)
+
+      setCreating({
+        kind: opened.record.kind,
+        payload: opened.record.payload,
+        folderId: opened.record.folder_id,
+        cloning: true,
+      })
+    } catch (cause) {
+      setError(describe(cause))
+    }
+  }
+
+  /**
+   * What can be done to a folder.
+   *
+   * Colour is a submenu here rather than only a field in the rename dialog. It was reachable that
+   * way and nobody found it: "renomear" does not read like "and also pick a colour", so the one
+   * thing people wanted to change about a folder was hidden behind the one thing they did not.
+   */
+  const folderEntries = (folder: FolderNode): MenuEntry[] => [
+    { kind: 'item', label: 'Renomear', onSelect: () => setFolderAction({ what: 'rename', folder }) },
+    {
+      kind: 'sub',
+      label: 'Cor',
+      items: COLOURS.map((colour) => ({
+        label: colour.label,
+        swatch: colour.dot,
+        onSelect: () =>
+          void api.renameFolder(folder.id, folder.name, colour.value).then(refreshContents),
+      })),
+    },
+    { kind: 'item', label: 'Mover', onSelect: () => setFolderAction({ what: 'move', folder }) },
+    {
+      kind: 'item',
+      label: 'Nova pasta dentro',
+      onSelect: () => setAsking({ what: 'folder', parentId: folder.id }),
+    },
+    { kind: 'separator' },
+    {
+      kind: 'item',
+      label: 'Excluir',
+      destructive: true,
+      onSelect: () => setFolderAction({ what: 'delete', folder }),
+    },
+  ]
+
+  /**
+   * What can be done to a record without opening it.
+   *
+   * Deliberately about the row it was opened on, never about the selection: the checkboxes have
+   * their own bar, and a right-click that quietly acts on nine other rows is how the wrong nine get
+   * moved. Deleting goes to the trash, which is why it does not stop to ask.
+   */
+  const recordEntries = (record: RecordPreview): MenuEntry[] => [
+    { kind: 'item', label: 'Abrir', onSelect: () => void openRecord(record.id) },
+    { kind: 'item', label: 'Clonar', onSelect: () => void cloneRecord(record.id) },
+    {
+      kind: 'item',
+      label: record.favourite ? 'Tirar dos favoritos' : 'Favoritar',
+      onSelect: () =>
+        void api.favouriteRecord(record.id, !record.favourite).then(refreshContents),
+    },
+    {
+      kind: 'sub',
+      label: 'Mover para',
+      items: [
+        {
+          label: 'Raiz do cofre',
+          onSelect: () => void api.moveRecord(record.id, null).then(refreshContents),
+        },
+        ...folders.map((folder) => ({
+          label: `${'— '.repeat(folder.depth)}${folder.name}`,
+          onSelect: () => void api.moveRecord(record.id, folder.id).then(refreshContents),
+        })),
+      ],
+    },
+    { kind: 'separator' },
+    {
+      kind: 'item',
+      label: 'Excluir',
+      destructive: true,
+      onSelect: () =>
+        void api.archiveRecord(record.id, true).then(() => {
+          // A record in the trash is not a record with a tab. Closing it here is the same thing the
+          // editor does when you delete from inside it.
+          setTabs((current) => current.filter((tab) => tab.id !== record.id))
+          setActiveTab((current) => (current === record.id ? null : current))
+          void refreshContents()
+        }),
+    },
+  ]
 
   const activeVault = vaults.find((vault) => vault.id === vaultId) ?? null
 
@@ -445,44 +551,8 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                         })
                       }
                     }}
-                    menu={
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label={`Ações da pasta ${folder.name}`}
-                          >
-                            <MoreHorizontal />
-                          </Button>
-                        </DropdownMenuTrigger>
-
-                        <DropdownMenuContent align="start">
-                          <DropdownMenuItem
-                            onSelect={() => setFolderAction({ what: 'rename', folder })}
-                          >
-                            Renomear
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => setFolderAction({ what: 'move', folder })}
-                          >
-                            Mover
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => setAsking({ what: 'folder', parentId: folder.id })}
-                          >
-                            Nova pasta dentro
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onSelect={() => setFolderAction({ what: 'delete', folder })}
-                          >
-                            Excluir
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    }
+                    entries={folderEntries(folder)}
+                    menuLabel={`Ações da pasta ${folder.name}`}
                   >
                     {folder.name}
                   </TreeRow>
@@ -533,7 +603,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                   size="sm"
                   disabled={!vaultId}
                   onClick={() => {
-                    setCreating({ kind: 'login', payload: emptyPayload('login') })
+                    setCreating({ kind: 'login', payload: emptyPayload('login'), folderId })
                     setActiveTab(null)
                   }}
                 >
@@ -586,6 +656,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
 
                     return (
                       <li key={record.id}>
+                        <RowMenu entries={recordEntries(record)}>
                         <div
                           draggable
                           onDragStart={(event) => {
@@ -653,7 +724,17 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                               )}
                             />
                           )}
+
+                          {/* The same actions as the right-click, as something to find. A gesture
+                              nobody is told about is a gesture nobody uses. */}
+                          <span className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 has-aria-expanded:opacity-100">
+                            <MenuButton
+                              entries={recordEntries(record)}
+                              label={`Ações de ${record.title}`}
+                            />
+                          </span>
                         </div>
+                        </RowMenu>
                       </li>
                     )
                   })}
@@ -718,6 +799,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                         )
                         await refreshContents()
                       }}
+                      onClone={(id) => void cloneRecord(id)}
                       onClosed={(id) => {
                         setTabs((current) => current.filter((tab) => tab.id !== id))
                         setActiveTab(null)
@@ -768,6 +850,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       {creating && (
         <RecordDialog
           open
+          cloning={creating.cloning}
           kind={creating.kind}
           payload={creating.payload}
           // Functional updates, and not for style: choosing a kind sets the kind *and* replaces the
@@ -950,7 +1033,8 @@ function TreeRow({
   onDragOver,
   onDragLeave,
   onDrop,
-  menu,
+  entries,
+  menuLabel,
   children,
 }: {
   depth?: number
@@ -961,10 +1045,11 @@ function TreeRow({
   onDragOver?: (event: React.DragEvent) => void
   onDragLeave?: () => void
   onDrop?: (event: React.DragEvent) => void
-  menu?: React.ReactNode
+  entries?: MenuEntry[]
+  menuLabel?: string
   children: React.ReactNode
 }) {
-  return (
+  const row = (
     <div
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -991,13 +1076,15 @@ function TreeRow({
 
       {/* The menu appears on hover and stays put once opened, so it never moves out from under a
           pointer that is already on its way to it. */}
-      {menu && (
+      {entries && (
         <span className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 has-aria-expanded:opacity-100">
-          {menu}
+          <MenuButton entries={entries} label={menuLabel ?? 'Ações'} />
         </span>
       )}
     </div>
   )
+
+  return entries ? <RowMenu entries={entries}>{row}</RowMenu> : row
 }
 
 function titleFor(lens: Lens): string {
