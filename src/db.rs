@@ -19,7 +19,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 
 /// The schema this binary understands. A file claiming more than this is not opened.
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 pub struct Store {
     conn: Connection,
@@ -297,6 +297,34 @@ impl Store {
                  CREATE INDEX attachments_by_record ON attachments (record_id);
 
                  UPDATE meta SET value = '7' WHERE key = 'schema_version';
+                 COMMIT;",
+            )?;
+        }
+
+        // F7+: standing permissions for the agent.
+        //
+        // These used to live in memory and die with the process, which was the honest default while
+        // the only window on offer was five minutes. It is the wrong default for the way this is
+        // actually used: an assistant that has to be re-approved every few minutes is one somebody
+        // stops using, and a permission nobody grants protects nothing.
+        //
+        // `record_id` is in the clear so that deleting a record takes its permissions with it — ids
+        // are already outside the seal everywhere else. The field's label is not: labels live inside
+        // a record's sealed payload, and a table listing "Senha" next to a record id would put back
+        // what that seal took away. So the label and the window go in one sealed blob.
+        if found < 8 {
+            self.conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE agent_grants (
+                     id         TEXT PRIMARY KEY,
+                     record_id  TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,
+                     sealed     BLOB NOT NULL,
+                     created_at TEXT NOT NULL
+                 ) STRICT;
+
+                 CREATE INDEX agent_grants_by_record ON agent_grants (record_id);
+
+                 UPDATE meta SET value = '8' WHERE key = 'schema_version';
                  COMMIT;",
             )?;
         }

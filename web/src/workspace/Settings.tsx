@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Bell,
   BellOff,
@@ -40,7 +40,14 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
-import { api, ApiError, type LockPolicy, type Status, type VaultSummary } from '../api'
+import {
+  api,
+  ApiError,
+  type AgentGrant,
+  type LockPolicy,
+  type Status,
+  type VaultSummary,
+} from '../api'
 import { askToNotify, notifyState, type NotifyState } from '../notify'
 import { TransferPanel } from './TransferPanel'
 import { VaultsPanel } from './VaultsPanel'
@@ -574,6 +581,103 @@ function DesktopKnock() {
 }
 
 /**
+ * What the agent may take without being asked again.
+ *
+ * A standing permission is a decision to stop being asked, so the screen that offers it also has to
+ * be the screen that shows what was agreed and takes it back. Each row says what it covers — one
+ * field of one record, never more — and when it ends.
+ */
+function StandingGrants({ onChanged }: { onChanged: () => void }) {
+  const [grants, setGrants] = useState<AgentGrant[] | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      setGrants((await api.agentGrants()).grants)
+    } catch {
+      setGrants([])
+    }
+  }, [])
+
+  // Permissions are granted from a dialog that can open over this screen, so the list is refreshed
+  // rather than fetched once: a "revoke" button next to a stale list revokes the wrong thing.
+  useEffect(() => {
+    void load()
+    const timer = window.setInterval(() => void load(), 5000)
+
+    return () => window.clearInterval(timer)
+  }, [load])
+
+  const revoke = async (id?: string) => {
+    await (id ? api.revokeAgentGrant(id) : api.revokeAgentGrants())
+    await load()
+    onChanged()
+  }
+
+  if (!grants || grants.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="space-y-3 border-t pt-4">
+      <div className="flex items-center justify-between gap-4">
+        <Label>Permissões valendo</Label>
+        <Button variant="outline" size="sm" onClick={() => void revoke()}>
+          Revogar todas
+        </Button>
+      </div>
+
+      <p className="text-sm text-muted-foreground">
+        Enquanto uma destas estiver de pé, o pedido correspondente não abre nenhuma pergunta. O uso
+        continua indo para a trilha.
+      </p>
+
+      <ul className="space-y-1">
+        {grants.map((grant) => (
+          <li
+            key={grant.id}
+            className="flex items-center justify-between gap-3 rounded-lg border p-3"
+          >
+            <div className="min-w-0 space-y-0.5">
+              <p className="truncate text-sm">
+                <span className="text-foreground">{grant.field}</span>
+                <span className="text-muted-foreground"> de </span>
+                <span className="text-foreground">{grant.record_title || grant.record_id}</span>
+              </p>
+              <p className="text-xs text-muted-foreground">{untilWhen(grant)}</p>
+            </div>
+
+            <Button variant="ghost" size="sm" onClick={() => void revoke(grant.id)}>
+              Revogar
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function untilWhen(grant: AgentGrant): string {
+  if (grant.scope.kind === 'always') {
+    return 'Sem prazo — só acaba quando você revogar'
+  }
+
+  if (grant.scope.kind === 'while-running') {
+    return `Enquanto ${grant.scope.process} (PID ${grant.scope.pid}) estiver aberto`
+  }
+
+  const at = new Date(grant.scope.at * 1000)
+  const left = Math.max(0, grant.scope.at - Math.floor(Date.now() / 1000))
+  const remaining =
+    left >= 86400
+      ? `${Math.floor(left / 86400)} d`
+      : left >= 3600
+        ? `${Math.floor(left / 3600)} h`
+        : `${Math.max(1, Math.floor(left / 60))} min`
+
+  return `Até ${at.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} — faltam ${remaining}`
+}
+
+/**
  * The agent surface: which vaults it may see, and whether the door is open at all.
  *
  * Two switches on purpose. Marking a vault says what *could* be reached; opening the socket says
@@ -696,6 +800,8 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
             ))}
         </div>
 
+        <StandingGrants onChanged={refresh} />
+
         {surface && (
           <div className="space-y-2 border-t pt-4">
             <Label>Ligar o Claude Code a este cofre</Label>
@@ -721,20 +827,7 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
               </Button>
             </div>
 
-            {surface.active_grants > 0 && (
-              <div className="flex items-center justify-between gap-4 pt-2">
-                <span className="text-sm text-muted-foreground">
-                  {surface.active_grants} permissão(ões) ainda valendo
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void api.revokeAgentGrants().then(refresh)}
-                >
-                  Revogar todas
-                </Button>
-              </div>
-            )}
+
           </div>
         )}
       </CardContent>

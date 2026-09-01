@@ -85,7 +85,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/agent", post(set_agent_surface))
         .route("/agent/requests", get(agent_requests))
         .route("/agent/requests/:id", post(answer_agent_request))
+        .route("/agent/grants", get(agent_grants))
         .route("/agent/grants", delete(revoke_agent_grants))
+        .route("/agent/grants/:id", delete(revoke_agent_grant))
         .route("/agent/reveal", put(set_agent_may_reveal))
         .route("/instances", get(instances))
         .route("/instances/:pid/close", post(close_instance))
@@ -447,7 +449,10 @@ async fn agent_status(State(state): State<Arc<AppState>>) -> Answer {
         "exposed_vaults": exposed,
         "may_reveal": settings::agent_may_reveal(&store),
         "can_copy": crate::clipboard::available(),
-        "active_grants": state.agent.active_grants(),
+        "active_grants": state
+            .lock
+            .with_key(|key| crate::grants::count(&store, key))
+            .unwrap_or(0),
         "command": format!(
             "claude mcp add keyhold --scope user -- {} mcp",
             std::env::current_exe()
@@ -478,7 +483,11 @@ async fn set_agent_surface(
         crate::agent::listen(state.clone()).map_err(bad_request)?;
     } else {
         crate::agent::stop();
-        state.agent.revoke_all();
+
+        // Questions in flight have nobody left to answer them. Standing permissions are not
+        // touched: closing the door is not the same as withdrawing what was already agreed, and
+        // silently forgetting them would be a surprise the next time it opens.
+        state.agent.forget_pending();
     }
 
     // Remembered, so an agent configured once keeps working after keyhold is closed and opened
@@ -501,28 +510,111 @@ async fn agent_requests(State(state): State<Arc<AppState>>) -> Answer {
         return Ok(Json(json!({ "requests": [] })));
     }
 
+    let standing = {
+        let store = state.store.lock().unwrap();
+
+        state.lock.with_key(|key| crate::grants::count(&store, key)).unwrap_or(0)
+    };
+
     Ok(Json(json!({
         "requests": state.agent.waiting(),
-        "active_grants": state.agent.active_grants(),
+        "active_grants": standing,
     })))
 }
 
 #[derive(Deserialize)]
 struct Answered {
     allowed: bool,
-    /// Zero means "just this once".
+    /// How long the yes lasts. Absent means "just this once".
     #[serde(default)]
-    minutes: u64,
+    window: Option<Window>,
 }
 
+/// The windows the dialog offers, as they arrive on the wire.
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+enum Window {
+    Once,
+    /// While the process that asked is still running.
+    Process,
+    Minutes { minutes: u64 },
+    Always,
+}
+
+/// The interface answering one question, and saying how long the answer is good for.
+///
+/// A window other than `once` becomes a row in the vault. That is a decision about the vault rather
+/// than about this request, which is why it is written here — with the key, under the lock, in the
+/// trail — instead of being kept in the agent's memory the way a five-minute grant used to be.
 async fn answer_agent_request(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<Answered>,
 ) -> Answer {
-    state.agent.answer(&id, body.allowed, body.minutes.min(60));
+    let asked = state.agent.answer(&id, body.allowed);
 
-    Ok(Json(json!({ "answered": true })))
+    let (Some(asked), true) = (asked, body.allowed) else {
+        return Ok(Json(json!({ "answered": true })));
+    };
+
+    let scope = match body.window {
+        None | Some(Window::Once) => return Ok(Json(json!({ "answered": true }))),
+        Some(Window::Always) => crate::grants::Scope::Always,
+        Some(Window::Minutes { minutes }) => crate::grants::Scope::Until {
+            at: crate::identity::now_seconds() + minutes.clamp(1, 60 * 24 * 30) * 60,
+        },
+        Some(Window::Process) => {
+            // The assistant rather than the bridge it speaks through: restarting the bridge is not
+            // the assistant going away. Its start time goes in too, because pids are reused.
+            let pid = asked.peer.parent_pid.unwrap_or(asked.peer.pid);
+
+            match crate::grants::started_at(pid) {
+                Some(since) => crate::grants::Scope::WhileRunning {
+                    pid,
+                    since,
+                    process: asked.peer.parent.clone().unwrap_or_else(|| asked.peer.process.clone()),
+                },
+                None => return Err(bad_request("esse processo já não está mais rodando")),
+            }
+        }
+    };
+
+    let store = state.store.lock().unwrap();
+
+    let written = state.lock.with_key(|key| {
+        crate::grants::grant(&store, key, &asked.record_id, &asked.field, scope.clone())
+    });
+
+    match written {
+        None => Err(locked()),
+        Some(Err(error)) => Err(bad_request(error)),
+        Some(Ok(_)) => {
+            let _ = audit::record(
+                &store,
+                audit::Actor::You,
+                audit::action::AGENT_GRANTED,
+                None,
+                audit::Outcome::Allowed,
+                Detail::new()
+                    .with("field", asked.field.as_str())
+                    .with("window", describe_window(&scope).as_str()),
+            );
+
+            Ok(Json(json!({ "answered": true })))
+        }
+    }
+}
+
+/// What a window says in the trail. Never a value, never a record title — the trail names the
+/// record by id, and the field label is the same one the dialog showed.
+fn describe_window(scope: &crate::grants::Scope) -> String {
+    match scope {
+        crate::grants::Scope::Always => "sempre".into(),
+        crate::grants::Scope::Until { at } => format!("até {at}"),
+        crate::grants::Scope::WhileRunning { pid, process, .. } => {
+            format!("enquanto {process} ({pid}) estiver aberto")
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -552,8 +644,66 @@ async fn set_agent_may_reveal(
     Ok(Json(json!({ "may_reveal": saved })))
 }
 
+/// Everything standing right now, with what each covers and when it ends.
+async fn agent_grants(State(state): State<Arc<AppState>>) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    let standing = state
+        .lock
+        .with_key(|key| crate::grants::list(&store, key))
+        .ok_or_else(locked)?
+        .map_err(bad_request)?;
+
+    Ok(Json(json!({ "grants": standing })))
+}
+
+/// Withdraw one.
+async fn revoke_agent_grant(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    if state.lock.with_key(|_| ()).is_none() {
+        return Err(locked());
+    }
+
+    crate::grants::revoke(&store, &id).map_err(bad_request)?;
+
+    let _ = audit::record(
+        &store,
+        audit::Actor::You,
+        audit::action::AGENT_GRANT_REVOKED,
+        None,
+        audit::Outcome::Allowed,
+        Detail::new(),
+    );
+
+    Ok(Json(json!({ "revoked": true })))
+}
+
+/// Withdraw all of them, and drop any question still waiting.
 async fn revoke_agent_grants(State(state): State<Arc<AppState>>) -> Answer {
-    state.agent.revoke_all();
+    state.agent.forget_pending();
+
+    let store = state.store.lock().unwrap();
+
+    if state.lock.with_key(|_| ()).is_none() {
+        return Err(locked());
+    }
+
+    let gone = crate::grants::revoke_all(&store).map_err(bad_request)?;
+
+    if gone > 0 {
+        let _ = audit::record(
+            &store,
+            audit::Actor::You,
+            audit::action::AGENT_GRANT_REVOKED,
+            None,
+            audit::Outcome::Allowed,
+            Detail::new().with("revoked", gone as i64),
+        );
+    }
 
     Ok(Json(json!({ "active_grants": 0 })))
 }

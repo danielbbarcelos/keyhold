@@ -35,6 +35,8 @@ const LABELS: Record<string, string> = {
   'secret.revealed': 'Segredo revelado',
   'secret.copied': 'Segredo copiado',
   'instance.closed': 'Instância encerrada',
+  'agent.granted': 'Permissão dada a um agente',
+  'agent.grant.revoked': 'Permissão de agente revogada',
   'identity.protection.changed': 'Proteção do cofre alterada',
   'identity.second-factor.changed': 'Segundo fator alterado',
 }

@@ -1279,3 +1279,17 @@ async fn a_stale_credential_is_told_apart_from_a_wrong_password() {
     assert_eq!(wrong.status, 401);
     assert!(wrong.json()["session"].is_null(), "a typo is not a stale session: {}", wrong.body);
 }
+
+#[tokio::test]
+async fn standing_permissions_need_the_vault_open() {
+    let app = start().await;
+
+    assert_eq!(app.get("/api/agent/grants").await.status, 423);
+
+    with_one_vault(&app).await;
+
+    let listed = app.get("/api/agent/grants").await;
+
+    assert_eq!(listed.status, 200);
+    assert_eq!(listed.json()["grants"].as_array().unwrap().len(), 0);
+}

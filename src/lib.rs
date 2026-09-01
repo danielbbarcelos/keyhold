@@ -20,6 +20,7 @@ pub mod crypto;
 pub mod db;
 pub mod encoding;
 pub mod generator;
+pub mod grants;
 pub mod health;
 pub mod http;
 pub mod identity;

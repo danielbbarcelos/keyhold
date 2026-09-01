@@ -186,8 +186,20 @@ assistant only that it worked.
 password cannot end up in a chat transcript at all. You can switch it on in the settings for the
 cases where nothing else fits, and the interface says plainly what that costs.
 
-Every request of any kind still stops and asks you, naming the process that asked, answerable once
-or for a few minutes.
+Every request of any kind still stops and asks you, naming the process that asked — and the same
+dialog says how long that yes should last. **Just this once**, **while that assistant is open**, a
+fixed window from 15 minutes to 30 days, or **for good**.
+
+The middle one is usually what somebody means. It ends when the assistant's process does, and a new
+process that inherits its pid inherits nothing else — the process's start time is recorded with it
+and checked on every use.
+
+A permission covers **one field of one record**, never a record, a vault, or "whatever that process
+asks for next": the question named a field, and the answer does not quietly mean more than the
+question did. Anything longer than "just this once" is written into the vault, sealed, so it
+survives a restart — and is listed in **Ajustes → Acesso por agente** with what it covers, when it
+ends, and a button to take it back. Every *use* still goes into the trail; the permission removes
+the question, never the record of what was taken.
 
 A request expires by itself after 90 seconds, and the person driving an assistant is usually looking
 at a terminal rather than at the vault. So the question also knocks on your desktop as a system

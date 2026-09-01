@@ -11,7 +11,15 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 
-import { api, type AgentRequest } from '../api'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+
+import { api, type AgentRequest, type GrantWindow } from '../api'
 import { knock } from '../notify'
 
 /**
@@ -29,8 +37,35 @@ import { knock } from '../notify'
  * at a terminal rather than at this window, and ninety seconds of not noticing is a request that
  * expires for no reason. The knock carries no secret — see `notify.ts`.
  */
+/**
+ * How long a yes lasts.
+ *
+ * Five minutes used to be the only answer, and it was the wrong one: an assistant that has to be
+ * re-approved every few minutes is one somebody turns off, and a permission nobody is willing to
+ * grant protects nothing. The list runs from "just this once" to "for good", and the two ends are
+ * genuinely different decisions rather than the same one at different lengths.
+ *
+ * `process` is the one worth reaching for. It ends when the assistant does, which is the window
+ * somebody actually means when they say "stop asking me during this session".
+ */
+const WINDOWS: Array<{ value: string; label: string; window: GrantWindow }> = [
+  { value: 'once', label: 'Só desta vez', window: { kind: 'once' } },
+  { value: '15', label: '15 minutos', window: { kind: 'minutes', minutes: 15 } },
+  { value: '30', label: '30 minutos', window: { kind: 'minutes', minutes: 30 } },
+  { value: '60', label: '1 hora', window: { kind: 'minutes', minutes: 60 } },
+  { value: '120', label: '2 horas', window: { kind: 'minutes', minutes: 120 } },
+  { value: '240', label: '4 horas', window: { kind: 'minutes', minutes: 240 } },
+  { value: '480', label: '8 horas', window: { kind: 'minutes', minutes: 480 } },
+  { value: '720', label: '12 horas', window: { kind: 'minutes', minutes: 720 } },
+  { value: '1440', label: '24 horas', window: { kind: 'minutes', minutes: 1440 } },
+  { value: '10080', label: '7 dias', window: { kind: 'minutes', minutes: 10080 } },
+  { value: '43200', label: '30 dias', window: { kind: 'minutes', minutes: 43200 } },
+  { value: 'always', label: 'Para sempre', window: { kind: 'always' } },
+]
+
 export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
   const [request, setRequest] = useState<AgentRequest | null>(null)
+  const [window_, setWindow] = useState('once')
 
   // The knock currently on the desktop, and the request it belongs to. Both are refs rather than
   // state: they are bookkeeping for something outside React, and changing them must not re-render.
@@ -91,8 +126,13 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
     return null
   }
 
-  const answer = (allowed: boolean, minutes = 0) =>
-    void api.answerAgentRequest(request.id, allowed, minutes).then(() => {
+  const chosen =
+    window_ === 'process'
+      ? ({ kind: 'process' } as GrantWindow)
+      : (WINDOWS.find((one) => one.value === window_)?.window ?? { kind: 'once' })
+
+  const answer = (allowed: boolean) =>
+    void api.answerAgentRequest(request.id, allowed, allowed ? chosen : { kind: 'once' }).then(() => {
       // Take the knock back at once rather than a poll later: the question is settled, and a
       // notification for a settled question is a second chance to answer something twice.
       showing.current?.close()
@@ -142,6 +182,34 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
                   : request.peer.process}{' '}
                 · PID {request.peer.pid}
               </p>
+
+              <div className="space-y-1.5 border-t pt-3">
+                <span className="text-foreground">Não perguntar de novo por</span>
+                <Select value={window_} onValueChange={setWindow}>
+                  <SelectTrigger className="w-full" aria-label="Por quanto tempo">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="once">Só desta vez</SelectItem>
+
+                    {request.peer.parent_pid !== null && (
+                      <SelectItem value="process">
+                        Enquanto {request.peer.parent ?? request.peer.process} estiver aberto
+                      </SelectItem>
+                    )}
+
+                    {WINDOWS.filter((one) => one.value !== 'once').map((one) => (
+                      <SelectItem key={one.value} value={one.value}>
+                        {one.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <span className="block text-xs">
+                  {describeWindow(window_, request)}
+                </span>
+              </div>
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -150,12 +218,26 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
           <Button variant="ghost" onClick={() => answer(false)}>
             Negar
           </Button>
-          <Button variant="outline" onClick={() => answer(true, 5)}>
-            Permitir por 5 min
-          </Button>
-          <Button onClick={() => answer(true, 0)}>Permitir uma vez</Button>
+          <Button onClick={() => answer(true)}>Permitir</Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
   )
+}
+
+/** What the chosen window actually costs, said before it is chosen rather than after. */
+function describeWindow(value: string, request: AgentRequest): string {
+  if (value === 'once') {
+    return 'O próximo pedido deste campo pergunta de novo.'
+  }
+
+  if (value === 'process') {
+    return `Vale só enquanto esse processo viver. Fechou, acabou — e um processo novo com o mesmo PID não herda nada.`
+  }
+
+  if (value === 'always') {
+    return `Fica valendo até você revogar em Ajustes → Acesso por agente. Vale para "${request.field}" deste registro, e só.`
+  }
+
+  return `Vale para "${request.field}" deste registro, e para nenhum outro campo. Dá para revogar antes em Ajustes.`
 }

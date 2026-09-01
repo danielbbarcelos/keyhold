@@ -95,6 +95,8 @@ pub mod action {
     pub const EXPORTED: &str = "vault.exported";
     pub const IMPORTED: &str = "vault.imported";
     pub const INSTANCE_CLOSED: &str = "instance.closed";
+    pub const AGENT_GRANTED: &str = "agent.granted";
+    pub const AGENT_GRANT_REVOKED: &str = "agent.grant.revoked";
     pub const PROTECTION_CHANGED: &str = "identity.protection.changed";
     pub const SECOND_FACTOR_CHANGED: &str = "identity.second-factor.changed";
 }

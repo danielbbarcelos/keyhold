@@ -17,7 +17,10 @@
 //!    default. What is not marked is not listed — there is nothing for the agent to ask about,
 //!    rather than something for it to be refused.
 //! 2. **Approval per request.** Every value handed over is a question answered in the interface,
-//!    naming the process and the PID that asked. A grant can be for once, or for a few minutes.
+//!    naming the process and the PID that asked. The yes carries a window — once, while that
+//!    process lives, a fixed span, or no end — and covers one field of one record. See
+//!    [`crate::grants`] for why those windows can outlive this process, and what keeps that from
+//!    being a decision made once and forgotten.
 //! 3. **A locked vault is a dead integration.** Nothing works locked, and the socket never accepts
 //!    a master password — unlocking happens in the interface, by hand.
 //! 4. **The trail records the agent as its own actor**, including refusals.
@@ -65,20 +68,15 @@ pub struct PendingRequest {
     pub asked_at: u64,
 }
 
-/// A yes that outlives the question that prompted it.
-#[derive(Clone, Debug)]
-struct Grant {
-    record_id: String,
-    field: String,
-    until: u64,
-}
-
-/// Everything the agent surface keeps in memory. Nothing here survives a restart, by design.
+/// The questions in flight, and the answers to them. Only that.
+///
+/// A yes that outlives the question is not here — it is a row in the vault, sealed, listed and
+/// revocable. See [`crate::grants`]. This holds what cannot outlive the process anyway: a question
+/// nobody has answered yet, and an answer nobody has collected yet.
 #[derive(Default)]
 pub struct AgentState {
     pending: Mutex<Vec<PendingRequest>>,
     answers: Mutex<HashMap<String, bool>>,
-    grants: Mutex<Vec<Grant>>,
 }
 
 impl AgentState {
@@ -86,11 +84,9 @@ impl AgentState {
         self.pending.lock().unwrap().clone()
     }
 
-    /// The interface answering one question.
-    ///
-    /// `minutes` of zero means "just this once": the grant is not recorded, so the next request for
-    /// the same field asks again.
-    pub fn answer(&self, id: &str, allowed: bool, minutes: u64) {
+    /// The interface answering one question. Returns what was asked, so the caller can turn a yes
+    /// into a standing permission — which is a decision about the vault, and so belongs in it.
+    pub fn answer(&self, id: &str, allowed: bool) -> Option<PendingRequest> {
         let asked = {
             let mut pending = self.pending.lock().unwrap();
             let at = pending.iter().position(|one| one.id == id);
@@ -100,37 +96,12 @@ impl AgentState {
 
         self.answers.lock().unwrap().insert(id.to_string(), allowed);
 
-        if let (Some(asked), true) = (asked, allowed && minutes > 0) {
-            self.grants.lock().unwrap().push(Grant {
-                record_id: asked.record_id,
-                field: asked.field,
-                until: now_seconds() + minutes * 60,
-            });
-        }
+        asked
     }
 
-    fn granted(&self, record_id: &str, field: &str) -> bool {
-        let now = now_seconds();
-        let mut grants = self.grants.lock().unwrap();
-
-        grants.retain(|grant| grant.until > now);
-
-        grants
-            .iter()
-            .any(|grant| grant.record_id == record_id && grant.field == field)
-    }
-
-    pub fn active_grants(&self) -> usize {
-        let now = now_seconds();
-        let mut grants = self.grants.lock().unwrap();
-
-        grants.retain(|grant| grant.until > now);
-        grants.len()
-    }
-
-    /// Drop every standing grant. The interface's "revoke everything".
-    pub fn revoke_all(&self) {
-        self.grants.lock().unwrap().clear();
+    /// Drop every question still waiting. Standing permissions are revoked separately, in the
+    /// vault, because that is where they live.
+    pub fn forget_pending(&self) {
         self.pending.lock().unwrap().clear();
     }
 }
@@ -221,18 +192,17 @@ fn peer_of(stream: &UnixStream) -> Peer {
 
     // Field 4 of /proc/<pid>/stat is the parent's pid. The comm field before it can contain spaces
     // and parentheses, so the parse starts after its closing one.
-    let parent = std::fs::read_to_string(format!("/proc/{pid}/stat"))
-        .ok()
-        .and_then(|stat| {
-            let after = stat.rfind(')')?;
-            stat[after + 1..].split_whitespace().nth(1)?.parse::<i64>().ok()
-        })
-        .and_then(name_of);
+    let parent_pid = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|stat| {
+        let after = stat.rfind(')')?;
+
+        stat[after + 1..].split_whitespace().nth(1)?.parse::<i64>().ok()
+    });
 
     Peer {
         pid,
         process: name_of(pid).unwrap_or_else(|| "desconhecido".into()),
-        parent,
+        parent: parent_pid.and_then(name_of),
+        parent_pid,
     }
 }
 
@@ -292,6 +262,7 @@ pub async fn handle_for_tests(request: Request, state: &Arc<AppState>) -> Respon
             pid: std::process::id() as i64,
             process: "teste".into(),
             parent: None,
+            parent_pid: None,
         },
     )
     .await
@@ -534,7 +505,18 @@ async fn approved(
         return Err(Response::refused("esse registro não está ao alcance de um agente"));
     }
 
-    if state.agent.granted(record_id, field) {
+    // A standing permission answers before anybody is asked. Read fresh every time rather than
+    // cached: revoking one has to take effect at once, and the clock moves.
+    let standing = {
+        let store = state.store.lock().unwrap();
+
+        state
+            .lock
+            .with_key(|key| crate::grants::allows(&store, key, record_id, field))
+            .unwrap_or(false)
+    };
+
+    if standing {
         return Ok(());
     }
 

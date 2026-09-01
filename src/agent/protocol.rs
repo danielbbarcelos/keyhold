@@ -87,6 +87,10 @@ pub struct Peer {
     pub process: String,
     /// What launched it: `claude`, or whatever else is driving. This is the name worth showing.
     pub parent: Option<String>,
+    /// And its pid. A permission granted "while this is open" binds here rather than to the
+    /// translator: the bridge is a detail of how the assistant talks, and restarting it is not the
+    /// assistant going away.
+    pub parent_pid: Option<i64>,
 }
 
 impl Peer {

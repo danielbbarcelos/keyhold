@@ -94,6 +94,33 @@ impl Fixture {
     async fn ask(&self, request: Request) -> Response {
         keyhold::agent::handle_for_tests(request, &self.state).await
     }
+
+    /// Write a standing permission the way answering the dialog with a window does.
+    ///
+    /// The HTTP handler is what turns a yes into one of these, so a test of the agent surface has
+    /// to do it by hand — and doing it through the same module keeps the two honest about what a
+    /// permission actually is.
+    fn grant(&self, field: &str, scope: keyhold::grants::Scope) {
+        let store = self.state.store.lock().unwrap();
+
+        self.state
+            .lock
+            .with_key(|key| keyhold::grants::grant(&store, key, &self.record, field, scope))
+            .unwrap()
+            .unwrap();
+    }
+
+    fn standing(&self) -> usize {
+        let store = self.state.store.lock().unwrap();
+
+        self.state.lock.with_key(|key| keyhold::grants::count(&store, key)).unwrap()
+    }
+
+    fn revoke_everything(&self) {
+        let store = self.state.store.lock().unwrap();
+
+        keyhold::grants::revoke_all(&store).unwrap();
+    }
 }
 
 #[tokio::test]
@@ -209,7 +236,7 @@ async fn a_value_is_only_handed_over_after_somebody_says_yes() {
     assert_eq!(waiting[0].record_title, "Produção");
     assert_eq!(waiting[0].intent, "get");
 
-    app.state.agent.answer(&waiting[0].id, true, 0);
+    app.state.agent.answer(&waiting[0].id, true);
 
     match asking.await.unwrap() {
         Response::Value { value } => assert_eq!(value, "hunter2"),
@@ -246,7 +273,7 @@ async fn a_refusal_is_a_refusal() {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     };
 
-    app.state.agent.answer(&waiting[0].id, false, 0);
+    app.state.agent.answer(&waiting[0].id, false);
 
     match asking.await.unwrap() {
         Response::Refused { .. } => {}
@@ -284,9 +311,21 @@ async fn ask_and_answer(app: &Fixture, field: &str, allowed: bool, minutes: u64)
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     };
 
-    app.state.agent.answer(&waiting[0].id, allowed, minutes);
+    app.state.agent.answer(&waiting[0].id, allowed);
 
-    asking.await.unwrap()
+    let answered = asking.await.unwrap();
+
+    // What the interface does after a yes with a window on it.
+    if allowed && minutes > 0 {
+        app.grant(
+            field,
+            keyhold::grants::Scope::Until {
+                at: keyhold::identity::now_seconds() + minutes * 60,
+            },
+        );
+    }
+
+    answered
 }
 
 #[tokio::test]
@@ -329,7 +368,7 @@ async fn a_grant_covers_the_next_request_for_the_same_field_and_nothing_else() {
 
     assert_eq!(waiting[0].field, "username", "a grant for one field covered another");
 
-    app.state.agent.answer(&waiting[0].id, false, 0);
+    app.state.agent.answer(&waiting[0].id, false);
     other.await.unwrap();
 }
 
@@ -340,10 +379,10 @@ async fn revoking_takes_every_standing_yes_away() {
     app.allow_reveal();
 
     ask_and_answer(&app, "Senha", true, 5).await;
-    assert_eq!(app.state.agent.active_grants(), 1);
+    assert_eq!(app.standing(), 1);
 
-    app.state.agent.revoke_all();
-    assert_eq!(app.state.agent.active_grants(), 0);
+    app.revoke_everything();
+    assert_eq!(app.standing(), 0);
 
     // And the next request asks again.
     let state = app.state.clone();
@@ -361,7 +400,7 @@ async fn revoking_takes_every_standing_yes_away() {
         let waiting = app.state.agent.waiting();
 
         if !waiting.is_empty() {
-            app.state.agent.answer(&waiting[0].id, false, 0);
+            app.state.agent.answer(&waiting[0].id, false);
             break;
         }
 
@@ -412,7 +451,7 @@ async fn run_returns_the_output_and_never_the_secret() {
     };
 
     assert_eq!(waiting[0].intent, "run");
-    app.state.agent.answer(&waiting[0].id, true, 0);
+    app.state.agent.answer(&waiting[0].id, true);
 
     match asking.await.unwrap() {
         Response::Ran { code, stdout, .. } => {
@@ -496,7 +535,7 @@ async fn switching_reading_on_lets_a_value_through_the_usual_approval() {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     };
 
-    app.state.agent.answer(&waiting[0].id, true, 0);
+    app.state.agent.answer(&waiting[0].id, true);
 
     match asking.await.unwrap() {
         Response::Value { value } => assert_eq!(value, "hunter2"),

@@ -40,7 +40,7 @@ export interface Status {
 
 export interface AgentRequest {
   id: string
-  peer: { pid: number; process: string; parent: string | null }
+  peer: { pid: number; process: string; parent: string | null; parent_pid: number | null }
   record_id: string
   record_title: string
   field: string
@@ -48,6 +48,29 @@ export interface AgentRequest {
   intent: string
   asked_at: number
 }
+
+/** How long a standing permission lasts. */
+export type GrantScope =
+  | { kind: 'until'; at: number }
+  | { kind: 'while-running'; pid: number; since: number; process: string }
+  | { kind: 'always' }
+
+/** A permission the agent may use without asking again. */
+export interface AgentGrant {
+  id: string
+  record_id: string
+  record_title: string
+  field: string
+  scope: GrantScope
+  created_at: string
+}
+
+/** What the approval dialog sends back: how long the yes is good for. */
+export type GrantWindow =
+  | { kind: 'once' }
+  | { kind: 'process' }
+  | { kind: 'minutes'; minutes: number }
+  | { kind: 'always' }
 
 /** One keyhold process on this machine, as `/proc` describes it. */
 export interface InstanceProcess {
@@ -365,8 +388,13 @@ export const api = {
   agentRequests: () =>
     call<{ requests: AgentRequest[]; active_grants: number }>('GET', '/api/agent/requests'),
 
-  answerAgentRequest: (id: string, allowed: boolean, minutes = 0) =>
-    call<{ answered: boolean }>('POST', `/api/agent/requests/${id}`, { allowed, minutes }),
+  answerAgentRequest: (id: string, allowed: boolean, window: GrantWindow = { kind: 'once' }) =>
+    call<{ answered: boolean }>('POST', `/api/agent/requests/${id}`, { allowed, window }),
+
+  agentGrants: () => call<{ grants: AgentGrant[] }>('GET', '/api/agent/grants'),
+
+  revokeAgentGrant: (id: string) =>
+    call<{ revoked: boolean }>('DELETE', `/api/agent/grants/${id}`),
 
   revokeAgentGrants: () => call<{ active_grants: number }>('DELETE', '/api/agent/grants'),
 
