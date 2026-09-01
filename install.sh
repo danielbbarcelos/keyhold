@@ -135,8 +135,20 @@ install_desktop_shortcut() {
 # Desktop launcher for $APP_DISPLAY_NAME (installed by install.sh).
 # Runs Keyhold detached from any terminal and keeps its output in a log.
 set -e
+
+# The log carries the URL, and the URL carries the session token. A default umask
+# leaves it group- and world-readable, which is a live credential in a file
+# anybody on the machine can open. Nothing here is anybody else's business.
+umask 077
+
 STATE_DIR="\${XDG_STATE_HOME:-\$HOME/.local/state}/$APP_BIN"
 mkdir -p "\$STATE_DIR"
+chmod 700 "\$STATE_DIR" 2>/dev/null || true
+
+# One generation, then start clean: the log answers "why did nothing happen just
+# now", and every run it keeps is another dead token sitting on the disk.
+LOG="\$STATE_DIR/app.log"
+[ -f "\$LOG" ] && mv -f "\$LOG" "\$LOG.1"
 
 BIN="\$(command -v $APP_BIN 2>/dev/null || true)"
 if [ -z "\$BIN" ] && [ -x "$BIN_DIR/$APP_BIN" ]; then
@@ -149,7 +161,7 @@ if [ -z "\$BIN" ]; then
   exit 127
 fi
 
-exec "\$BIN" "\$@" >>"\$STATE_DIR/app.log" 2>&1
+exec "\$BIN" "\$@" >"\$LOG" 2>&1
 LAUNCHER
   chmod +x "$launcher"
 
@@ -182,6 +194,14 @@ Name[pt_BR]=Encerrar e começar de novo
 Exec=$launcher --replace
 DESKTOP
   chmod 644 "$desktop_file"
+
+  # Logs written by an earlier version inherited the umask, and they hold the
+  # session token of every run they saw.
+  local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/$APP_BIN"
+  [ -d "$state_dir" ] && chmod 700 "$state_dir" 2>/dev/null || true
+  for stale in "$state_dir/app.log" "$state_dir/app.log.1"; do
+    [ -f "$stale" ] && chmod 600 "$stale" 2>/dev/null || true
+  done
 
   has update-desktop-database && update-desktop-database "$apps_dir" >/dev/null 2>&1 || true
   has gtk-update-icon-cache &&

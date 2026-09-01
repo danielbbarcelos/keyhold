@@ -116,6 +116,15 @@ never handing the value over:
 The environment is used rather than the command line for the same reason throughout: `/proc/*/cmdline`
 is readable by every process of this user, and `/proc/*/environ` is not.
 
+### Where the session token lands
+
+It lives in memory and in the URL fragment, and the fragment reaches two places outside this
+process: the `xdg-open` helper's `/proc/<pid>/cmdline` while it runs, and — when Keyhold was started
+from the desktop shortcut — `~/.local/state/keyhold/app.log`, because that log is where the URL can
+be read when the browser did not open. Both are `0600` inside a `0700` directory, the launcher
+truncates the log on every start so only the current run's token is on disk, and every token dies
+with the process that made it.
+
 ## What Keyhold does not defend against
 
 Stated plainly, because a vault that implies otherwise is lying:
