@@ -57,6 +57,18 @@ impl Running {
         http::send("GET", &format!("{}{path}", self.base), None, None).await
     }
 
+    /// The same request a rebound page would make: right address, wrong name.
+    async fn get_as_host(&self, path: &str, host: &str) -> Reply {
+        http::send_as(
+            "GET",
+            &format!("{}{path}", self.base),
+            Some(&self.token),
+            None,
+            Some(host),
+        )
+        .await
+    }
+
     async fn post(&self, path: &str, body: serde_json::Value) -> Reply {
         http::send(
             "POST",
@@ -100,6 +112,16 @@ mod http {
         token: Option<&str>,
         body: Option<&str>,
     ) -> super::Reply {
+        send_as(method, url, token, body, None).await
+    }
+
+    pub async fn send_as(
+        method: &str,
+        url: &str,
+        token: Option<&str>,
+        body: Option<&str>,
+        host: Option<&str>,
+    ) -> super::Reply {
         let rest = url.strip_prefix("http://").expect("http url");
         let (authority, path) = match rest.find('/') {
             Some(at) => (&rest[..at], &rest[at..]),
@@ -108,8 +130,9 @@ mod http {
 
         let mut stream = tokio::net::TcpStream::connect(authority).await.unwrap();
 
+        let named = host.unwrap_or(authority);
         let mut request =
-            format!("{method} {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n");
+            format!("{method} {path} HTTP/1.1\r\nHost: {named}\r\nConnection: close\r\n");
 
         if let Some(token) = token {
             request.push_str(&format!("{}: {}\r\n", super::TOKEN_HEADER, token));
@@ -1292,4 +1315,25 @@ async fn standing_permissions_need_the_vault_open() {
 
     assert_eq!(listed.status, 200);
     assert_eq!(listed.json()["grants"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn a_request_arriving_under_another_name_is_refused() {
+    let app = start().await;
+    with_one_vault(&app).await;
+
+    // What DNS rebinding looks like from this side: the connection is genuinely from loopback, the
+    // token would be missing anyway, but the name the browser was told is not ours.
+    for name in ["evil.example", "evil.example:7717", "keyhold.attacker.test"] {
+        let refused = app.get_as_host("/api/status", name).await;
+
+        assert_eq!(refused.status, 421, "{name} was answered");
+    }
+
+    // And the names that are ours still work, including the unauthenticated ones.
+    for name in ["127.0.0.1:7717", "localhost:7717", "localhost"] {
+        assert_eq!(app.get_as_host("/api/status", name).await.status, 200, "{name} was refused");
+    }
+
+    assert_eq!(app.get_as_host("/health", "evil.example").await.status, 421);
 }

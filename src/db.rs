@@ -19,7 +19,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 
 /// The schema this binary understands. A file claiming more than this is not opened.
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 
 pub struct Store {
     conn: Connection,
@@ -325,6 +325,36 @@ impl Store {
                  CREATE INDEX agent_grants_by_record ON agent_grants (record_id);
 
                  UPDATE meta SET value = '8' WHERE key = 'schema_version';
+                 COMMIT;",
+            )?;
+        }
+
+        // F8: the trail stops naming things in the clear.
+        //
+        // It used to be readable without a key on purpose — "a log you need the vault open to
+        // inspect is a log you cannot consult when the vault is the problem". That reasoning did
+        // not survive contact with the file: `strings vault.db` printed which fields were read,
+        // from which record, by which process. A field's label is content, not shape, and the same
+        // argument that seals it inside a record's payload applies to a line about that field.
+        //
+        // What stays outside: the time, the action, the outcome, and the chain. Enough to see that
+        // something was revealed at 21:34 and that the log has not been edited; not enough to know
+        // what. And the route that reads the trail already required an open vault, so nothing the
+        // interface could do before is lost.
+        //
+        // The mark records where the plaintext era ends. Rows up to it are re-sealed on the next
+        // unlock, when there is a key to do it with; rows after it with no `sealed` are the ones
+        // written while the vault was closed, which name nothing.
+        if found < 9 {
+            self.conn.execute_batch(
+                "BEGIN;
+                 ALTER TABLE audit_events ADD COLUMN sealed BLOB;
+
+                 INSERT OR REPLACE INTO meta (key, value)
+                     VALUES ('audit_plaintext_through',
+                             (SELECT COALESCE(MAX(seq), 0) FROM audit_events));
+
+                 UPDATE meta SET value = '9' WHERE key = 'schema_version';
                  COMMIT;",
             )?;
         }

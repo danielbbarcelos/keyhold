@@ -104,7 +104,45 @@ pub fn router(state: Arc<AppState>) -> Router {
         .nest("/api", api)
         .fallback(serve_asset)
         .layer(middleware::from_fn(security_headers))
+        // Outermost, so it also covers the routes that answer without a token.
+        .layer(middleware::from_fn(only_this_machine))
         .with_state(state)
+}
+
+/// Refuse a request that reached this port under somebody else's name.
+///
+/// The attack this closes is DNS rebinding: a page on `evil.example` whose name is made to resolve
+/// to `127.0.0.1`, so the browser treats this server as that page's own origin and lets it read
+/// what comes back. Binding to loopback does not help — the connection really is from loopback —
+/// and neither does the absence of CORS, because after rebinding there is nothing cross about it.
+///
+/// What gives it away is the `Host` header: the browser sends the name that was typed, and that
+/// name is not one of ours. A vault reached by any name but its own is not being reached by its
+/// own interface.
+///
+/// It was never the whole defence — every route that matters wants a session token, and a rebound
+/// page has no way to learn one — but "they would have needed the token anyway" is the argument
+/// that stops being true the first time something is added that does not.
+async fn only_this_machine(request: Request<Body>, next: Next) -> Response {
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+
+    // Port and all, or nothing: the name is what is checked, and an address is allowed to carry the
+    // port it was reached on. Anything with credentials, a path, or another name is not.
+    let name = host.rsplit_once(':').map(|(name, _)| name).unwrap_or(host);
+
+    if matches!(name, "127.0.0.1" | "localhost" | "[::1]" | "::1") {
+        return next.run(request).await;
+    }
+
+    (
+        StatusCode::MISDIRECTED_REQUEST,
+        Json(json!({ "error": "this vault answers to 127.0.0.1 and nothing else" })),
+    )
+        .into_response()
 }
 
 /// A failure the interface can show without the server having explained too much.
@@ -184,7 +222,7 @@ async fn setup(State(state): State<Arc<AppState>>, Json(body): Json<SetupBody>) 
 
     // The vault setup makes goes in the trail like any other: the first line of the log should be
     // the moment this file started existing, not the second thing that happened to it.
-    audit::note(&store, audit::action::VAULT_CREATED, Some(&first.id), Detail::new());
+    audit::note(&store, &state.lock, audit::action::VAULT_CREATED, Some(&first.id), Detail::new());
 
     let recovery_key = outcome.recovery_key.clone();
     state.lock.unlock_with(outcome.vault_key);
@@ -268,8 +306,14 @@ async fn unlock(State(state): State<Arc<AppState>>, Json(body): Json<UnlockBody>
                 crate::records::purge_expired(&store, crate::settings::retention_days(&store))
                     .unwrap_or(0);
 
+            // The first moment there is a key is the first moment the trail written before this
+            // build existed can stop naming things in the clear. It runs once and then never
+            // again, and records that it ran.
+            let _ = state.lock.with_key(|key| audit::reseal(&store, key));
+
             audit::note(
                 &store,
+                &state.lock,
                 audit::action::UNLOCK,
                 None,
                 Detail::new().with("purged", purged as i64),
@@ -285,6 +329,7 @@ async fn unlock(State(state): State<Arc<AppState>>, Json(body): Json<UnlockBody>
             // somebody trying. The reason is recorded, never what was typed.
             let _ = audit::record(
                 &store,
+                &state.lock,
                 audit::Actor::You,
                 audit::action::UNLOCK_FAILED,
                 None,
@@ -305,7 +350,7 @@ async fn lock_now(State(state): State<Arc<AppState>>) -> Answer {
 
     {
         let store = state.store.lock().unwrap();
-        audit::note(&store, audit::action::LOCK, None, Detail::new());
+        audit::note(&store, &state.lock, audit::action::LOCK, None, Detail::new());
     }
 
     Ok(Json(json!({ "lock": state.lock.status() })))
@@ -338,12 +383,13 @@ async fn read_audit(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(query): axum::extract::Query<AuditQuery>,
 ) -> Answer {
-    if state.lock.with_key(|_| ()).is_none() {
-        return Err(locked());
-    }
-
     let store = state.store.lock().unwrap();
-    let events = audit::recent(&store, query.limit.unwrap_or(200)).map_err(bad_request)?;
+
+    let events = state
+        .lock
+        .with_key(|key| audit::recent(&store, key, query.limit.unwrap_or(200)))
+        .ok_or_else(locked)?
+        .map_err(bad_request)?;
 
     Ok(Json(json!({ "events": events, "log_reads": settings::log_reads(&store) })))
 }
@@ -413,6 +459,7 @@ async fn close_instance(
 
     let _ = audit::record(
         &store,
+        &state.lock,
         audit::Actor::You,
         audit::action::INSTANCE_CLOSED,
         None,
@@ -591,6 +638,7 @@ async fn answer_agent_request(
         Some(Ok(_)) => {
             let _ = audit::record(
                 &store,
+                &state.lock,
                 audit::Actor::You,
                 audit::action::AGENT_GRANTED,
                 None,
@@ -636,6 +684,7 @@ async fn set_agent_may_reveal(
 
     audit::note(
         &store,
+        &state.lock,
         audit::action::PROTECTION_CHANGED,
         None,
         Detail::new().with("agent_may_reveal", saved),
@@ -672,6 +721,7 @@ async fn revoke_agent_grant(
 
     let _ = audit::record(
         &store,
+        &state.lock,
         audit::Actor::You,
         audit::action::AGENT_GRANT_REVOKED,
         None,
@@ -697,6 +747,7 @@ async fn revoke_agent_grants(State(state): State<Arc<AppState>>) -> Answer {
     if gone > 0 {
         let _ = audit::record(
             &store,
+            &state.lock,
             audit::Actor::You,
             audit::action::AGENT_GRANT_REVOKED,
             None,
@@ -762,6 +813,7 @@ async fn change_protection(
 
     audit::note(
         &store,
+        &state.lock,
         audit::action::PROTECTION_CHANGED,
         None,
         Detail::new().with("mode", if body.password.is_some() { "password" } else { "device" }),
@@ -818,6 +870,7 @@ async fn enable_second_factor(
 
     audit::note(
         &store,
+        &state.lock,
         audit::action::SECOND_FACTOR_CHANGED,
         None,
         Detail::new().with("enabled", true),
@@ -860,6 +913,7 @@ async fn disable_second_factor(
 
     audit::note(
         &store,
+        &state.lock,
         audit::action::SECOND_FACTOR_CHANGED,
         None,
         Detail::new().with("enabled", false),

@@ -82,7 +82,7 @@ async fn create_vault(State(state): State<Arc<AppState>>, Json(meta): Json<Vault
     let made = with_key!(state, |key| vaults::create_vault(&store, key, meta))
         .map_err(bad_request)?;
 
-    audit::note(&store, audit::action::VAULT_CREATED, Some(&made.id), Detail::new());
+    audit::note(&store, &state.lock, audit::action::VAULT_CREATED, Some(&made.id), Detail::new());
 
     Ok(Json(json!({ "vault": made })))
 }
@@ -132,6 +132,7 @@ async fn delete_vault(
 
     audit::note(
         &store,
+        &state.lock,
         audit::action::VAULT_DELETED,
         Some(&id),
         Detail::new()
@@ -198,6 +199,7 @@ async fn rotate(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> A
 
     audit::note(
         &store,
+        &state.lock,
         audit::action::VAULT_ROTATED,
         Some(&id),
         Detail::new().with("generation", rotated.key_version),
@@ -229,6 +231,7 @@ async fn export_vault(
 
     audit::note(
         &store,
+        &state.lock,
         audit::action::EXPORTED,
         Some(&id),
         Detail::new().with("format", transfer::FORMAT),
@@ -265,6 +268,7 @@ async fn import_into_vault(
 
     audit::note(
         &store,
+        &state.lock,
         audit::action::IMPORTED,
         Some(&id),
         Detail::new()
@@ -325,6 +329,7 @@ async fn add_attachment(
 
     audit::note(
         &store,
+        &state.lock,
         audit::action::RECORD_UPDATED,
         Some(&id),
         Detail::new().with("attachment", added.name.clone()).with("bytes", added.size),
@@ -346,6 +351,7 @@ async fn open_attachment(State(state): State<Arc<AppState>>, Path(id): Path<Stri
     if crate::settings::log_reads(&store) {
         audit::note(
             &store,
+            &state.lock,
             audit::action::SECRET_REVEALED,
             Some(&id),
             Detail::new().with("attachment", file.name.clone()),
@@ -390,7 +396,7 @@ async fn destroy_record(State(state): State<Arc<AppState>>, Path(id): Path<Strin
 
     with_key!(state, |_key| records::destroy(&store, &id)).map_err(bad_request)?;
 
-    audit::note(&store, audit::action::RECORD_DESTROYED, Some(&id), Detail::new());
+    audit::note(&store, &state.lock, audit::action::RECORD_DESTROYED, Some(&id), Detail::new());
 
     Ok(Json(json!({ "destroyed": true })))
 }
@@ -417,6 +423,7 @@ async fn empty_trash(State(state): State<Arc<AppState>>, Path(id): Path<String>)
 
     audit::note(
         &store,
+        &state.lock,
         audit::action::RECORD_DESTROYED,
         Some(&id),
         Detail::new().with("count", count as i64),
@@ -454,6 +461,7 @@ async fn report_access(
     if crate::settings::log_reads(&store) {
         audit::note(
             &store,
+            &state.lock,
             if body.kind == "copy" {
                 audit::action::SECRET_COPIED
             } else {
@@ -602,6 +610,7 @@ async fn create_record(
 
     audit::note(
         &store,
+        &state.lock,
         audit::action::RECORD_CREATED,
         Some(&made.id),
         Detail::new().with("kind", made.kind.clone()),
@@ -630,6 +639,7 @@ async fn update_record(
 
     audit::note(
         &store,
+        &state.lock,
         audit::action::RECORD_UPDATED,
         Some(&id),
         Detail::new().with("version", updated.version),
@@ -680,6 +690,7 @@ async fn archive_record(
 
     audit::note(
         &store,
+        &state.lock,
         if flag.on { audit::action::RECORD_DELETED } else { audit::action::RECORD_RESTORED },
         Some(&id),
         Detail::new(),

@@ -116,6 +116,22 @@ never handing the value over:
 The environment is used rather than the command line for the same reason throughout: `/proc/*/cmdline`
 is readable by every process of this user, and `/proc/*/environ` is not.
 
+### What the file still shows
+
+Somebody holding `vault.db` and nothing else can read:
+
+- **How much there is** — how many vaults, folders and records, how the tree nests, and every
+  created/updated date. Hiding shape as well would mean giving up SQL, and with it the tree.
+- **What kind each record is** (`login`, `card`, `note`) and its flags — favourite, marked
+  compromised, a rotation date. Metadata about a record, never its content.
+- **The trail's skeleton** — that something happened at a time, what action it was, whether it was
+  allowed, and the hash chain. Who did it, which record it was about and any detail are sealed.
+- **How the key is derived** — the KDF parameters and the salts, which have to be readable to derive
+  anything, and two wrapped copies of the vault key that open with the password or the recovery key.
+
+What it does not show: a title, a username, an address, a note, a field label, a field value, a
+vault or folder name, or which field of which record an agent was ever given.
+
 ### Where the session token lands
 
 It lives in memory and in the URL fragment, and the fragment reaches two places outside this

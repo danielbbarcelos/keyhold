@@ -606,6 +606,7 @@ fn note_agent(
 
     let _ = audit::record(
         &store,
+        &state.lock,
         audit::Actor::Agent { process: peer.process.clone(), pid: peer.pid },
         action,
         Some(record_id),

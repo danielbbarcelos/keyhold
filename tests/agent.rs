@@ -110,6 +110,17 @@ impl Fixture {
             .unwrap();
     }
 
+    /// The trail, read the way the interface reads it: with the key.
+    fn trail(&self, limit: i64) -> Vec<keyhold::audit::Event> {
+        let store = self.state.store.lock().unwrap();
+
+        self.state
+            .lock
+            .with_key(|key| keyhold::audit::recent(&store, key, limit))
+            .unwrap()
+            .unwrap()
+    }
+
     fn standing(&self) -> usize {
         let store = self.state.store.lock().unwrap();
 
@@ -281,8 +292,7 @@ async fn a_refusal_is_a_refusal() {
     }
 
     // And the refusal is in the trail, as the agent.
-    let store = app.state.store.lock().unwrap();
-    let events = keyhold::audit::recent(&store, 5).unwrap();
+    let events = app.trail(5);
     let denied = events
         .iter()
         .find(|event| event.result == keyhold::audit::Outcome::Denied)
@@ -503,8 +513,7 @@ async fn a_value_is_refused_outright_until_reading_is_switched_on() {
     assert!(app.state.agent.waiting().is_empty(), "a refused-by-policy request still asked");
 
     // And the refusal is in the trail.
-    let store = app.state.store.lock().unwrap();
-    let events = keyhold::audit::recent(&store, 3).unwrap();
+    let events = app.trail(3);
 
     assert!(events
         .iter()
