@@ -96,8 +96,8 @@ impl Store {
 
         if found > SCHEMA_VERSION {
             bail!(
-                "this vault was written by a newer keyhold (schema {found}, this build understands \
-                 {SCHEMA_VERSION}). Upgrade keyhold rather than letting an older build write to it."
+                "this vault was written by a newer Keyhold (schema {found}, this build understands \
+                 {SCHEMA_VERSION}). Upgrade Keyhold rather than letting an older build write to it."
             );
         }
 

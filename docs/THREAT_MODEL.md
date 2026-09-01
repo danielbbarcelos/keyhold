@@ -1,13 +1,13 @@
 # Threat model
 
 A vault that leaks once has lost its reason to exist, so it is worth being explicit about which
-attacks keyhold is built to survive, which it is not, and why.
+attacks Keyhold is built to survive, which it is not, and why.
 
-The context that shapes all of it: **keyhold has no server.** There is no account, no sync, no
+The context that shapes all of it: **Keyhold has no server.** There is no account, no sync, no
 operator. That removes an entire class of threat — nobody else's database can leak your vault —
 and it moves the remaining ones onto your own machine.
 
-## What keyhold defends against
+## What Keyhold defends against
 
 ### T1 · Your disk is read
 
@@ -23,7 +23,7 @@ holding them are owner-only, re-checked on every open.
 Somebody has the file and all the time in the world.
 
 **Defence.** Argon2id with a 64 MiB memory cost, three iterations. This is the only thing that
-matters in this scenario: an attacker with the file does not talk to keyhold, so rate limiting and
+matters in this scenario: an attacker with the file does not talk to Keyhold, so rate limiting and
 attempt counters are theatre. The KDF parameters are recorded in the file and versioned so they can
 be raised as hardware improves.
 
@@ -64,7 +64,7 @@ fails the build on `innerHTML`, `eval`, `new Function`, or any remote URL in the
 ### T5 · Another local process
 
 The Unix model does not separate processes running as the same user. Anything you run can connect to
-keyhold's port.
+Keyhold's port.
 
 **Defence.** Every API route requires a session token that is generated per run, never written to
 disk, delivered in the URL fragment, and compared in constant time. Authentication is a custom
@@ -81,7 +81,7 @@ action always in reach. Locking wipes the key from memory rather than hiding the
 
 ### T7 · The clipboard
 
-Copying a password puts it somewhere keyhold does not control.
+Copying a password puts it somewhere Keyhold does not control.
 
 **Defence.** Copies are cleared after a deadline, the countdown is visible, and a copy you make
 yourself in the meantime cancels the clear rather than wiping your clipboard. The interface says
@@ -116,12 +116,12 @@ never handing the value over:
 The environment is used rather than the command line for the same reason throughout: `/proc/*/cmdline`
 is readable by every process of this user, and `/proc/*/environ` is not.
 
-## What keyhold does not defend against
+## What Keyhold does not defend against
 
 Stated plainly, because a vault that implies otherwise is lying:
 
 - **Malware running as you.** A keylogger captures the master password as it is typed. A debugger
-  attached to the process reads the key while the vault is open. keyhold narrows the window; it
+  attached to the process reads the key while the vault is open. Keyhold narrows the window; it
   does not outrank the kernel.
 - **A compromised browser.** An extension with access to the page can read what the page renders.
   If you do not trust the browser, do not unlock the vault in it.
@@ -137,5 +137,5 @@ Stated plainly, because a vault that implies otherwise is lying:
 | Encrypting with a key stored beside the vault | Whoever reads the file reads the key. That is obfuscation, not confidentiality |
 | Escrow or a reset code held anywhere | Recovers the forgetful user by creating a master key to everything: a rare risk traded for a catastrophic one |
 | Validating the master password against a stored hash | Gives an offline attacker a cheap oracle. Decryption failure is the only check needed |
-| A scored entropy meter | `log2(alphabet) × length` is exact for a generated password and a lie for a human one. keyhold reports named, checkable findings instead |
+| A scored entropy meter | `log2(alphabet) × length` is exact for a generated password and a lie for a human one. Keyhold reports named, checkable findings instead |
 | Serving the interface on a network interface | There is no version of this product that should. The bind address is not configurable |

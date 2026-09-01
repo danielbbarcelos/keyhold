@@ -48,7 +48,7 @@ export function HealthPanel({ health, onOpen }: HealthPanelProps) {
               : `Nada a dizer sobre ${health.examined === 1 ? 'a senha' : 'as senhas'} deste cofre.`}
           </p>
           <p className="text-sm text-muted-foreground">
-            O keyhold não dá nota a senha: ele só aponta o que dá para conferir — curta demais, um
+            O Keyhold não dá nota a senha: ele só aponta o que dá para conferir — curta demais, um
             só tipo de caractere, repetida, previsível, ou parada há tempo demais.
           </p>
         </div>

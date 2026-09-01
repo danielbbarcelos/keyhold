@@ -1209,3 +1209,51 @@ async fn a_csv_from_another_manager_can_be_imported() {
     assert_eq!(imported["detail"]["from"], "csv");
     assert_eq!(imported["detail"]["records"], 2);
 }
+
+#[tokio::test]
+async fn closing_an_instance_needs_the_vault_open() {
+    let app = start().await;
+
+    // Setup has not run, so nothing is unlocked. Ending a process is not something a tab left over
+    // from a previous run gets to do with a token alone.
+    let refused = app.post("/api/instances/1/close", serde_json::json!({})).await;
+
+    assert_eq!(refused.status, 423);
+}
+
+#[tokio::test]
+async fn a_pid_from_the_client_is_never_signalled_on_the_client_s_word() {
+    let app = start().await;
+    with_one_vault(&app).await;
+
+    // `1` is init: alive, not ours, and certainly not a keyhold. The handler rescans `/proc` and
+    // refuses anything the scan does not vouch for, which is the whole control here.
+    let refused = app.post("/api/instances/1/close", serde_json::json!({})).await;
+
+    assert_eq!(refused.status, 400);
+    assert!(
+        refused.json()["error"].as_str().unwrap().contains("PID 1"),
+        "the refusal should name what it refused: {}",
+        refused.body
+    );
+
+    // And the process running this test is not one either — its name is the test binary's.
+    let mine = std::process::id();
+    let refused = app.post(&format!("/api/instances/{mine}/close"), serde_json::json!({})).await;
+
+    assert_eq!(refused.status, 400);
+}
+
+#[tokio::test]
+async fn the_instance_list_answers_without_a_key() {
+    let app = start().await;
+
+    let listed = app.get("/api/instances").await;
+
+    assert_eq!(listed.status, 200);
+    assert!(listed.json()["processes"].is_array());
+    assert!(listed.json()["version"].is_string());
+
+    // Same as every other route: no token, no answer.
+    assert_eq!(app.get_without_token("/api/instances").await.status, 401);
+}

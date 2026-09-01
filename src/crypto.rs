@@ -93,7 +93,7 @@ impl KdfParams {
             || self.parallelism == 0
         {
             bail!(
-                "this vault asks for a weaker key derivation than keyhold accepts \
+                "this vault asks for a weaker key derivation than Keyhold accepts \
                  ({} KiB / {} passes); it may have been tampered with",
                 self.memory_kib,
                 self.iterations

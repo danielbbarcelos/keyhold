@@ -87,6 +87,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/agent/requests/:id", post(answer_agent_request))
         .route("/agent/grants", delete(revoke_agent_grants))
         .route("/agent/reveal", put(set_agent_may_reveal))
+        .route("/instances", get(instances))
+        .route("/instances/:pid/close", post(close_instance))
         .route("/protection", put(change_protection))
         .route("/second-factor/begin", post(begin_second_factor))
         .route("/second-factor", post(enable_second_factor))
@@ -235,7 +237,7 @@ async fn unlock(State(state): State<Arc<AppState>>, Json(body): Json<UnlockBody>
         if failures >= MAX_FAILURES {
             return Err(Failure(
                 StatusCode::TOO_MANY_REQUESTS,
-                "too many failed attempts — close keyhold and open it again".into(),
+                "too many failed attempts — close Keyhold and open it again".into(),
             ));
         }
     }
@@ -378,6 +380,47 @@ async fn visibility(
     state.lock.set_visible(body.visible);
 
     Ok(Json(json!({ "lock": state.lock.status() })))
+}
+
+/// Every keyhold running as this person, and which one is answering right now.
+///
+/// Nothing here is about a vault's contents — it is a list of processes and their ages — so it
+/// answers whether or not the vault is open.
+async fn instances() -> Answer {
+    Ok(Json(json!({
+        "processes": crate::instance::processes(),
+        "version": env!("CARGO_PKG_VERSION"),
+    })))
+}
+
+/// Close one of the others.
+///
+/// Behind the lock on purpose. Listing is harmless, but ending a process is the sort of thing a tab
+/// left open from a previous session should not still be able to do, and the panel that offers it
+/// only exists inside an open vault anyway.
+async fn close_instance(
+    State(state): State<Arc<AppState>>,
+    Path(pid): Path<i32>,
+) -> Answer {
+    if state.lock.with_key(|_| ()).is_none() {
+        return Err(locked());
+    }
+
+    let store = state.store.lock().unwrap();
+    let outcome = crate::instance::close(pid);
+
+    let _ = audit::record(
+        &store,
+        audit::Actor::You,
+        audit::action::INSTANCE_CLOSED,
+        None,
+        if outcome.is_ok() { audit::Outcome::Allowed } else { audit::Outcome::Denied },
+        Detail::new().with("pid", pid as i64),
+    );
+
+    outcome.map_err(bad_request)?;
+
+    Ok(Json(json!({ "processes": crate::instance::processes() })))
 }
 
 /// Whether the agent socket is open, and what is on the other side of the decision.

@@ -230,5 +230,5 @@ export function DeleteFolderDialog({
 }
 
 function describe(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'Não foi possível falar com o keyhold.'
+  return cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.'
 }

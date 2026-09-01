@@ -2,7 +2,7 @@
 
 <img src="assets/icon.png" alt="" width="112" height="112">
 
-# keyhold
+# Keyhold
 
 **A password vault that lives entirely on your machine.**
 
@@ -14,14 +14,14 @@ No server. No account. No sync. Nothing to sign up for.
 
 ## What it is
 
-keyhold keeps your passwords, keys and private notes in a single encrypted file on your own
+Keyhold keeps your passwords, keys and private notes in a single encrypted file on your own
 computer, and shows them to you in your browser — without any of it ever going anywhere.
 
 You open it, type one master password, and everything is there. You close it, and the key that
 opens it stops existing until you type that password again.
 
 It is a single program. There is no service behind it, no company holding a copy, and no account to
-lose access to. If your internet is down, keyhold works exactly the same.
+lose access to. If your internet is down, Keyhold works exactly the same.
 
 **It can also answer a coding assistant running on your machine** — so you can ask Claude Code to
 connect to a server without pasting a password into a chat. Every request stops and asks you first,
@@ -32,7 +32,7 @@ assistant.
 > review. If you put something in it, keep a copy somewhere else too. See
 > [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## What keyhold promises
+## What Keyhold promises
 
 **The file on disk is unreadable without your password.** If someone copies your backup, syncs your
 home folder to a cloud, or walks off with the drive, what they get is noise. The key is not stored
@@ -42,17 +42,17 @@ next to it — it is not stored anywhere.
 you unlock, kept in memory, and wiped when you lock or quit. Nobody has a copy: not us, not a
 support desk, not someone with a court order — because there is no us and no desk.
 
-**Nothing leaves your machine.** keyhold only listens to your own computer, never fetches anything
+**Nothing leaves your machine.** Keyhold only listens to your own computer, never fetches anything
 from the internet, and carries everything it displays inside the program itself. No CDN, no fonts
 downloaded, no update check, no analytics.
 
-## What keyhold does not promise
+## What Keyhold does not promise
 
 Saying this plainly is part of the design. A vault that implies otherwise is lying to you.
 
-- **If your computer is already compromised, keyhold loses.** Software that records your keystrokes
+- **If your computer is already compromised, Keyhold loses.** Software that records your keystrokes
   will catch your master password as you type it. A program running as you can read this one's
-  memory while the vault is open. keyhold protects the file when it is closed and narrows the window
+  memory while the vault is open. Keyhold protects the file when it is closed and narrows the window
   when it is open; it cannot outrank the operating system it runs on.
 - **A revealed password is revealed.** Screenshots, photos of the screen, and remembering it are all
   outside anything a program can do.
@@ -88,23 +88,42 @@ cargo build --release
 ./target/release/keyhold
 ```
 
-keyhold picks a free loopback port, generates a session token, and opens your browser at
+Keyhold picks a free loopback port, generates a session token, and opens your browser at
 `http://127.0.0.1:<port>/#token=…`.
 
 The token is in the URL **fragment** — the one part of an address a browser never sends over the
-network. It is generated per run and never written to disk, so restarting keyhold invalidates every
+network. It is generated per run and never written to disk, so restarting Keyhold invalidates every
 tab that was open.
 
 ```
 keyhold              # start the interface
 keyhold --port 7717  # bind a fixed port
 keyhold --no-browser # do not open a browser
+keyhold --replace    # close a running Keyhold without asking first
 keyhold where        # print where the vault and its directories live
 ```
 
+### Only one at a time
+
+Two Keyholds over one vault file is a mess that hides itself: both open the same database, and the
+agent socket has a fixed path, so the last one to start owns the integration while the earlier ones
+keep an unlocked key in memory behind a window you may not be looking at.
+
+So a second start does not happen quietly. It finds the one already running and asks — in the
+terminal, or as a desktop dialog when it was launched from the shortcut — whether to close it.
+Saying no changes nothing. Saying yes closes the other one properly: that vault locks and its key is
+forgotten, which is exactly what closing a vault should mean.
+
+**Instâncias** in the rail lists every Keyhold process running as you — the interface, any `keyhold
+mcp` bridge an assistant opened, any `keyhold run` still holding a secret — with what each one is
+for and how long it has been up. The others can be closed from there, behind a confirmation that
+says what closing that particular one costs. A pid typed by a client is never signalled on the
+client's word: the request is re-checked against a fresh scan of `/proc`, and the process serving
+the window refuses to close itself.
+
 ## Letting a local agent use the vault
 
-keyhold can answer a coding agent running on the same machine — searching for a record, describing
+Keyhold can answer a coding agent running on the same machine — searching for a record, describing
 its fields, and handing over a value once you say yes.
 
 ```bash
@@ -120,9 +139,9 @@ process to find.
 
 **The agent never uses the HTTP port.** That one is picked fresh on every run and belongs to your
 browser; the socket's path never changes, so a `claude mcp add` done once keeps working across
-restarts. The setting is remembered too — reopening keyhold reopens the socket. An agent that
+restarts. The setting is remembered too — reopening Keyhold reopens the socket. An agent that
 connects before you have unlocked is told the vault is locked, which is a more useful thing to hear
-than that keyhold is not running.
+than that Keyhold is not running.
 
 Closing the surface removes the socket, and a locked vault answers nothing.
 
@@ -134,7 +153,7 @@ This is the part worth understanding, because it is not a matter of asking polit
 repeats it — when the tool returns it. Telling an assistant "do not print this" does not undo that,
 and no instruction in a tool description is a control.
 
-So keyhold's answer is to hand the secret to the *process*, never to the model:
+So Keyhold's answer is to hand the secret to the *process*, never to the model:
 
 ```bash
 keyhold run "Banco de dados" Senha -- psql "postgres://deploy@localhost/app"
@@ -145,7 +164,7 @@ the value. It can run that itself, from its terminal, for anything that needs a 
 login, a curl, a deploy script. The same thing is available as the `keyhold_run` tool.
 
 When it is **you** who needs the password — to paste into a login form — the assistant uses
-`keyhold_copy`: keyhold puts it on your clipboard, clears it after 45 seconds, and tells the
+`keyhold_copy`: Keyhold puts it on your clipboard, clears it after 45 seconds, and tells the
 assistant only that it worked.
 
 **Reading a value outright is off by default.** With it off, `keyhold_get` is not even offered, so a
@@ -155,9 +174,14 @@ cases where nothing else fits, and the interface says plainly what that costs.
 Every request of any kind still stops and asks you, naming the process that asked, answerable once
 or for a few minutes.
 
+A request expires by itself after 90 seconds, and the person driving an assistant is usually looking
+at a terminal rather than at the vault. So the question also knocks on your desktop as a system
+notification — carrying the record's title and the field's label, never a value. Allow it once in
+**Ajustes → Acesso por agente**; browsers only offer notifications to a page you have said yes to.
+
 ## The desktop shortcut
 
-`install.sh` adds **keyhold** to your application launcher. Opening it starts keyhold detached from
+`install.sh` adds **Keyhold** to your application launcher. Opening it starts Keyhold detached from
 any terminal and opens the vault in your browser — the same thing running `keyhold` does, without a
 terminal window left behind.
 
@@ -198,7 +222,7 @@ rm ~/.local/share/icons/hicolor/*/apps/keyhold.png
 | `~/.local/state/keyhold/` | sockets and other per-run state | dies with the process |
 | `~/.config/keyhold/` | preferences; never a key, never a secret | forever |
 
-All three are created `0700`, and the vault file `0600`. keyhold re-checks and repairs those modes
+All three are created `0700`, and the vault file `0600`. Keyhold re-checks and repairs those modes
 every time it opens, because the directory that already existed is the one nobody checked.
 
 ## Security design
@@ -228,7 +252,7 @@ The full reasoning, including what is deliberately out of scope, is in
 ```bash
 cargo test                     # includes the hardening and HTTP-surface checks
 cd web && npm run build        # rebuild the embedded interface
-cd web && npm run dev          # interface with hot reload, proxying to a keyhold on :5274
+cd web && npm run dev          # interface with hot reload, proxying to a Keyhold on :5274
 ```
 
 `cargo test` is the gate. Two suites exist specifically to keep decisions from eroding:

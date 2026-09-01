@@ -24,7 +24,7 @@ export function App() {
     if (!hasToken()) {
       return (
         <Notice title="Esta janela não tem a credencial da sessão">
-          Abra o keyhold pelo terminal ou pelo atalho. A credencial vive na URL e vale só enquanto o
+          Abra o Keyhold pelo terminal ou pelo atalho. A credencial vive na URL e vale só enquanto o
           programa estiver aberto.
         </Notice>
       )
@@ -32,7 +32,7 @@ export function App() {
 
     if (offline) {
       return (
-        <Notice title="Sem contato com o keyhold">
+        <Notice title="Sem contato com o Keyhold">
           O programa ainda está rodando? Se você o fechou, a chave já foi esquecida — é o que fechar
           significa aqui.
         </Notice>

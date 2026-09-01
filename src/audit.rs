@@ -94,6 +94,7 @@ pub mod action {
     pub const VAULT_ROTATED: &str = "vault.rotated";
     pub const EXPORTED: &str = "vault.exported";
     pub const IMPORTED: &str = "vault.imported";
+    pub const INSTANCE_CLOSED: &str = "instance.closed";
     pub const PROTECTION_CHANGED: &str = "identity.protection.changed";
     pub const SECOND_FACTOR_CHANGED: &str = "identity.second-factor.changed";
 }

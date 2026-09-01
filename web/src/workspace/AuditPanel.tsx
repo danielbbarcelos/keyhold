@@ -34,6 +34,7 @@ const LABELS: Record<string, string> = {
   'record.restored': 'Registro restaurado',
   'secret.revealed': 'Segredo revelado',
   'secret.copied': 'Segredo copiado',
+  'instance.closed': 'Instância encerrada',
   'identity.protection.changed': 'Proteção do cofre alterada',
   'identity.second-factor.changed': 'Segundo fator alterado',
 }

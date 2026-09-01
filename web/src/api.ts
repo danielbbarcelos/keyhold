@@ -49,6 +49,15 @@ export interface AgentRequest {
   asked_at: number
 }
 
+/** One keyhold process on this machine, as `/proc` describes it. */
+export interface InstanceProcess {
+  pid: number
+  role: 'interface' | 'agent' | 'command' | 'other'
+  running_for: number
+  is_this_one: boolean
+  holds_the_vault: boolean
+}
+
 export interface AuditActor {
   kind: 'you' | 'agent'
   process?: string
@@ -354,6 +363,12 @@ export const api = {
     call<{ answered: boolean }>('POST', `/api/agent/requests/${id}`, { allowed, minutes }),
 
   revokeAgentGrants: () => call<{ active_grants: number }>('DELETE', '/api/agent/grants'),
+
+  instances: () =>
+    call<{ processes: InstanceProcess[]; version: string }>('GET', '/api/instances'),
+
+  closeInstance: (pid: number) =>
+    call<{ processes: InstanceProcess[] }>('POST', `/api/instances/${pid}/close`),
 
   audit: (limit = 200) =>
     call<{ events: AuditEvent[]; log_reads: boolean }>('GET', `/api/audit?limit=${limit}`),

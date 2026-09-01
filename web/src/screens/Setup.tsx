@@ -58,7 +58,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
       await action()
       setError('')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
     } finally {
       setBusy(false)
     }
@@ -93,7 +93,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
               <CardTitle>Sua senha-mestra</CardTitle>
               <CardDescription>
                 Ela não é guardada em lugar nenhum e não pode ser redefinida. Use uma senha longa que
-                você não use em mais nada — ou deixe o keyhold gerar uma.
+                você não use em mais nada — ou deixe o Keyhold gerar uma.
               </CardDescription>
             </>
           )}

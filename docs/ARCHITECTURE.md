@@ -2,7 +2,7 @@
 
 ## One process, one authority
 
-keyhold is a single binary. It owns the vault file, it owns the key while unlocked, and it decides
+Keyhold is a single binary. It owns the vault file, it owns the key while unlocked, and it decides
 what any client may see. There are two clients — the browser interface and, from F7, a local agent —
 and neither of them holds a key.
 
@@ -28,6 +28,7 @@ src/
   main.rs      the CLI, and what starting keyhold actually does
   lib.rs       the same code the tests drive
   paths.rs     where files live, and the permissions they are held to
+  instance.rs  one vault, one process: the claim, and taking over a running one
   session.rs   the per-run token: generated, compared in constant time, never persisted
   db.rs        the vault file: open, restrict, migrate
   http.rs      the loopback surface: token gate, policy headers, embedded bundle
@@ -41,7 +42,7 @@ tests/
 ## The lock, and what "locked" means
 
 Locked is not a screen. Locked is the absence of the key: the derived material is zeroized and the
-process cannot read the vault until somebody types the master password again. Quitting keyhold is
+process cannot read the vault until somebody types the master password again. Quitting Keyhold is
 therefore the strongest possible lock, and a crash is a lock too.
 
 This is why the session token is per-run and never stored. A tab from a previous run is a tab whose

@@ -55,7 +55,7 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
       setNote(await action())
       setError('')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
       setNote('')
     } finally {
       setBusy(false)
@@ -187,7 +187,7 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
           </Button>
 
           <p className="text-sm text-muted-foreground">
-            Um arquivo do keyhold (<span className="text-foreground">.json</span>, pede a senha
+            Um arquivo do Keyhold (<span className="text-foreground">.json</span>, pede a senha
             acima) ou um CSV de outro gerenciador. Nada é sobrescrito: tudo entra como registro
             novo.
           </p>

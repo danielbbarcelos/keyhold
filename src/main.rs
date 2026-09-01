@@ -7,7 +7,7 @@
 //! What this binary does when run with no arguments: opens the vault file, picks a free loopback
 //! port, generates a session token, serves the interface, and points a browser at it.
 
-use keyhold::{db, http, paths, session};
+use keyhold::{db, http, instance, paths, session};
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::process::Command;
@@ -31,6 +31,10 @@ struct Cli {
     /// Do not open a browser.
     #[arg(long)]
     no_browser: bool,
+
+    /// Close a keyhold that is already running instead of asking first.
+    #[arg(long)]
+    replace: bool,
 
     #[command(subcommand)]
     command: Option<Cmd>,
@@ -89,6 +93,31 @@ async fn main() -> Result<()> {
 }
 
 async fn serve(cli: Cli) -> Result<()> {
+    // Before the vault file is even opened: two processes over one database, both racing for an
+    // agent socket whose path is fixed, is a mess nobody sees until an assistant is talking to a
+    // vault the window is no longer showing.
+    let held = match instance::claim()? {
+        instance::Claim::Held(held) => held,
+        instance::Claim::Busy(other) => {
+            if !cli.replace && !instance::ask_to_replace(&other) {
+                println!();
+                println!("  Keyhold is already running (pid {}). Nothing was changed.", other.pid);
+                println!();
+
+                return Ok(());
+            }
+
+            instance::replace(&other)?;
+
+            match instance::claim()? {
+                instance::Claim::Held(held) => held,
+                instance::Claim::Busy(other) => {
+                    anyhow::bail!("another Keyhold (pid {}) started while this one was taking over", other.pid)
+                }
+            }
+        }
+    };
+
     let store = Store::open(&paths::vault_file())?;
 
     // Read the lock policy before anything can change it: the vault starts locked, and the clock
@@ -106,14 +135,16 @@ async fn serve(cli: Cli) -> Result<()> {
         .with_context(|| format!("could not bind {requested}"))?;
     let bound = listener.local_addr()?;
 
+    held.note_port(bound.port());
+
     let url = format!("http://127.0.0.1:{}/#token={}", bound.port(), token.expose());
 
     println!();
-    println!("  keyhold {}", env!("CARGO_PKG_VERSION"));
+    println!("  Keyhold {}", env!("CARGO_PKG_VERSION"));
     println!("  {url}");
     println!("  vault   {}", paths::vault_file().display());
     println!();
-    println!("  Ctrl+C to stop. Closing keyhold forgets the key.");
+    println!("  Ctrl+C to stop. Closing Keyhold forgets the key.");
 
     if agent_wanted {
         println!();
@@ -146,12 +177,42 @@ async fn serve(cli: Cli) -> Result<()> {
     }
 
     axum::serve(listener, http::router(state))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(shutdown())
         .await?;
 
+    // Explicit, and the last thing that happens: the machine is only released once nothing is being
+    // served on it. Reading as `drop(held)` also keeps a future edit from moving the claim into a
+    // scope that ends early.
+    drop(held);
+
     Ok(())
+}
+
+/// Ctrl+C, or a `TERM` from another keyhold taking over.
+///
+/// `TERM` is handled rather than left to the kernel for one reason: the default action kills the
+/// process where it stands, which skips wiping the key and skips releasing the claim. A takeover is
+/// a routine thing here, so it should end this instance the same way Ctrl+C does.
+async fn shutdown() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        let mut terminate = match signal(SignalKind::terminate()) {
+            Ok(stream) => stream,
+            Err(_) => return drop(tokio::signal::ctrl_c().await),
+        };
+
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = terminate.recv() => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 /// Hand the URL to the desktop.

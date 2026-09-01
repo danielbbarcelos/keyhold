@@ -652,6 +652,7 @@ dependencies = [
  "axum",
  "clap",
  "hmac",
+ "libc",
  "mime_guess",
  "qrcode",
  "rand",

@@ -130,12 +130,12 @@ pub fn export(
 /// Open an archive produced by [`export`].
 pub fn open_archive(envelope: &Envelope, passphrase: &str) -> Result<Archive> {
     if envelope.format != FORMAT {
-        bail!("este arquivo não é um export do keyhold");
+        bail!("este arquivo não é um export do Keyhold");
     }
 
     if envelope.version > VERSION {
         bail!(
-            "este arquivo foi escrito por uma versão mais nova do keyhold (formato {})",
+            "este arquivo foi escrito por uma versão mais nova do Keyhold (formato {})",
             envelope.version
         );
     }

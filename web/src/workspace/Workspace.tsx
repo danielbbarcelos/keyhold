@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
+  Cpu,
   Folder,
   FolderPlus,
   Lock,
@@ -47,6 +48,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
+import { Logo } from '@/components/common/Logo'
+
 import {
   api,
   ApiError,
@@ -73,6 +76,7 @@ import {
 } from './FolderDialogs'
 import { AgentApproval } from './AgentApproval'
 import { AuditPanel } from './AuditPanel'
+import { InstancesPanel } from './InstancesPanel'
 import { HealthPanel } from './HealthPanel'
 import { Settings } from './Settings'
 import { TrashPanel } from './TrashPanel'
@@ -91,7 +95,7 @@ import { kindIcon } from './kinds'
  *    vault has nowhere to navigate to, and a route table would describe the shape of what is inside.
  */
 
-type Lens = 'all' | 'favourites' | 'attention' | 'trash' | 'trail' | 'settings'
+type Lens = 'all' | 'favourites' | 'attention' | 'trash' | 'trail' | 'instances' | 'settings'
 
 const LENSES: Array<{ id: Lens; label: string; icon: typeof Vault }> = [
   { id: 'all', label: 'Tudo', icon: Vault },
@@ -99,6 +103,7 @@ const LENSES: Array<{ id: Lens; label: string; icon: typeof Vault }> = [
   { id: 'attention', label: 'Atenção', icon: AlertTriangle },
   { id: 'trash', label: 'Lixeira', icon: Trash2 },
   { id: 'trail', label: 'Trilha', icon: ScrollText },
+  { id: 'instances', label: 'Instâncias', icon: Cpu },
   { id: 'settings', label: 'Ajustes', icon: Settings2 },
 ]
 
@@ -236,7 +241,8 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
 
   // Two lenses replace the list entirely rather than filtering it: one is a report, the other is a
   // different set of records with different things to do to them.
-  const wholeLens = lens === 'attention' || lens === 'trash' || lens === 'trail'
+  const wholeLens =
+    lens === 'attention' || lens === 'trash' || lens === 'trail' || lens === 'instances'
 
   async function openRecord(id: string) {
     if (tabs.some((tab) => tab.id === id)) {
@@ -276,6 +282,15 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
     <div className="grid h-screen grid-cols-[3.5rem_16rem_minmax(0,1fr)] overflow-hidden bg-background">
       {/* ── the rail ─────────────────────────────────────────────────────────────────────────── */}
       <nav className="flex flex-col items-center gap-1 border-r bg-sidebar py-3">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="mb-2 flex size-9 items-center justify-center">
+              <Logo className="size-7" />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="right">Keyhold</TooltipContent>
+        </Tooltip>
+
         {LENSES.map((entry) => {
           const Icon = entry.icon
 
@@ -539,6 +554,8 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                       void openRecord(recordId)
                     }}
                   />
+                ) : lens === 'instances' ? (
+                  <InstancesPanel />
                 ) : lens === 'attention' ? (
                   <HealthPanel
                     health={health}
@@ -1008,5 +1025,5 @@ function needsAttention(record: RecordPreview): boolean {
 }
 
 function describe(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'Não foi possível falar com o keyhold.'
+  return cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.'
 }

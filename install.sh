@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ───────────────────────────────────────────────────────────────────────────
-#  keyhold — installer
+#  Keyhold — installer
 #
 #  Builds the interface bundle, compiles the binary with it embedded, puts it
-#  on your PATH, and adds a desktop shortcut that opens keyhold in your
+#  on your PATH, and adds a desktop shortcut that opens Keyhold in your
 #  browser.
 #
 #  Environment:
@@ -16,7 +16,7 @@
 set -Eeuo pipefail
 
 APP_BIN="keyhold"
-APP_DISPLAY_NAME="keyhold"
+APP_DISPLAY_NAME="Keyhold"
 APP_GENERIC_NAME="Password Vault"
 APP_COMMENT="A password vault that lives entirely on this machine"
 APP_CATEGORIES="System;Security;"
@@ -40,7 +40,7 @@ fail() { printf "  %s●%s %s\n" "$RED" "$RESET" "$*" >&2; exit 1; }
 has() { command -v "$1" >/dev/null 2>&1; }
 
 header() {
-  printf "\n  %skeyhold — installer%s\n" "$BOLD" "$RESET"
+  printf "\n  %sKeyhold — installer%s\n" "$BOLD" "$RESET"
   printf "  %s───────────────────%s\n\n" "$DIM" "$RESET"
 }
 
@@ -71,7 +71,7 @@ build_frontend() {
 
 build_binary() {
   # The bundle is compiled in, so this has to happen after the frontend build.
-  info "Compiling keyhold (this takes a minute the first time)..."
+  info "Compiling Keyhold (this takes a minute the first time)..."
   (cd "$SOURCE_DIR" && cargo build --release --quiet)
 
   mkdir -p "$BIN_DIR"
@@ -127,13 +127,13 @@ install_desktop_shortcut() {
   install_icons || true
 
   # A wrapper rather than calling the binary directly: a desktop launcher has no
-  # terminal, so keyhold's output — including the URL it opens — would go
+  # terminal, so Keyhold's output — including the URL it opens — would go
   # nowhere. This keeps it in a log you can read when something did not start.
   local launcher="$BIN_DIR/$APP_BIN-launch"
   cat >"$launcher" <<LAUNCHER
 #!/usr/bin/env bash
 # Desktop launcher for $APP_DISPLAY_NAME (installed by install.sh).
-# Runs keyhold detached from any terminal and keeps its output in a log.
+# Runs Keyhold detached from any terminal and keeps its output in a log.
 set -e
 STATE_DIR="\${XDG_STATE_HOME:-\$HOME/.local/state}/$APP_BIN"
 mkdir -p "\$STATE_DIR"

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Bot, Terminal } from 'lucide-react'
 
 import {
@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button'
 
 import { api, type AgentRequest } from '../api'
+import { knock } from '../notify'
 
 /**
  * The question an agent's request becomes.
@@ -23,25 +24,57 @@ import { api, type AgentRequest } from '../api'
  *
  * Polled rather than pushed. The daemon times a request out on its own, so a closed window cannot
  * leave an agent hanging — or leave a question to be answered by whoever opens the window next.
+ *
+ * A request also knocks on the desktop, because the person driving the assistant is usually looking
+ * at a terminal rather than at this window, and ninety seconds of not noticing is a request that
+ * expires for no reason. The knock carries no secret — see `notify.ts`.
  */
 export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
   const [request, setRequest] = useState<AgentRequest | null>(null)
 
+  // The knock currently on the desktop, and the request it belongs to. Both are refs rather than
+  // state: they are bookkeeping for something outside React, and changing them must not re-render.
+  const knocked = useRef<string | null>(null)
+  const showing = useRef<Notification | null>(null)
+
   useEffect(() => {
     let stopped = false
 
+    const withdraw = () => {
+      showing.current?.close()
+      showing.current = null
+      knocked.current = null
+    }
+
     const poll = async () => {
+      let next: AgentRequest | null = null
+
       try {
         const answer = await api.agentRequests()
-
-        if (!stopped) {
-          setRequest(answer.requests[0] ?? null)
-        }
+        next = answer.requests[0] ?? null
       } catch {
-        if (!stopped) {
-          setRequest(null)
-        }
+        next = null
       }
+
+      if (stopped) {
+        return
+      }
+
+      if (!next) {
+        // Answered here, answered elsewhere, or expired. Either way the desktop should stop
+        // asking about it.
+        withdraw()
+      } else if (next.id !== knocked.current) {
+        withdraw()
+        knocked.current = next.id
+        showing.current = knock({
+          title: 'Keyhold — um assistente está pedindo um segredo',
+          body: `${next.peer.parent ?? next.peer.process} quer ${next.field} de ${next.record_title}. Abra o Keyhold para decidir.`,
+          tag: `keyhold-agent-${next.id}`,
+        })
+      }
+
+      setRequest(next)
     }
 
     void poll()
@@ -50,6 +83,7 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
     return () => {
       stopped = true
       window.clearInterval(timer)
+      withdraw()
     }
   }, [])
 
@@ -59,6 +93,10 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
 
   const answer = (allowed: boolean, minutes = 0) =>
     void api.answerAgentRequest(request.id, allowed, minutes).then(() => {
+      // Take the knock back at once rather than a poll later: the question is settled, and a
+      // notification for a settled question is a second chance to answer something twice.
+      showing.current?.close()
+      showing.current = null
       setRequest(null)
       onAnswered()
     })

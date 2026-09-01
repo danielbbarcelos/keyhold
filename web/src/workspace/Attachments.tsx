@@ -42,7 +42,7 @@ export function Attachments({ recordId }: { recordId: string }) {
       await refresh()
       setError('')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
     } finally {
       setBusy(false)
     }

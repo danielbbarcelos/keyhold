@@ -45,7 +45,7 @@ pub fn generate_secret() -> Vec<u8> {
 /// app's list. Nothing secret is in it except the secret itself, which is the entire purpose.
 pub fn provisioning_uri(secret: &[u8], account: &str) -> String {
     format!(
-        "otpauth://totp/keyhold:{}?secret={}&issuer=keyhold&algorithm=SHA1&digits={}&period={}",
+        "otpauth://totp/Keyhold:{}?secret={}&issuer=Keyhold&algorithm=SHA1&digits={}&period={}",
         urlencode(account),
         base32(secret),
         DIGITS,
@@ -164,9 +164,9 @@ mod tests {
     fn the_provisioning_uri_is_what_an_app_expects() {
         let uri = provisioning_uri(b"12345678901234567890", "daniel@example.com");
 
-        assert!(uri.starts_with("otpauth://totp/keyhold:"));
+        assert!(uri.starts_with("otpauth://totp/Keyhold:"));
         assert!(uri.contains("secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"));
-        assert!(uri.contains("issuer=keyhold"));
+        assert!(uri.contains("issuer=Keyhold"));
         assert!(uri.contains("digits=6"));
         assert!(uri.contains("period=30"));
     }

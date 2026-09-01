@@ -33,7 +33,7 @@ fn ask(request: &Request) -> Result<Response> {
 
     let mut stream = UnixStream::connect(&path).map_err(|_| {
         anyhow::anyhow!(
-            "o keyhold não está aberto nesta máquina (nenhum socket em {})",
+            "o Keyhold não está aberto nesta máquina (nenhum socket em {})",
             path.display()
         )
     })?;
@@ -46,7 +46,7 @@ fn ask(request: &Request) -> Result<Response> {
     std::io::BufReader::new(&stream).read_line(&mut answer)?;
 
     if answer.trim().is_empty() {
-        bail!("o keyhold fechou a conexão sem responder");
+        bail!("o Keyhold fechou a conexão sem responder");
     }
 
     Ok(serde_json::from_str(&answer)?)
@@ -95,7 +95,7 @@ fn tools(may_reveal: bool, may_copy: bool) -> Value {
                  o segredo em uma variável de ambiente do processo filho e devolve a saída. O valor \
                  nunca entra nesta conversa, então nunca vai parar no histórico da sessão. Exemplo: \
                  rodar `psql \"$DB_URL\"` com o campo Senha em DB_URL. A pessoa aprova o pedido na \
-                 janela do keyhold.",
+                 janela do Keyhold.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -144,7 +144,7 @@ fn tools(may_reveal: bool, may_copy: bool) -> Value {
                  keyhold_copy não resolverem, porque o valor passa a fazer parte desta conversa e \
                  fica no histórico da sessão. NUNCA escreva o valor em arquivo, commit, log, \
                  mensagem ou resumo, e não o repita de volta para a pessoa — ela já tem o cofre. A \
-                 pessoa aprova cada pedido na janela do keyhold.",
+                 pessoa aprova cada pedido na janela do Keyhold.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -227,7 +227,7 @@ fn render(response: Response) -> Value {
         ),
         Response::Value { value } => (
             format!(
-                "{value}\n\n[keyhold] Este valor saiu do cofre local e agora faz parte desta \
+                "{value}\n\n[Keyhold] Este valor saiu do cofre local e agora faz parte desta \
                  conversa. Use-o só na chamada imediata; não o escreva em arquivo, commit, log ou \
                  resumo."
             ),
@@ -239,7 +239,7 @@ fn render(response: Response) -> Value {
             ),
             code != 0,
         ),
-        Response::Refused { reason } => (format!("[keyhold] {reason}"), true),
+        Response::Refused { reason } => (format!("[Keyhold] {reason}"), true),
     };
 
     json!({
@@ -300,7 +300,7 @@ pub fn run_command(record: &str, field: &str, variable: Option<&str>, command: &
     let found = match ask(&Request::Search { query: record.to_string() })? {
         Response::Records { records } => records,
         Response::Refused { reason } => bail!("{reason}"),
-        _ => bail!("resposta inesperada do keyhold"),
+        _ => bail!("resposta inesperada do Keyhold"),
     };
 
     let exact: Vec<_> = found
@@ -339,7 +339,7 @@ pub fn run_command(record: &str, field: &str, variable: Option<&str>, command: &
             Ok(code)
         }
         Response::Refused { reason } => bail!("{reason}"),
-        _ => bail!("resposta inesperada do keyhold"),
+        _ => bail!("resposta inesperada do Keyhold"),
     }
 }
 

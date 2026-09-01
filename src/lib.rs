@@ -23,6 +23,7 @@ pub mod generator;
 pub mod health;
 pub mod http;
 pub mod identity;
+pub mod instance;
 pub mod lock;
 pub mod mcp;
 pub mod paths;

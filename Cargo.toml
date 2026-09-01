@@ -32,6 +32,10 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 thiserror = "1"
 anyhow = "1"
 
+# Only for `kill`: replacing a running instance means signalling it and waiting for it to be gone.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 tempfile = "3"

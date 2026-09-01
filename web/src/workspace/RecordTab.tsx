@@ -71,7 +71,7 @@ export function RecordTab({ record, folders, onReload, onClosed }: RecordTabProp
       await onReload(record.id)
       setError('')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
     }
   }
 

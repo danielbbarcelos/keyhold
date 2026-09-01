@@ -16,7 +16,7 @@ valid session token.
 
 The limits in [THREAT_MODEL.md](THREAT_MODEL.md) are deliberate and documented: malware running as
 the user, a compromised browser, screenshots, and the absence of any password recovery. A report
-that keyhold cannot survive one of those describes the design rather than a flaw in it — though an
+that Keyhold cannot survive one of those describes the design rather than a flaw in it — though an
 argument that one of those limits is drawn in the wrong place is genuinely welcome, as an issue.
 
 ## Expectations

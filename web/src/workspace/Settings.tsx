@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
+  Bell,
+  BellOff,
   Bot,
   KeyRound,
   Loader2,
@@ -39,6 +41,7 @@ import {
 } from '@/components/ui/alert-dialog'
 
 import { api, ApiError, type LockPolicy, type Status, type VaultSummary } from '../api'
+import { askToNotify, notifyState, type NotifyState } from '../notify'
 import { TransferPanel } from './TransferPanel'
 import { VaultsPanel } from './VaultsPanel'
 
@@ -103,7 +106,7 @@ function AutoLock({ policy, onChanged }: { policy: LockPolicy; onChanged: () => 
           <Badge>recomendado</Badge>
         </CardTitle>
         <CardDescription>
-          O relógio corre no keyhold, não nesta janela — uma aba fechada ou congelada não estica o
+          O relógio corre no Keyhold, não nesta janela — uma aba fechada ou congelada não estica o
           prazo. Você pode desligar os dois, e o cofre então só tranca quando você mandar.
         </CardDescription>
       </CardHeader>
@@ -172,7 +175,7 @@ function SecondFactor({ status, onChanged }: { status: Status; onChanged: () => 
       await action()
       setError('')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
     } finally {
       setBusy(false)
     }
@@ -298,7 +301,7 @@ function MasterPassword({ status, onChanged }: { status: Status; onChanged: () =
       setError('')
       onChanged()
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
       setDone('')
     }
   }
@@ -313,7 +316,7 @@ function MasterPassword({ status, onChanged }: { status: Status; onChanged: () =
         </CardTitle>
         <CardDescription>
           {hasPassword
-            ? 'Trocar a senha não mexe em nada que está guardado: o keyhold reembrulha uma chave só.'
+            ? 'Trocar a senha não mexe em nada que está guardado: o Keyhold reembrulha uma chave só.'
             : 'Este cofre abre sem senha. Definir uma agora passa a proteger o arquivo por criptografia, e não só por permissão de arquivo.'}
         </CardDescription>
       </CardHeader>
@@ -519,6 +522,58 @@ function TrailSettings({ on, onChanged }: { on: boolean; onChanged: () => void }
 }
 
 /**
+ * Permission to knock on the desktop when an agent asks for something.
+ *
+ * It lives here, next to the switch that opens the door, because that is the moment the question
+ * makes sense: a request expires in ninety seconds, and nobody watching a terminal sees a dialog
+ * in a window behind it. Asked from a click and never on load — a page that asks cold is a page
+ * whose prompts people learn to dismiss.
+ */
+function DesktopKnock() {
+  const [state, setState] = useState<NotifyState>(() => notifyState())
+
+  if (state === 'unsupported') {
+    return null
+  }
+
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <Label className="font-normal">
+        Avisar na área de trabalho
+        <span className="mt-1 block text-sm text-muted-foreground">
+          {state === 'granted'
+            ? 'Um pedido aparece como notificação do sistema, com o processo e o campo — nunca com o valor.'
+            : state === 'denied'
+              ? 'O navegador está bloqueando as notificações deste endereço. Libere nas permissões do site para voltar a receber.'
+              : 'Um pedido expira em 90 segundos. Sem isto, ele só aparece se esta janela estiver à vista.'}
+        </span>
+      </Label>
+
+      {state === 'granted' ? (
+        <Badge variant="secondary" className="shrink-0 gap-1">
+          <Bell className="size-3" />
+          ligado
+        </Badge>
+      ) : state === 'denied' ? (
+        <Badge variant="secondary" className="shrink-0 gap-1">
+          <BellOff className="size-3" />
+          bloqueado
+        </Badge>
+      ) : (
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={() => void askToNotify().then(setState)}
+        >
+          Permitir
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/**
  * The agent surface: which vaults it may see, and whether the door is open at all.
  *
  * Two switches on purpose. Marking a vault says what *could* be reached; opening the socket says
@@ -568,7 +623,7 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
         <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm">
           <p className="font-medium">Como um assistente usa uma credencial sem lê-la</p>
           <p className="text-muted-foreground">
-            Ele executa o comando através do keyhold, e o segredo entra numa variável de ambiente do
+            Ele executa o comando através do Keyhold, e o segredo entra numa variável de ambiente do
             processo — nunca no texto da conversa:
           </p>
           <code className="block rounded-md border bg-background px-3 py-2 text-xs">
@@ -615,6 +670,8 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
           </p>
         )}
 
+        <DesktopKnock />
+
         <div className="space-y-3 border-t pt-4">
           <Label>Cofres ao alcance</Label>
 
@@ -643,7 +700,7 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
           <div className="space-y-2 border-t pt-4">
             <Label>Ligar o Claude Code a este cofre</Label>
             <p className="text-sm text-muted-foreground">
-              Rode isto uma vez no terminal. O keyhold não mexe na configuração de outro programa
+              Rode isto uma vez no terminal. O Keyhold não mexe na configuração de outro programa
               sozinho.
             </p>
 

@@ -18,7 +18,7 @@ promise it does not keep.
 ## What F1–F4 put in place
 
 **Three layers, each one a choice with a stated cost.** A master password is recommended and
-optional — without one, keyhold falls back to a device key stored beside the vault, and the setup
+optional — without one, Keyhold falls back to a device key stored beside the vault, and the setup
 screen says plainly that this means anybody who can read your files can open your vault. A second
 factor from an authenticator app is optional, and the interface says what it does and does not
 protect against. Auto-lock is recommended and switchable off, in both of its clocks.
@@ -110,7 +110,7 @@ records" is something somebody can weigh and "cannot be undone" is a sentence ev
 
 **A trash that waits.** Deleting archives; destroying is separate, confirmed, and takes the record's
 whole version history with it. The retention window is configurable, defaults to 30 days, and can
-be switched off entirely. The purge runs on unlock rather than on a timer: keyhold only exists
+be switched off entirely. The purge runs on unlock rather than on a timer: Keyhold only exists
 while somebody is using it, so a schedule would fire whenever the machine happened to be awake.
 
 ## What F0 put in place
