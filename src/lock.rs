@@ -43,7 +43,7 @@ impl LockPolicy {
     pub fn sanitised(self) -> Self {
         Self {
             idle_seconds: self.idle_seconds.map(|s| s.clamp(30, 8 * 60 * 60)),
-            hidden_seconds: self.hidden_seconds.map(|s| s.clamp(10, 60 * 60)),
+            hidden_seconds: self.hidden_seconds.map(|s| s.clamp(10, 8 * 60 * 60)),
         }
     }
 }

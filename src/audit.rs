@@ -96,6 +96,7 @@ pub mod action {
     pub const LOCK: &str = "vault.lock";
     pub const RECORD_CREATED: &str = "record.created";
     pub const RECORD_UPDATED: &str = "record.updated";
+    pub const RECORD_MOVED: &str = "record.moved";
     pub const RECORD_DELETED: &str = "record.deleted";
     pub const RECORD_DESTROYED: &str = "record.destroyed";
     pub const RECORD_RESTORED: &str = "record.restored";

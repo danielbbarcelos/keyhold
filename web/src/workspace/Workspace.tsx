@@ -30,13 +30,6 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
@@ -67,6 +60,8 @@ import {
   MoveFolderDialog,
   RenameFolderDialog,
 } from './FolderDialogs'
+import { MoveToVaultDialog } from './MoveToVaultDialog'
+import { EVERY_VAULT, VaultPicker } from './VaultPicker'
 import { AgentApproval } from './AgentApproval'
 import { AuditPanel } from './AuditPanel'
 import { InstancesPanel } from './InstancesPanel'
@@ -133,6 +128,9 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   const [folderAction, setFolderAction] = useState<
     { what: 'rename' | 'move' | 'delete'; folder: FolderNode } | null
   >(null)
+  const [deleting, setDeleting] = useState<RecordPreview | null>(null)
+  // `what` is the phrase the dialog puts in its title, so one record and a selection read alike.
+  const [movingToVault, setMovingToVault] = useState<{ ids: string[]; what: string } | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [dragging, setDragging] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null | undefined>(undefined)
@@ -151,7 +149,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
           (vault) => vault.id === current && !vault.archived,
         )
 
-        if (current && stillThere) {
+        if (current === EVERY_VAULT || (current && stillThere)) {
           return current
         }
 
@@ -162,32 +160,61 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
     }
   }, [])
 
+  /**
+   * What the screen is showing: one vault, or all of them at once.
+   *
+   * Across every vault there is no folder tree — a folder belongs to a vault, and a tree that mixed
+   * "Clientes" from two of them would be a tree whose rows mean different things. The sidebar shows
+   * the vaults instead, which is the only grouping that still holds.
+   */
   const refreshContents = useCallback(async () => {
     if (!vaultId) {
       return
     }
 
-    try {
-      const [tree, list] = await Promise.all([api.folders(vaultId), api.records(vaultId)])
+    const across = vaultId === EVERY_VAULT
+    const reach = across ? vaults.filter((vault) => !vault.archived).map((v) => v.id) : [vaultId]
 
-      setFolders(tree.folders)
-      setRecords(list.records)
+    try {
+      if (across) {
+        const lists = await Promise.all(reach.map((id) => api.records(id)))
+
+        setFolders([])
+        setRecords(
+          lists
+            .flatMap((list) => list.records)
+            .sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
+        )
+      } else {
+        const [tree, list] = await Promise.all([api.folders(vaultId), api.records(vaultId)])
+
+        setFolders(tree.folders)
+        setRecords(list.records)
+      }
 
       // The two lenses that ask the binary a different question. Fetched only when they are on
       // screen: health opens every record in the vault to judge it, which is not something to do
       // on every refresh of a list nobody is looking at.
       if (lens === 'attention') {
         setHealth(null)
-        setHealth((await api.health(vaultId)).health)
+
+        const reports = await Promise.all(reach.map((id) => api.health(id)))
+
+        setHealth({
+          findings: reports.flatMap((report) => report.health.findings),
+          examined: reports.reduce((total, report) => total + report.health.examined, 0),
+        })
       }
 
       if (lens === 'trash') {
-        setTrash((await api.trash(vaultId)).records)
+        const bins = await Promise.all(reach.map((id) => api.trash(id)))
+
+        setTrash(bins.flatMap((bin) => bin.records))
       }
     } catch (cause) {
       setError(describe(cause))
     }
-  }, [vaultId, lens])
+  }, [vaultId, vaults, lens])
 
   useEffect(() => void refreshVaults(), [refreshVaults])
   useEffect(() => void refreshContents(), [refreshContents])
@@ -303,6 +330,25 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   }
 
   /**
+   * Send a record to the trash.
+   *
+   * Closing the tab is part of it: a record in the trash is not a record with a tab, and leaving
+   * one open means a pane whose Save writes to something the list no longer shows.
+   */
+  async function deleteRecord(id: string) {
+    try {
+      await api.archiveRecord(id, true)
+
+      setTabs((current) => current.filter((tab) => tab.id !== id))
+      setActiveTab((current) => (current === id ? null : current))
+
+      await refreshContents()
+    } catch (cause) {
+      setError(describe(cause))
+    }
+  }
+
+  /**
    * What can be done to a folder.
    *
    * Colour is a submenu here rather than only a field in the rename dialog. It was reachable that
@@ -341,7 +387,11 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
    *
    * Deliberately about the row it was opened on, never about the selection: the checkboxes have
    * their own bar, and a right-click that quietly acts on nine other rows is how the wrong nine get
-   * moved. Deleting goes to the trash, which is why it does not stop to ask.
+   * moved.
+   *
+   * Deleting asks, even though it only goes to the trash. "Excluir" sits one row below "Mover
+   * para" in a menu that opens under the pointer, and undoing a mis-click meant finding the lens,
+   * the row and the restore — three steps to undo one that was never intended.
    */
   const recordEntries = (record: RecordPreview): MenuEntry[] => [
     { kind: 'item', label: 'Abrir', onSelect: () => void openRecord(record.id) },
@@ -366,35 +416,56 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
         })),
       ],
     },
+    {
+      kind: 'item',
+      label: 'Mover para outro cofre…',
+      onSelect: () => setMovingToVault({ ids: [record.id], what: `“${record.title}”` }),
+    },
     { kind: 'separator' },
     {
       kind: 'item',
       label: 'Excluir',
       destructive: true,
-      onSelect: () =>
-        void api.archiveRecord(record.id, true).then(() => {
-          // A record in the trash is not a record with a tab. Closing it here is the same thing the
-          // editor does when you delete from inside it.
-          setTabs((current) => current.filter((tab) => tab.id !== record.id))
-          setActiveTab((current) => (current === record.id ? null : current))
-          void refreshContents()
-        }),
+      onSelect: () => setDeleting(record),
     },
   ]
 
   const activeVault = vaults.find((vault) => vault.id === vaultId) ?? null
+  const across = vaultId === EVERY_VAULT
+  const openVaults = vaults.filter((vault) => !vault.archived)
+  const nameOfVault = (id: string) => vaults.find((vault) => vault.id === id)?.name ?? ''
 
   return (
     <div className="grid h-screen grid-cols-[3.5rem_16rem_minmax(0,1fr)] overflow-hidden bg-background">
       {/* ── the rail ─────────────────────────────────────────────────────────────────────────── */}
       <nav className="flex flex-col items-center gap-1 border-r bg-sidebar py-3">
+        {/*
+          * The logo goes home.
+          *
+          * It is the one mark on the screen that is not a control, which is exactly why people
+          * click it when they are lost — so it does the thing they mean by it: the whole list, no
+          * folder, no open record, nothing typed in the search box.
+          */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="mb-2 flex size-9 items-center justify-center">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="mb-2"
+              aria-label="Início"
+              onClick={() => {
+                setLens('all')
+                setFolderId(null)
+                setActiveTab(null)
+                setCreating(null)
+                setQuery('')
+                setSelected([])
+              }}
+            >
               <Logo className="size-7" />
-            </span>
+            </Button>
           </TooltipTrigger>
-          <TooltipContent side="right">Keyhold</TooltipContent>
+          <TooltipContent side="right">Início</TooltipContent>
         </Tooltip>
 
         {LENSES.map((entry) => {
@@ -455,28 +526,16 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
         <>
           <aside className="flex min-w-0 flex-col border-r bg-sidebar">
             <div className="flex h-14 items-center gap-1.5 border-b px-3">
-              <Select
-                value={vaultId ?? ''}
-                onValueChange={(value) => {
-                  setVaultId(value)
+              <VaultPicker
+                vaults={vaults}
+                value={vaultId}
+                onPick={(id) => {
+                  setVaultId(id)
                   setFolderId(null)
                   setTabs([])
                   setActiveTab(null)
                 }}
-              >
-                <SelectTrigger className="h-8 flex-1" aria-label="Cofre">
-                  <SelectValue placeholder="Cofre" />
-                </SelectTrigger>
-                <SelectContent>
-                  {vaults
-                    .filter((vault) => !vault.archived)
-                    .map((vault) => (
-                      <SelectItem key={vault.id} value={vault.id}>
-                        {vault.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              />
 
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -495,6 +554,19 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
 
             <ScrollArea className="flex-1">
               <div className="space-y-0.5 p-2">
+                {across ? (
+                  openVaults.map((vault) => (
+                    <TreeRow
+                      key={vault.id}
+                      selected={false}
+                      colour={vault.colour}
+                      onClick={() => setVaultId(vault.id)}
+                    >
+                      {vault.name}
+                    </TreeRow>
+                  ))
+                ) : (
+                <>
                 <TreeRow
                   selected={folderId === null}
                   onClick={() => setFolderId(null)}
@@ -557,6 +629,8 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                     {folder.name}
                   </TreeRow>
                 ))}
+                </>
+                )}
               </div>
             </ScrollArea>
 
@@ -565,7 +639,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                 variant="ghost"
                 size="sm"
                 className="w-full justify-start"
-                disabled={!vaultId}
+                disabled={!vaultId || across}
                 onClick={() => setAsking({ what: 'folder', parentId: folderId })}
               >
                 <FolderPlus />
@@ -583,6 +657,12 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                   folders={folders}
                   onClear={() => setSelected([])}
                   onChanged={refreshContents}
+                  onMoveToVault={() =>
+                    setMovingToVault({
+                      ids: selected,
+                      what: `${selected.length} ${selected.length === 1 ? 'registro' : 'registros'}`,
+                    })
+                  }
                 />
               ) : (
               <>
@@ -601,7 +681,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
               {!wholeLens && (
                 <Button
                   size="sm"
-                  disabled={!vaultId}
+                  disabled={!vaultId || across}
                   onClick={() => {
                     setCreating({ kind: 'login', payload: emptyPayload('login'), folderId })
                     setActiveTab(null)
@@ -639,7 +719,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                     <TrashPanel
                       records={trash}
                       retentionDays={status.retention_days}
-                      vaultId={vaultId}
+                      vaultId={across ? null : vaultId}
                       onChanged={refreshContents}
                     />
                   )
@@ -712,6 +792,13 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                           >
                             {record.title}
                           </button>
+
+                          {/* Which vault a row is from only matters when the list mixes them. */}
+                          {across && (
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {nameOfVault(record.vault_id)}
+                            </span>
+                          )}
 
                           {record.favourite && (
                             <Star className="size-3 shrink-0 fill-current text-primary" />
@@ -810,7 +897,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                 ) : (
                   <div className="grid flex-1 place-items-center p-8 text-center">
                     <p className="max-w-xs text-sm text-muted-foreground">
-                      {activeVault
+                      {activeVault || across
                         ? 'Escolha um registro à esquerda, ou crie um. Ctrl+P abre a busca.'
                         : 'Crie um cofre para começar.'}
                     </p>
@@ -905,6 +992,54 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
             void refreshContents()
           }}
           onCancel={() => setFolderAction(null)}
+        />
+      )}
+
+      {deleting && (
+        <AlertDialog open onOpenChange={(open) => !open && setDeleting(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Excluir “{deleting.title}”?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Vai para a lixeira, e de lá dá para restaurar enquanto o prazo não vencer.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  const id = deleting.id
+                  setDeleting(null)
+                  void deleteRecord(id)
+                }}
+              >
+                Excluir
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {movingToVault && (
+        <MoveToVaultDialog
+          ids={movingToVault.ids}
+          what={movingToVault.what}
+          vaults={vaults}
+          fromVaultId={across ? null : vaultId}
+          onDone={() => {
+            // Whatever moved is in another vault now, so any tab showing it is a tab onto a record
+            // this screen no longer lists.
+            const moved = new Set(movingToVault.ids)
+
+            setTabs((current) => current.filter((tab) => !moved.has(tab.id)))
+            setActiveTab((current) => (current && moved.has(current) ? null : current))
+            setSelected([])
+            setMovingToVault(null)
+
+            void refreshContents()
+          }}
+          onCancel={() => setMovingToVault(null)}
         />
       )}
 

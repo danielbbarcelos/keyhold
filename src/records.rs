@@ -325,6 +325,107 @@ pub fn move_to_folder(store: &Store, id: &str, folder_id: Option<&str>) -> Resul
     Ok(())
 }
 
+/// Move a record to another vault.
+///
+/// The one move that re-encrypts. A record's key is wrapped under its vault's key, and its payload
+/// is sealed with the vault id in the additional data — so a row that changed `vault_id` and
+/// nothing else would be a row nobody can open, its own history included. Everything that names the
+/// old vault is rebuilt here in one transaction: the wrapped record key, the current payload, every
+/// past version, and the wrapped key of every attachment.
+///
+/// **The record key itself stays.** It never left this file, and the vault it is moving to is under
+/// the same master password; minting a new one would rewrite every version's ciphertext and buy
+/// nothing. What changes is who wraps it, which is exactly what "this is in that vault now" means —
+/// including for `agent_access`, which is decided per vault.
+///
+/// A version that will not open stops the move instead of being dropped. A history with a hole in
+/// it is worse than a record that stayed where it was.
+pub fn move_to_vault(
+    store: &mut Store,
+    master: &SecretKey,
+    id: &str,
+    vault_id: &str,
+    folder_id: Option<&str>,
+) -> Result<()> {
+    let current = header(store, id)?;
+
+    if current.vault_id == vault_id {
+        return move_to_folder(store, id, folder_id);
+    }
+
+    let from = vaults::vault_key(store, master, &current.vault_id)?;
+    let to = vaults::vault_key(store, master, vault_id)?;
+
+    check_folder(store, vault_id, folder_id)?;
+
+    let (wrapped, sealed): (Vec<u8>, Vec<u8>) = store.conn().query_row(
+        "SELECT wrapped_key, sealed_payload FROM records WHERE id = ?1",
+        params![id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+
+    let record_key =
+        unwrap_key(&from, &wrapped, &key_aad(id)).context("this record's key did not open")?;
+
+    let rewrapped = wrap_key(&to, &record_key, &key_aad(id))?;
+
+    let bytes = crypto::open(
+        &record_key,
+        &sealed,
+        &payload_aad(id, current.version, &current.vault_id),
+    )
+    .context("this record did not open")?;
+
+    let resealed = crypto::seal(&record_key, &bytes, &payload_aad(id, current.version, vault_id))?;
+
+    let older = {
+        let mut statement = store
+            .conn()
+            .prepare("SELECT version, sealed_payload FROM record_versions WHERE record_id = ?1")?;
+
+        let rows = statement.query_map(params![id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+        })?;
+
+        let collected = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+        collected
+    };
+
+    let mut moved = Vec::with_capacity(older.len());
+
+    for (version, blob) in older {
+        let bytes = crypto::open(&record_key, &blob, &payload_aad(id, version, &current.vault_id))
+            .with_context(|| format!("version {version} of this record did not open"))?;
+
+        moved.push((
+            version,
+            crypto::seal(&record_key, &bytes, &payload_aad(id, version, vault_id))?,
+        ));
+    }
+
+    let transaction = store.conn_mut().transaction()?;
+
+    transaction.execute(
+        "UPDATE records SET vault_id = ?2, folder_id = ?3, wrapped_key = ?4, sealed_payload = ?5,
+                            updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+         WHERE id = ?1",
+        params![id, vault_id, folder_id, rewrapped, resealed],
+    )?;
+
+    for (version, blob) in moved {
+        transaction.execute(
+            "UPDATE record_versions SET sealed_payload = ?3 WHERE record_id = ?1 AND version = ?2",
+            params![id, version, blob],
+        )?;
+    }
+
+    crate::attachments::rewrap_for_vault(&transaction, id, &from, &to)?;
+
+    transaction.commit()?;
+
+    Ok(())
+}
+
 pub fn set_favourite(store: &Store, id: &str, favourite: bool) -> Result<()> {
     changed(store.conn().execute(
         "UPDATE records SET favourite = ?2 WHERE id = ?1",
@@ -772,6 +873,154 @@ mod tests {
 
         let made = create(&store, &master, &vault, None, "login", &login("X", "y")).unwrap();
         assert!(move_to_folder(&store, &made.id, Some(&stray.id)).is_err());
+    }
+
+    /// Somebody with a spare vault and a text editor cannot move a record by hand.
+    ///
+    /// This is the reason `move_to_vault` exists at all: the vault id is in the payload's
+    /// additional data, so an `UPDATE records SET vault_id` is a record that stops opening.
+    #[test]
+    fn changing_the_vault_column_by_hand_breaks_the_record() {
+        let (_dir, store, master, vault) = scratch();
+
+        let other = vaults::create_vault(
+            &store,
+            &master,
+            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into() },
+        )
+        .unwrap();
+
+        let made = create(&store, &master, &vault, None, "login", &login("Servidor", "senha")).unwrap();
+
+        store
+            .conn()
+            .execute(
+                "UPDATE records SET vault_id = ?2 WHERE id = ?1",
+                params![made.id, other.id],
+            )
+            .unwrap();
+
+        assert!(open(&store, &master, &made.id).is_err(), "a hand-edited move opened anyway");
+    }
+
+    #[test]
+    fn moving_between_vaults_carries_the_record_and_its_history() {
+        let (_dir, mut store, master, vault) = scratch();
+
+        let other = vaults::create_vault(
+            &store,
+            &master,
+            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into() },
+        )
+        .unwrap();
+
+        let made = create(&store, &master, &vault, None, "login", &login("Servidor", "primeira")).unwrap();
+        update(&mut store, &master, &made.id, &login("Servidor", "segunda")).unwrap();
+
+        let before: Vec<u8> = store
+            .conn()
+            .query_row(
+                "SELECT sealed_payload FROM records WHERE id = ?1",
+                params![made.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        move_to_vault(&mut store, &master, &made.id, &other.id, None).unwrap();
+
+        let moved = open(&store, &master, &made.id).unwrap();
+
+        assert_eq!(moved.header.vault_id, other.id);
+        assert_eq!(moved.payload.fields[0].value, "segunda");
+
+        // The version written before the move still opens, which is the part a naive move loses.
+        let old = read_version(&store, &master, &made.id, 1).unwrap();
+        assert_eq!(old.fields[0].value, "primeira");
+
+        let after: Vec<u8> = store
+            .conn()
+            .query_row(
+                "SELECT sealed_payload FROM records WHERE id = ?1",
+                params![made.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_ne!(before, after, "the payload was not re-sealed under the new vault");
+
+        assert!(list(&store, &vault, true).unwrap().is_empty(), "it is still listed where it was");
+        assert_eq!(list(&store, &other.id, true).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_moved_record_takes_its_attachments_with_it() {
+        let (_dir, mut store, master, vault) = scratch();
+
+        let other = vaults::create_vault(
+            &store,
+            &master,
+            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into() },
+        )
+        .unwrap();
+
+        let made = create(&store, &master, &vault, None, "login", &login("Servidor", "senha")).unwrap();
+
+        let file =
+            crate::attachments::add(&store, &master, &made.id, "chave.pem", "text/plain", b"---")
+                .unwrap();
+
+        move_to_vault(&mut store, &master, &made.id, &other.id, None).unwrap();
+
+        let reopened = crate::attachments::open(&store, &master, &file.id).unwrap();
+
+        assert_eq!(reopened.bytes, b"---");
+    }
+
+    #[test]
+    fn a_move_can_file_the_record_in_the_new_vaults_folder_and_nowhere_else() {
+        let (_dir, mut store, master, vault) = scratch();
+
+        let other = vaults::create_vault(
+            &store,
+            &master,
+            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into() },
+        )
+        .unwrap();
+
+        let here = vaults::create_folder(
+            &store,
+            &master,
+            &vault,
+            None,
+            crate::vaults::FolderMeta { name: "Aqui".into(), colour: None },
+        )
+        .unwrap();
+
+        let there = vaults::create_folder(
+            &store,
+            &master,
+            &other.id,
+            None,
+            crate::vaults::FolderMeta { name: "Lá".into(), colour: None },
+        )
+        .unwrap();
+
+        let made = create(&store, &master, &vault, Some(&here.id), "login", &login("X", "y")).unwrap();
+
+        assert!(
+            move_to_vault(&mut store, &master, &made.id, &other.id, Some(&here.id)).is_err(),
+            "a record was filed in a folder of the vault it just left"
+        );
+
+        // The refused move left everything where it was, rather than half-way.
+        assert_eq!(header(&store, &made.id).unwrap().vault_id, vault);
+
+        move_to_vault(&mut store, &master, &made.id, &other.id, Some(&there.id)).unwrap();
+
+        let moved = header(&store, &made.id).unwrap();
+
+        assert_eq!(moved.vault_id, other.id);
+        assert_eq!(moved.folder_id.as_deref(), Some(there.id.as_str()));
     }
 
     #[test]

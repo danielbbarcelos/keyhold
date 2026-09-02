@@ -652,17 +652,53 @@ async fn update_record(
 struct MoveRecord {
     #[serde(default)]
     folder_id: Option<String>,
+    /// Absent means "wherever it already is". Present and different means a re-encryption.
+    #[serde(default)]
+    vault_id: Option<String>,
 }
 
+/// Move a record: to another folder, or to another vault entirely.
+///
+/// One route for both because they are one gesture as far as somebody dragging a row is concerned,
+/// and because the folder is only meaningful alongside the vault that owns it — sending them apart
+/// would allow a request that files a record in a folder belonging to a vault it is not in.
 async fn move_record(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<MoveRecord>,
 ) -> Answer {
-    let store = state.store.lock().unwrap();
+    let mut store = state.store.lock().unwrap();
 
-    with_key!(state, |_key| records::move_to_folder(&store, &id, body.folder_id.as_deref()))
-        .map_err(bad_request)?;
+    let before = with_key!(state, |_key| records::header(&store, &id)).map_err(bad_request)?;
+
+    match body.vault_id.as_deref() {
+        Some(vault_id) => with_key!(state, |key| records::move_to_vault(
+            &mut store,
+            key,
+            &id,
+            vault_id,
+            body.folder_id.as_deref()
+        ))
+        .map_err(bad_request)?,
+        None => with_key!(state, |_key| records::move_to_folder(
+            &store,
+            &id,
+            body.folder_id.as_deref()
+        ))
+        .map_err(bad_request)?,
+    }
+
+    // Only a change of vault is written down. Dragging a row between folders is arranging, and a
+    // trail that logs arranging is a trail nobody reads the important lines of.
+    if body.vault_id.as_deref().is_some_and(|to| to != before.vault_id) {
+        audit::note(
+            &store,
+            &state.lock,
+            audit::action::RECORD_MOVED,
+            Some(&id),
+            Detail::new().with("from_vault", before.vault_id),
+        );
+    }
 
     Ok(Json(json!({ "moved": true })))
 }

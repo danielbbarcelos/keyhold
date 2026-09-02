@@ -83,18 +83,19 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged }: Setting
   )
 }
 
-const IDLE_CHOICES: Array<[string, number | null]> = [
+/**
+ * The same presets for both clocks.
+ *
+ * They used to differ — the hidden one stopped at two minutes, on the theory that a window you
+ * cannot see is a window you are not using. It is not: reading a password and typing it into
+ * another tab is the ordinary way to use a vault, and a fuse that short turns the ordinary case
+ * into a re-unlock. The two clocks answer the same question, so they offer the same answers.
+ */
+const CHOICES: Array<[string, number | null]> = [
   ['1 min', 60],
   ['5 min', 300],
   ['15 min', 900],
   ['1 h', 3600],
-  ['Nunca', null],
-]
-
-const HIDDEN_CHOICES: Array<[string, number | null]> = [
-  ['15 s', 15],
-  ['1 min', 60],
-  ['2 min', 120],
   ['Nunca', null],
 ]
 
@@ -121,13 +122,11 @@ function AutoLock({ policy, onChanged }: { policy: LockPolicy; onChanged: () => 
       <CardContent className="space-y-4 px-6">
         <Choices
           label="Parado por"
-          options={IDLE_CHOICES}
           current={policy.idle_seconds}
           onPick={(value) => void save({ idle_seconds: value })}
         />
         <Choices
           label="Janela escondida por"
-          options={HIDDEN_CHOICES}
           current={policy.hidden_seconds}
           onPick={(value) => void save({ hidden_seconds: value })}
         />
@@ -136,17 +135,36 @@ function AutoLock({ policy, onChanged }: { policy: LockPolicy; onChanged: () => 
   )
 }
 
+/**
+ * The presets, plus whatever is set now if it is not one of them.
+ *
+ * A vault written before these presets changed can hold a value no button offers, and a row of
+ * buttons with none of them lit reads as "off" — which is the opposite of what it means.
+ */
 function Choices({
   label,
-  options,
   current,
   onPick,
 }: {
   label: string
-  options: Array<[string, number | null]>
   current: number | null
   onPick: (value: number | null) => void
 }) {
+  const options: Array<[string, number | null]> = (() => {
+    if (current === null || CHOICES.some(([, value]) => value === current)) {
+      return CHOICES
+    }
+
+    const timed: Array<[string, number]> = [
+      ...CHOICES.filter((choice): choice is [string, number] => choice[1] !== null),
+      [minutes(current), current],
+    ]
+
+    timed.sort((a, b) => a[1] - b[1])
+
+    return [...timed, ['Nunca', null] as [string, null]]
+  })()
+
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
@@ -164,6 +182,14 @@ function Choices({
       </div>
     </div>
   )
+}
+
+function minutes(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds} s`
+  }
+
+  return seconds % 3600 === 0 ? `${seconds / 3600} h` : `${Math.round(seconds / 60)} min`
 }
 
 function SecondFactor({ status, onChanged }: { status: Status; onChanged: () => void }) {

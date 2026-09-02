@@ -16,6 +16,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
@@ -33,9 +34,10 @@ interface BulkBarProps {
   folders: FolderNode[]
   onClear: () => void
   onChanged: () => void
+  onMoveToVault: () => void
 }
 
-export function BulkBar({ selected, folders, onClear, onChanged }: BulkBarProps) {
+export function BulkBar({ selected, folders, onClear, onChanged, onMoveToVault }: BulkBarProps) {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   async function each(action: (id: string) => Promise<unknown>) {
@@ -76,6 +78,10 @@ export function BulkBar({ selected, folders, onClear, onChanged }: BulkBarProps)
               {folder.name}
             </DropdownMenuItem>
           ))}
+
+          {/* Another vault is not another folder: it re-encrypts, so it asks in its own dialog. */}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={onMoveToVault}>Outro cofre…</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 

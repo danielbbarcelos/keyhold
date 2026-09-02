@@ -311,8 +311,15 @@ export const api = {
   saveRecord: (id: string, payload: Payload) =>
     call<{ record: RecordHeader }>('PUT', `/api/records/${id}`, payload),
 
-  moveRecord: (id: string, folderId: string | null) =>
-    call<{ moved: boolean }>('POST', `/api/records/${id}/move`, { folder_id: folderId }),
+  /**
+   * Move a record. Passing `vaultId` moves it to another vault, which re-encrypts it — the folder
+   * then has to be one of that vault's, or nothing.
+   */
+  moveRecord: (id: string, folderId: string | null, vaultId?: string) =>
+    call<{ moved: boolean }>('POST', `/api/records/${id}/move`, {
+      folder_id: folderId,
+      ...(vaultId ? { vault_id: vaultId } : {}),
+    }),
 
   favouriteRecord: (id: string, on: boolean) =>
     call<{ favourite: boolean }>('POST', `/api/records/${id}/favourite`, { on }),

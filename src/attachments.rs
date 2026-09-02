@@ -215,6 +215,42 @@ pub fn remove(store: &Store, id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Re-wrap every attachment of a record under another vault's key.
+///
+/// Only the wrapping changes. The sealed bytes and the sealed name are left exactly as they are,
+/// because neither of their additional data names a vault — a file belongs to its record, and the
+/// record is the thing that moved.
+pub(crate) fn rewrap_for_vault(
+    conn: &rusqlite::Connection,
+    record_id: &str,
+    from: &SecretKey,
+    to: &SecretKey,
+) -> Result<usize> {
+    let files = {
+        let mut statement =
+            conn.prepare("SELECT id, wrapped_key FROM attachments WHERE record_id = ?1")?;
+
+        let rows = statement.query_map(params![record_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+        })?;
+
+        let collected = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+        collected
+    };
+
+    for (id, wrapped) in &files {
+        let file_key =
+            unwrap_key(from, wrapped, &key_aad(id)).context("a chave deste arquivo não abriu")?;
+
+        conn.execute(
+            "UPDATE attachments SET wrapped_key = ?2 WHERE id = ?1",
+            params![id, wrap_key(to, &file_key, &key_aad(id))?],
+        )?;
+    }
+
+    Ok(files.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -27,7 +27,9 @@ interface TrashPanelProps {
   records: RecordPreview[]
   retentionDays: number
   onChanged: () => void
-  vaultId: string
+  /** `null` when the trash being shown is several vaults' at once, which nothing can empty in one
+   * go — "esvaziar" would then mean a different set of records depending on which vault was open. */
+  vaultId: string | null
 }
 
 export function TrashPanel({ records, retentionDays, onChanged, vaultId }: TrashPanelProps) {
@@ -44,7 +46,7 @@ export function TrashPanel({ records, retentionDays, onChanged, vaultId }: Trash
             : 'A limpeza automática está desligada: o que é excluído fica aqui até você mandar apagar.'}
         </p>
 
-        {records.length > 0 && (
+        {records.length > 0 && vaultId && (
           <Button variant="destructive" size="sm" onClick={() => setConfirming({ what: 'all' })}>
             <Trash2 />
             Esvaziar agora
@@ -113,7 +115,7 @@ export function TrashPanel({ records, retentionDays, onChanged, vaultId }: Trash
               onClick={() => {
                 const action =
                   confirming?.what === 'all'
-                    ? api.emptyTrash(vaultId)
+                    ? api.emptyTrash(vaultId as string)
                     : api.destroyRecord((confirming as { id: string }).id)
 
                 void action.then(() => {

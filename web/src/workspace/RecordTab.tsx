@@ -26,6 +26,17 @@ import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+
 import { api, ApiError, type FolderNode, type OpenRecord, type VersionEntry } from '../api'
 import { Input } from '@/components/ui/input'
 
@@ -57,6 +68,7 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
   const [versions, setVersions] = useState<VersionEntry[]>([])
   const [viewing, setViewing] = useState<number | null>(null)
   const [error, setError] = useState('')
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   useEffect(() => {
     setDraft(record.payload)
@@ -217,11 +229,7 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
               {record.compromised_at ? 'Não está mais comprometido' : 'Marcar comprometido'}
             </Button>
 
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => void api.archiveRecord(record.id, true).then(() => onClosed(record.id))}
-            >
+            <Button size="sm" variant="destructive" onClick={() => setConfirmingDelete(true)}>
               <Trash2 />
               Excluir
             </Button>
@@ -348,6 +356,29 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
           )}
         </aside>
       </ScrollArea>
+
+      <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir “{record.payload.title}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Vai para a lixeira, e de lá dá para restaurar enquanto o prazo não vencer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmingDelete(false)
+                void api.archiveRecord(record.id, true).then(() => onClosed(record.id))
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {viewing !== null && (
         <VersionDialog

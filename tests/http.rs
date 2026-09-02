@@ -750,6 +750,87 @@ async fn deleting_a_record_puts_it_in_the_trash_rather_than_destroying_it() {
     );
 }
 
+#[tokio::test]
+async fn a_record_can_be_moved_to_another_vault_and_still_opens() {
+    let app = start().await;
+    let first = with_one_vault(&app).await;
+
+    let second = app
+        .post("/api/vaults", serde_json::json!({ "name": "Pessoal", "description": "", "colour": "brand" }))
+        .await
+        .json()["vault"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let id = app
+        .post(
+            &format!("/api/vaults/{first}/records"),
+            serde_json::json!({
+                "kind": "login",
+                "payload": {
+                    "title": "Servidor",
+                    "username": "deploy",
+                    "fields": [{ "label": "Senha", "kind": "password", "value": "uma senha" }]
+                }
+            }),
+        )
+        .await
+        .json()["record"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // A folder of the vault it is leaving is not somewhere it can land.
+    let stray = app
+        .post(
+            &format!("/api/vaults/{first}/folders"),
+            serde_json::json!({ "name": "Aqui", "parent_id": null }),
+        )
+        .await
+        .json()["folder"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let refused = app
+        .post(
+            &format!("/api/records/{id}/move"),
+            serde_json::json!({ "vault_id": second, "folder_id": stray }),
+        )
+        .await;
+
+    assert_eq!(refused.status, 400);
+
+    let moved = app
+        .post(
+            &format!("/api/records/{id}/move"),
+            serde_json::json!({ "vault_id": second, "folder_id": null }),
+        )
+        .await;
+
+    assert_eq!(moved.status, 200);
+
+    assert!(app.get(&format!("/api/vaults/{first}/records")).await.json()["records"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    assert_eq!(
+        app.get(&format!("/api/vaults/{second}/records")).await.json()["records"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // The whole point: it opens on the other side.
+    let opened = app.get(&format!("/api/records/{id}")).await.json();
+
+    assert_eq!(opened["record"]["vault_id"], second);
+    assert_eq!(opened["record"]["payload"]["fields"][0]["value"], "uma senha");
+}
+
 // ── health, rotation and the trash (F5) ─────────────────────────────────────────────────────────
 
 #[tokio::test]
