@@ -35,6 +35,10 @@ sha2 = "0.10"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 thiserror = "1"
 anyhow = "1"
+# Only for the AWS Parameter Store vaults (src/aws): the one place Keyhold talks to a network,
+# and only when somebody has configured such a vault. rustls on the `ring` provider, so no C
+# toolchain, no aws-lc and no OpenSSL; the roots are compiled in rather than read from the system.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # Only for `kill`: replacing a running instance means signalling it and waiting for it to be gone.
 [target.'cfg(unix)'.dependencies]
