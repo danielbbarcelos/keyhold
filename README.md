@@ -283,8 +283,8 @@ rm ~/.local/share/icons/hicolor/*/apps/keyhold.png
 
 ## Planned: vaults in AWS Parameter Store
 
-> **Not built yet.** This is the design for the next feature, written down so it can be argued with
-> before it is code. Nothing below exists in the current release.
+> **Being built (F9).** The server side exists; the interface for it is on its way. Not yet: the
+> agent surface does not read AWS vaults, and records do not move between local and AWS vaults.
 
 Many teams already keep credentials in AWS Systems Manager Parameter Store, and most people on
 those teams find the console hard to use. Keyhold will be able to show and edit those parameters

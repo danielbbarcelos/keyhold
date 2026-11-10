@@ -14,6 +14,7 @@
 //! sentence on a settings screen and "mandatory" is a reason to leave the vault unlocked in a
 //! terminal instead.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -67,11 +68,20 @@ struct Open {
 pub struct Lock {
     state: Mutex<Option<Open>>,
     policy: Mutex<LockPolicy>,
+    /// Goes up every time the key arrives or leaves. Whatever is kept in memory *because* the vault
+    /// is open (the AWS sessions, for one) remembers the generation it was made in, and throws
+    /// itself away when that is no longer the current one. That way a lock forgets them too, even
+    /// the lock that happens on its own when a clock runs out.
+    generation: AtomicU64,
 }
 
 impl Lock {
     pub fn new(policy: LockPolicy) -> Self {
-        Self { state: Mutex::new(None), policy: Mutex::new(policy.sanitised()) }
+        Self {
+            state: Mutex::new(None),
+            policy: Mutex::new(policy.sanitised()),
+            generation: AtomicU64::new(0),
+        }
     }
 
     pub fn policy(&self) -> LockPolicy {
@@ -86,6 +96,7 @@ impl Lock {
     }
 
     pub fn unlock_with(&self, key: SecretKey) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
         *self.state.lock().unwrap() =
             Some(Open { key, last_activity: now_seconds(), hidden_since: None });
     }
@@ -96,6 +107,24 @@ impl Lock {
     /// ceasing to exist in this process.
     pub fn lock(&self) {
         *self.state.lock().unwrap() = None;
+        self.generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Which unlock this is, or `None` while locked.
+    ///
+    /// Two calls that return the same number are inside the same unlocked stretch: nobody locked
+    /// and opened again in between. Checks the clock like [`Lock::with_key`], but does not count as
+    /// activity.
+    pub fn generation(&self) -> Option<u64> {
+        let mut guard = self.state.lock().unwrap();
+        let policy = *self.policy.lock().unwrap();
+
+        if guard.as_ref().is_some_and(|open| is_expired(open, policy, now_seconds())) {
+            *guard = None;
+            self.generation.fetch_add(1, Ordering::SeqCst);
+        }
+
+        guard.as_ref().map(|_| self.generation.load(Ordering::SeqCst))
     }
 
     /// Hand the key to something that needs it, if the vault is open and has not timed out.
@@ -115,6 +144,7 @@ impl Lock {
 
         if expired {
             *guard = None;
+            self.generation.fetch_add(1, Ordering::SeqCst);
         }
 
         let open = guard.as_mut()?;
@@ -152,6 +182,7 @@ impl Lock {
         if let Some(open) = guard.as_ref() {
             if is_expired(open, policy, now) {
                 *guard = None;
+                self.generation.fetch_add(1, Ordering::SeqCst);
             }
         }
 

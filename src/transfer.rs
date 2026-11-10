@@ -351,7 +351,7 @@ mod tests {
         let vault = vaults::create_vault(
             &store,
             &outcome.vault_key,
-            VaultMeta { name: "Trabalho".into(), description: String::new(), colour: "default".into() },
+            VaultMeta { name: "Trabalho".into(), description: String::new(), colour: "default".into(), ..Default::default() },
         )
         .unwrap();
 

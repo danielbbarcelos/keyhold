@@ -16,6 +16,7 @@
 //!    values that exist for exactly one moment: the recovery key at setup, and the second-factor
 //!    secret while it is being scanned.
 
+mod aws;
 mod contents;
 
 use std::sync::Arc;
@@ -62,6 +63,9 @@ pub struct AppState {
     /// person at an open laptop guessing. It does nothing about an attack on the file itself —
     /// see `docs/THREAT_MODEL.md`, which says so rather than implying this is more than it is.
     pub failures: std::sync::Mutex<u32>,
+    /// AWS sessions, credentials and caches for Parameter Store vaults (F9). Memory only, and
+    /// dropped when the vault locks.
+    pub aws: crate::aws::state::AwsState,
 }
 
 /// After this many wrong answers, keyhold stops accepting them for a while.
@@ -98,6 +102,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/second-factor", delete(disable_second_factor))
         .route("/password", post(make_password))
         .merge(contents::routes())
+        .merge(aws::routes())
         .route_layer(middleware::from_fn_with_state(state.clone(), require_token));
 
     Router::new()
@@ -207,26 +212,34 @@ async fn open_window(State(state): State<Arc<AppState>>, uri: Uri, headers: Head
 }
 
 /// A failure the interface can show without the server having explained too much.
-pub(crate) struct Failure(pub StatusCode, pub String);
+///
+/// The third part is set only for failures that came from (or are about) AWS: one of
+/// `session_expired`, `access_denied`, `not_found`, `conflict`, `throttled`, `network`, `invalid`
+/// or `other`, sent as `"aws"` next to the message so the interface can offer the right way out
+/// (renewing the login, above all).
+pub(crate) struct Failure(pub StatusCode, pub String, pub Option<&'static str>);
 
 impl IntoResponse for Failure {
     fn into_response(self) -> Response {
-        (self.0, Json(json!({ "error": self.1 }))).into_response()
+        match self.2 {
+            Some(kind) => (self.0, Json(json!({ "error": self.1, "aws": kind }))).into_response(),
+            None => (self.0, Json(json!({ "error": self.1 }))).into_response(),
+        }
     }
 }
 
 pub(crate) type Answer = Result<Json<Value>, Failure>;
 
 pub(crate) fn bad_request(error: impl std::fmt::Display) -> Failure {
-    Failure(StatusCode::BAD_REQUEST, error.to_string())
+    Failure(StatusCode::BAD_REQUEST, error.to_string(), None)
 }
 
 pub(crate) fn conflict(error: impl std::fmt::Display) -> Failure {
-    Failure(StatusCode::CONFLICT, error.to_string())
+    Failure(StatusCode::CONFLICT, error.to_string(), None)
 }
 
 pub(crate) fn locked() -> Failure {
-    Failure(StatusCode::LOCKED, "the vault is locked".into())
+    Failure(StatusCode::LOCKED, "the vault is locked".into(), None)
 }
 
 /// Liveness only. Says that something is listening and what version it is — never whether a vault
@@ -237,6 +250,7 @@ async fn health() -> impl IntoResponse {
 
 /// Everything the interface needs to choose a screen. No secrets, in any state.
 async fn status(State(state): State<Arc<AppState>>) -> Answer {
+    state.aws.sweep(&state.lock);
     let store = state.store.lock().unwrap();
     let identity = identity::status(&store).map_err(bad_request)?;
     let lock = state.lock.status();
@@ -278,6 +292,7 @@ async fn setup(State(state): State<Arc<AppState>>, Json(body): Json<SetupBody>) 
             name: "Pessoal".into(),
             description: String::new(),
             colour: "default".into(),
+            ..Default::default()
         },
     )
     .map_err(bad_request)?;
@@ -340,6 +355,7 @@ async fn unlock(State(state): State<Arc<AppState>>, Json(body): Json<UnlockBody>
             return Err(Failure(
                 StatusCode::TOO_MANY_REQUESTS,
                 "too many failed attempts — close Keyhold and open it again".into(),
+                None,
             ));
         }
     }
@@ -402,6 +418,7 @@ async fn unlock(State(state): State<Arc<AppState>>, Json(body): Json<UnlockBody>
             Err(Failure(
                 StatusCode::UNAUTHORIZED,
                 format!("{error}"),
+                None,
             ))
         }
     }
@@ -409,6 +426,7 @@ async fn unlock(State(state): State<Arc<AppState>>, Json(body): Json<UnlockBody>
 
 async fn lock_now(State(state): State<Arc<AppState>>) -> Answer {
     state.lock.lock();
+    state.aws.forget();
 
     {
         let store = state.store.lock().unwrap();
@@ -470,6 +488,7 @@ async fn audit_integrity(State(state): State<Arc<AppState>>) -> Answer {
 /// The interface saying "somebody is still here".
 async fn heartbeat(State(state): State<Arc<AppState>>) -> Answer {
     state.lock.touch();
+    state.aws.sweep(&state.lock);
 
     Ok(Json(json!({ "lock": state.lock.status() })))
 }

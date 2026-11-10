@@ -275,6 +275,7 @@ mod tests {
                 name: "Servidores".into(),
                 description: String::new(),
                 colour: "default".into(),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -382,6 +383,7 @@ mod tests {
                     name: "Servidores".into(),
                     description: String::new(),
                     colour: "default".into(),
+                    ..Default::default()
                 },
             )
             .unwrap();

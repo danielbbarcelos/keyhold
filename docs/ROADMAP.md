@@ -14,7 +14,28 @@ promise it does not keep.
 | **F6** | Encrypted attachments, audit trail with a verifiable hash chain, encrypted export, import | **done** |
 | **F7** | Agent surface: a unix socket and an MCP server so a local coding agent can look things up without the secret passing through a chat transcript | **done** |
 | **F8** | Release: packaging, CI, signed builds | **next** |
-| **F9** | AWS Parameter Store vaults: IAM Identity Center sign-in, accounts, vaults backed by Parameter Store, attachments in S3. Design in the README, [Planned: vaults in AWS Parameter Store](../README.md#planned-vaults-in-aws-parameter-store) | **planned** |
+| **F9** | AWS Parameter Store vaults: IAM Identity Center sign-in, accounts, vaults backed by Parameter Store, attachments in S3. Design in the README, [Planned: vaults in AWS Parameter Store](../README.md#planned-vaults-in-aws-parameter-store) | **server done**: the agent surface, moving records between local and AWS vaults, and renaming AWS folders are not built yet |
+
+## What F9 put in place
+
+**An AWS vault is a vault.** The interface uses the same routes and gets the same JSON for an AWS
+vault as for a local one: `contents.rs` sees an AWS vault or an `aws~` id and hands the request to
+`http/aws.rs`. Records are SecureString parameters, folders are paths (an empty one is a `.keep`
+marker), titles and notes live in the description, compromised and rotation marks in tags, and
+favourites stay on this machine. The rules are in `src/aws/mapping.rs`, pure and tested on their
+own.
+
+**Sign-in is Keyhold's own.** IAM Identity Center device login, no AWS CLI, no `~/.aws`. Tokens and
+role credentials live in memory only and are dropped when the vault locks; logins, connections and
+favourites are remembered, sealed under the master key.
+
+**Nothing is kept from AWS.** Reads go to AWS; two caches of a few seconds in memory stop one screen
+from asking twice. An expired session answers 424 with `"aws": "session_expired"`, which is the
+interface's cue to offer "Renovar".
+
+**What is not built yet:** the agent surface does not read AWS vaults (the switch refuses to turn
+on for one); records do not move between a local vault and an AWS vault; AWS folders cannot be
+renamed or moved, because Parameter Store has no rename; export and import refuse AWS vaults.
 
 ## What F1–F4 put in place
 

@@ -141,6 +141,32 @@ be read when the browser did not open. Both are `0600` inside a `0700` directory
 truncates the log on every start so only the current run's token is on disk, and every token dies
 with the process that made it.
 
+### A20 · The one thing that leaves the machine: an AWS vault's content, to its own account
+
+"Nothing leaves the machine" has exactly one exception, and it is narrow on purpose. A vault created
+as an AWS Parameter Store vault (F9) reads and writes its records in the AWS account it names, and
+its attachments in the S3 bucket it names. Nothing else goes anywhere: not a local vault's content,
+not another AWS vault's, not the names of local vaults, not the audit trail, not telemetry. A file
+with no AWS vault in it never makes a single request.
+
+What that exception rests on, and what it does not claim:
+
+- **IAM decides who reads.** Values are SecureString under KMS, with no extra layer of Keyhold's
+  own. Anyone the account's policies allow can read them with the console or the CLI, and a
+  compromise of that account is a compromise of that vault. Keyhold adds nothing on AWS's side and
+  says so.
+- **What the policy denies does not appear.** Content is listed only with `GetParametersByPath`,
+  which respects a Deny. `DescribeParameters` is used only for the description and KMS key of
+  parameters that were already returned.
+- **Credentials are short and stay in memory.** Sign-in is IAM Identity Center's device flow.
+  Tokens and role credentials are never written to disk and are dropped when the vault locks; the
+  logins and connections that are remembered are sealed under the master key like everything else.
+- **No local copy.** Values read from AWS are not written to the vault file. Two caches of a few
+  seconds live in memory while the vault is open, and are dropped on lock.
+- **Signed requests go only to AWS's own endpoints** for the configured regions, over rustls with
+  compiled-in roots and with redirects off, so a signed request is never replayed to another host.
+- **The agent surface does not reach AWS vaults** yet: an assistant sees only local vaults.
+
 ## What Keyhold does not defend against
 
 Stated plainly, because a vault that implies otherwise is lying:

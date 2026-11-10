@@ -39,6 +39,40 @@ tests/
   http.rs      what the API must refuse, driven through a real socket
 ```
 
+## Vaults in AWS Parameter Store (F9)
+
+A vault has a kind. A local vault is the file, as always. An AWS vault keeps only its name and its
+place (connection, region, bucket) in the file, sealed like any vault's metadata; its records are
+SecureString parameters in one AWS account, read from `/` with `GetParametersByPath`, and its
+attachments are S3 objects under the parameter's name.
+
+```
+src/aws/
+  sigv4.rs  ssm.rs  s3.rs  sso.rs  error.rs   the client layer: signing, Parameter Store, S3, SSO
+  mapping.rs   record <-> parameter: ids, names, folders, value format, description, tags, keys
+  config.rs    logins, connections, favourites: sealed under the master key, in `settings`
+  state.rs     tokens, credentials, short caches: memory only, tied to the lock's generation
+src/http/
+  aws.rs       the /aws routes, and the AWS side of every vault, folder, record and attachment route
+```
+
+**Same routes, same shapes.** `http/contents.rs` checks, before it touches the store, whether the
+vault is an AWS one or the id starts with `aws~`; if so the request goes to `http/aws.rs`, which
+answers with the same `FolderNode`, `RecordPreview`, `OpenRecord` and `Attachment` the local side
+uses. Ids carry their place: `aws~<vault id>~<base64url(parameter name, path or object key)>`.
+
+**The store's lock is never held across a request to AWS.** It is a `std::sync::Mutex`; every AWS
+function takes it, reads what it needs, lets go, and only then awaits the network.
+
+**Tied to the lock.** `Lock` keeps a generation that changes on every unlock and every lock
+(including the automatic one). `AwsState` remembers the generation its tokens were made in and
+drops everything when it no longer matches, so a lock forgets every AWS session and the person logs
+in again after unlocking.
+
+**Errors that say what to do.** `AwsError` becomes `{ "error": "<frase>", "aws": "<kind>" }` with
+424 for an expired AWS session (401 stays reserved for Keyhold's own session token), 403, 404, 409,
+429, 502 and 400.
+
 ## The lock, and what "locked" means
 
 Locked is not a screen. Locked is the absence of the key: the derived material is zeroized and the

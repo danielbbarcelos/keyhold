@@ -819,6 +819,7 @@ mod tests {
                 name: "Trabalho".into(),
                 description: String::new(),
                 colour: "brand".into(),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -1026,7 +1027,7 @@ mod tests {
         let other = vaults::create_vault(
             &store,
             &master,
-            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into() },
+            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into(), ..Default::default() },
         )
         .unwrap();
 
@@ -1056,7 +1057,7 @@ mod tests {
         let other = vaults::create_vault(
             &store,
             &master,
-            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into() },
+            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into(), ..Default::default() },
         )
         .unwrap();
 
@@ -1080,7 +1081,7 @@ mod tests {
         let other = vaults::create_vault(
             &store,
             &master,
-            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into() },
+            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into(), ..Default::default() },
         )
         .unwrap();
 
@@ -1129,7 +1130,7 @@ mod tests {
         let other = vaults::create_vault(
             &store,
             &master,
-            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into() },
+            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into(), ..Default::default() },
         )
         .unwrap();
 
@@ -1153,7 +1154,7 @@ mod tests {
         let other = vaults::create_vault(
             &store,
             &master,
-            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into() },
+            VaultMeta { name: "Pessoal".into(), description: String::new(), colour: "brand".into(), ..Default::default() },
         )
         .unwrap();
 

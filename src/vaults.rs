@@ -65,10 +65,80 @@ pub struct VaultMeta {
     pub description: String,
     #[serde(default = "default_colour")]
     pub colour: String,
+    /// `local` (the file, as always) or `aws` (Parameter Store, F9). Absent in every vault written
+    /// before F9, which are all local.
+    #[serde(default = "local_kind")]
+    pub kind: String,
+    /// Where an `aws` vault lives. `None` for a local one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aws: Option<AwsVault>,
 }
+
+impl Default for VaultMeta {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            description: String::new(),
+            colour: default_colour(),
+            kind: local_kind(),
+            aws: None,
+        }
+    }
+}
+
+/// An AWS vault's place: one whole account (through one connection) in one region (A5), and the
+/// bucket its attachments go to (A18).
+///
+/// Sealed with the rest of the vault's metadata. The vault still has a row and a key in the local
+/// file, for this and for its name, but never a local record.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AwsVault {
+    pub connection_id: String,
+    pub region: String,
+    #[serde(default)]
+    pub bucket: Option<String>,
+}
+
+pub const KIND_LOCAL: &str = "local";
+pub const KIND_AWS: &str = "aws";
 
 fn default_colour() -> String {
     "brand".into()
+}
+
+fn local_kind() -> String {
+    KIND_LOCAL.into()
+}
+
+impl VaultMeta {
+    pub fn is_aws(&self) -> bool {
+        self.kind == KIND_AWS
+    }
+
+    /// Settle `kind` to one of the two, and `aws` to what that kind needs.
+    ///
+    /// An empty bucket is no bucket. Anything but `aws` is local, and a local vault carries no AWS
+    /// place even if the interface sent one.
+    fn settled(mut self) -> Result<Self> {
+        if self.kind != KIND_AWS {
+            self.kind = KIND_LOCAL.into();
+            self.aws = None;
+            return Ok(self);
+        }
+
+        let Some(aws) = self.aws.as_mut() else {
+            bail!("um cofre AWS precisa de uma conexão e de uma região");
+        };
+
+        aws.region = aws.region.trim().to_string();
+        aws.bucket = aws.bucket.take().map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
+
+        if crate::aws::validate_region(&aws.region).is_err() {
+            bail!("'{}' não é uma região da AWS", aws.region);
+        }
+
+        Ok(self)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -91,6 +161,10 @@ pub struct VaultSummary {
     /// Which generation of this vault's key its contents are wrapped with (F5).
     pub key_version: i64,
     pub key_rotated_at: Option<String>,
+    /// `local` or `aws`.
+    pub kind: String,
+    /// Where an AWS vault lives; `null` for a local one.
+    pub aws: Option<AwsVault>,
 }
 
 #[derive(Debug, Serialize)]
@@ -109,6 +183,9 @@ pub fn create_vault(store: &Store, master: &SecretKey, meta: VaultMeta) -> Resul
     if meta.name.trim().is_empty() {
         bail!("a vault needs a name");
     }
+
+    let meta = meta.settled()?;
+    check_connection(store, master, &meta)?;
 
     let id = new_id();
     let key = SecretKey::random();
@@ -182,6 +259,8 @@ pub fn list_vaults(store: &Store, master: &SecretKey) -> Result<Vec<VaultSummary
             created_at: created,
             key_version,
             key_rotated_at: rotated,
+            kind: meta.kind,
+            aws: meta.aws,
         });
     }
 
@@ -206,10 +285,24 @@ pub fn vault_key(store: &Store, master: &SecretKey, id: &str) -> Result<SecretKe
     unwrap_key(master, &wrapped, &vault_key_aad(id)).context("this vault's key did not open")
 }
 
+/// Rename, recolour, or move an AWS vault to another connection, region or bucket.
+///
+/// The kind never changes: a local vault does not become an AWS one by being edited, nor the other
+/// way round. An AWS vault edited without an `aws` part (an interface that only sends name and
+/// colour) keeps the place it had.
 pub fn update_vault(store: &Store, master: &SecretKey, id: &str, meta: VaultMeta) -> Result<VaultSummary> {
     if meta.name.trim().is_empty() {
         bail!("a vault needs a name");
     }
+
+    let current = read_vault(store, master, id)?;
+    let meta = VaultMeta {
+        kind: current.kind.clone(),
+        aws: if current.kind == KIND_AWS { meta.aws.or(current.aws) } else { None },
+        ..meta
+    }
+    .settled()?;
+    check_connection(store, master, &meta)?;
 
     let key = vault_key(store, master, id)?;
     let sealed = crypto::seal(&key, &serde_json::to_vec(&meta)?, &vault_meta_aad(id))?;
@@ -219,6 +312,21 @@ pub fn update_vault(store: &Store, master: &SecretKey, id: &str, meta: VaultMeta
         .execute("UPDATE vaults SET sealed_meta = ?1 WHERE id = ?2", params![sealed, id])?;
 
     read_vault(store, master, id)
+}
+
+/// An AWS vault has to name a connection that exists.
+fn check_connection(store: &Store, master: &SecretKey, meta: &VaultMeta) -> Result<()> {
+    let Some(aws) = meta.aws.as_ref() else {
+        return Ok(());
+    };
+
+    let config = crate::aws::config::load(store, master)?;
+
+    if config.connection(&aws.connection_id).is_none() {
+        bail!("essa conexão AWS não existe mais; escolha outra");
+    }
+
+    Ok(())
 }
 
 /// Put a vault away, or bring it back.
@@ -393,6 +501,8 @@ pub fn rotate_vault(store: &mut Store, master: &SecretKey, id: &str) -> Result<V
             name: meta.name,
             description: meta.description,
             colour: meta.colour,
+            kind: meta.kind,
+            aws: meta.aws,
         })?,
         &vault_meta_aad(id),
     )?;
@@ -723,7 +833,7 @@ mod tests {
     }
 
     fn meta(name: &str) -> VaultMeta {
-        VaultMeta { name: name.into(), description: String::new(), colour: "brand".into() }
+        VaultMeta { name: name.into(), description: String::new(), colour: "brand".into(), ..Default::default() }
     }
 
     fn folder(name: &str) -> FolderMeta {

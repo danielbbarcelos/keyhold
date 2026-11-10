@@ -259,6 +259,10 @@ async fn serve(stream: UnixStream, state: Arc<AppState>) -> Result<()> {
 }
 
 /// The vaults an agent is allowed to know about at all.
+///
+/// Never an AWS vault (F9, A19). Reading one means requests to AWS on the agent's behalf, with
+/// approvals that would have to outlive a socket round trip; until that is built, an agent sees
+/// only the local file, and the switch that would expose an AWS vault refuses to turn on.
 fn visible_vaults(state: &AppState) -> Vec<String> {
     let store = state.store.lock().unwrap();
 
@@ -269,7 +273,9 @@ fn visible_vaults(state: &AppState) -> Vec<String> {
                 .map(|found| {
                     found
                         .into_iter()
-                        .filter(|vault| vault.agent_access && !vault.archived)
+                        .filter(|vault| {
+                            vault.agent_access && !vault.archived && vault.kind != vaults::KIND_AWS
+                        })
                         .map(|vault| vault.id)
                         .collect()
                 })

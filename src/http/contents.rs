@@ -4,6 +4,11 @@
 //! goes through the lock. That is not a convention — it is the reason the auto-lock deadline is
 //! real. There is no path in this file that reaches a plaintext payload without the clock having
 //! been consulted first, and a request that arrives one second late gets a 423 rather than a secret.
+//!
+//! **AWS vaults use these same routes (F9).** A handler whose vault lives in Parameter Store, or
+//! whose id starts with `aws~`, hands the request to `http::aws` before touching the store, and
+//! the answer comes back in the shapes below. That check is the first line of each handler
+//! because the store's lock cannot be held across a request to AWS.
 
 use std::sync::Arc;
 
@@ -13,7 +18,9 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 
+use super::aws;
 use super::{bad_request, locked, Answer, AppState};
+use crate::aws::mapping::is_aws_id;
 use crate::audit::{self, Detail};
 use crate::attachments;
 use crate::health;
@@ -171,6 +178,14 @@ async fn agent_access(
     Path(id): Path<String>,
     Json(flag): Json<Flag>,
 ) -> Answer {
+    // A19: the agent surface reads the local file only. Saying so here is better than a switch
+    // that turns on and then finds nothing.
+    if flag.on && aws::is_aws_vault(&state, &id) {
+        return Err(bad_request(
+            "assistentes ainda não leem cofres AWS. Este cofre fica fora do alcance deles",
+        ));
+    }
+
     let store = state.store.lock().unwrap();
 
     with_key!(state, |_key| vaults::set_agent_access(&store, &id, flag.on)).map_err(bad_request)?;
@@ -225,6 +240,12 @@ async fn export_vault(
     Path(id): Path<String>,
     Json(body): Json<ExportRequest>,
 ) -> Answer {
+    if aws::is_aws_vault(&state, &id) {
+        return Err(bad_request(
+            "exportar um cofre AWS ainda não é possível: o conteúdo dele fica na AWS",
+        ));
+    }
+
     let store = state.store.lock().unwrap();
 
     let envelope = with_key!(state, |key| transfer::export(&store, key, &id, &body.passphrase))
@@ -255,6 +276,10 @@ async fn import_into_vault(
     Path(id): Path<String>,
     Json(body): Json<ImportRequest>,
 ) -> Answer {
+    if aws::is_aws_vault(&state, &id) {
+        return Err(bad_request("importar para um cofre AWS ainda não é possível"));
+    }
+
     let store = state.store.lock().unwrap();
 
     let incoming = match &body {
@@ -290,6 +315,10 @@ async fn import_into_vault(
 // ── attachments (F6) ────────────────────────────────────────────────────────────────────────────
 
 async fn list_attachments(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    if is_aws_id(&id) {
+        return aws::list_attachments(&state, &id).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     let found = with_key!(state, |key| attachments::list(&store, key, &id)).map_err(bad_request)?;
@@ -314,9 +343,13 @@ async fn add_attachment(
     let bytes = crate::encoding::from_base64url(&body.data)
         .ok_or_else(|| bad_request("o conteúdo do arquivo não chegou inteiro"))?;
 
-    let store = state.store.lock().unwrap();
-
     let mime = if body.mime.is_empty() { "application/octet-stream" } else { &body.mime };
+
+    if is_aws_id(&id) {
+        return aws::add_attachment(&state, &id, &body.name, mime, &bytes).await;
+    }
+
+    let store = state.store.lock().unwrap();
 
     let added = with_key!(state, |key| attachments::add(
         &store,
@@ -345,6 +378,10 @@ async fn add_attachment(
 /// session token, and a route that authenticated by query string would put a credential in history
 /// and in every log that URLs land in. The interface turns this back into a file to save.
 async fn open_attachment(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    if is_aws_id(&id) {
+        return aws::open_attachment(&state, &id).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     let file = with_key!(state, |key| attachments::open(&store, key, &id)).map_err(bad_request)?;
@@ -367,6 +404,10 @@ async fn open_attachment(State(state): State<Arc<AppState>>, Path(id): Path<Stri
 }
 
 async fn delete_attachment(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    if is_aws_id(&id) {
+        return aws::delete_attachment(&state, &id).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     with_key!(state, |_key| attachments::remove(&store, &id)).map_err(bad_request)?;
@@ -393,6 +434,10 @@ async fn list_trash(State(state): State<Arc<AppState>>, Path(id): Path<String>) 
 /// means something gentler here — the trash — and two verbs that differ only in permanence is how
 /// somebody loses a secret to a misremembered endpoint.
 async fn destroy_record(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    if is_aws_id(&id) {
+        return aws::delete_record(&state, &id, true).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     with_key!(state, |_key| records::destroy(&store, &id)).map_err(bad_request)?;
@@ -479,6 +524,10 @@ async fn report_access(
 // ── folders ─────────────────────────────────────────────────────────────────────────────────────
 
 async fn list_folders(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    if aws::is_aws_vault(&state, &id) {
+        return aws::list_folders(&state, &id).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     let found = with_key!(state, |key| vaults::list_folders(&store, key, &id))
@@ -500,6 +549,10 @@ async fn create_folder(
     Path(id): Path<String>,
     Json(body): Json<NewFolder>,
 ) -> Answer {
+    if aws::is_aws_vault(&state, &id) {
+        return aws::create_folder(&state, &id, &body.meta.name, body.parent_id.as_deref()).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     let made = with_key!(state, |key| vaults::create_folder(
@@ -519,6 +572,10 @@ async fn update_folder(
     Path(id): Path<String>,
     Json(meta): Json<FolderMeta>,
 ) -> Answer {
+    if is_aws_id(&id) {
+        return Err(not_yet_for_aws_folders());
+    }
+
     let store = state.store.lock().unwrap();
 
     let updated = with_key!(state, |key| vaults::update_folder(&store, key, &id, meta))
@@ -538,6 +595,10 @@ async fn move_folder(
     Path(id): Path<String>,
     Json(body): Json<MoveFolder>,
 ) -> Answer {
+    if is_aws_id(&id) {
+        return Err(not_yet_for_aws_folders());
+    }
+
     let store = state.store.lock().unwrap();
 
     with_key!(state, |_key| vaults::move_folder(&store, &id, body.parent_id.as_deref()))
@@ -547,11 +608,21 @@ async fn move_folder(
 }
 
 async fn delete_folder(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    if is_aws_id(&id) {
+        return aws::delete_folder(&state, &id).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     with_key!(state, |_key| vaults::delete_folder(&store, &id)).map_err(bad_request)?;
 
     Ok(Json(json!({ "deleted": true })))
+}
+
+/// Parameter Store has no rename: renaming a folder means rewriting every parameter under it, and
+/// that is a bigger operation than a click should start without its own confirmation.
+fn not_yet_for_aws_folders() -> super::Failure {
+    bad_request("renomear ou mover pastas de um cofre AWS ainda não é possível")
 }
 
 // ── records ─────────────────────────────────────────────────────────────────────────────────────
@@ -571,6 +642,10 @@ async fn list_records(
     Path(id): Path<String>,
     Query(query): Query<ListQuery>,
 ) -> Answer {
+    if aws::is_aws_vault(&state, &id) {
+        return aws::list_records(&state, &id).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     let found = with_key!(state, |key| records::list_with_previews(
@@ -592,6 +667,10 @@ struct NewRecord {
     #[serde(default)]
     folder_id: Option<String>,
     payload: Payload,
+    /// AWS vaults only: the parameter's name, or its last segment under the folder. Suggested
+    /// from the title when absent.
+    #[serde(default)]
+    name: Option<String>,
 }
 
 fn item_kind() -> String {
@@ -603,6 +682,17 @@ async fn create_record(
     Path(id): Path<String>,
     Json(body): Json<NewRecord>,
 ) -> Answer {
+    if aws::is_aws_vault(&state, &id) {
+        return aws::create_record(
+            &state,
+            &id,
+            body.folder_id.as_deref(),
+            &body.payload,
+            body.name.as_deref(),
+        )
+        .await;
+    }
+
     let store = state.store.lock().unwrap();
 
     let made = with_key!(state, |key| records::create(
@@ -627,6 +717,10 @@ async fn create_record(
 }
 
 async fn open_record(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    if is_aws_id(&id) {
+        return aws::open_record(&state, &id).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     let opened = with_key!(state, |key| records::open(&store, key, &id)).map_err(bad_request)?;
@@ -642,6 +736,10 @@ async fn totp_code(
     State(state): State<Arc<AppState>>,
     Path((id, index)): Path<(String, usize)>,
 ) -> Answer {
+    if is_aws_id(&id) {
+        return aws::totp_code(&state, &id, index).await;
+    }
+
     let store = state.store.lock().unwrap();
     let opened = with_key!(state, |key| records::open(&store, key, &id)).map_err(bad_request)?;
 
@@ -659,11 +757,34 @@ async fn totp_code(
     Ok(Json(json!({ "code": code, "remaining": remaining })))
 }
 
+/// The header an AWS save may carry instead of `expected_version` in the body.
+const EXPECTED_VERSION_HEADER: &str = "x-keyhold-expected-version";
+
+/// Save a record.
+///
+/// The body is the payload itself. For an AWS record it may also carry `expected_version` (or the
+/// `x-keyhold-expected-version` header): the version the person opened, so a save on top of
+/// somebody else's change is refused with 409 instead of overwriting it (A12). A local record
+/// ignores it, since nobody else writes to this file.
 async fn update_record(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(payload): Json<Payload>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<serde_json::Value>,
 ) -> Answer {
+    let expected = body.get("expected_version").and_then(|v| v.as_i64()).or_else(|| {
+        headers
+            .get(EXPECTED_VERSION_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse().ok())
+    });
+
+    let payload: Payload = serde_json::from_value(body).map_err(bad_request)?;
+
+    if is_aws_id(&id) {
+        return aws::update_record(&state, &id, &payload, expected).await;
+    }
+
     let mut store = state.store.lock().unwrap();
 
     let updated = with_key!(state, |key| records::update(&mut store, key, &id, &payload))
@@ -699,6 +820,19 @@ async fn move_record(
     Path(id): Path<String>,
     Json(body): Json<MoveRecord>,
 ) -> Answer {
+    if is_aws_id(&id) {
+        return aws::move_record(&state, &id, body.folder_id.as_deref(), body.vault_id.as_deref())
+            .await;
+    }
+
+    // A17 is not done: a local record does not go into an AWS vault by being dragged there.
+    if body.vault_id.as_deref().is_some_and(|to| aws::is_aws_vault(&state, to)) {
+        return Err(bad_request(
+            "mover registros entre cofres AWS e locais ainda não é possível. Crie o registro no \
+             outro cofre e apague este",
+        ));
+    }
+
     let mut store = state.store.lock().unwrap();
 
     let before = with_key!(state, |_key| records::header(&store, &id)).map_err(bad_request)?;
@@ -740,6 +874,10 @@ async fn set_favourite(
     Path(id): Path<String>,
     Json(flag): Json<Flag>,
 ) -> Answer {
+    if is_aws_id(&id) {
+        return aws::set_favourite(&state, &id, flag.on).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     with_key!(state, |_key| records::set_favourite(&store, &id, flag.on)).map_err(bad_request)?;
@@ -752,6 +890,11 @@ async fn archive_record(
     Path(id): Path<String>,
     Json(flag): Json<Flag>,
 ) -> Answer {
+    // A16: deleting an AWS record deletes the parameter. There is no trash to put it in.
+    if is_aws_id(&id) {
+        return aws::delete_record(&state, &id, flag.on).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     with_key!(state, |_key| records::archive(&store, &id, flag.on)).map_err(bad_request)?;
@@ -772,6 +915,10 @@ async fn set_compromised(
     Path(id): Path<String>,
     Json(flag): Json<Flag>,
 ) -> Answer {
+    if is_aws_id(&id) {
+        return aws::set_compromised(&state, &id, flag.on).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     with_key!(state, |_key| records::set_compromised(&store, &id, flag.on)).map_err(bad_request)?;
@@ -790,6 +937,10 @@ async fn set_rotation(
     Path(id): Path<String>,
     Json(body): Json<Rotation>,
 ) -> Answer {
+    if is_aws_id(&id) {
+        return aws::set_rotation(&state, &id, body.due_at.as_deref()).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     with_key!(state, |_key| records::set_rotation_due(&store, &id, body.due_at.as_deref()))
@@ -799,6 +950,10 @@ async fn set_rotation(
 }
 
 async fn list_versions(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    if is_aws_id(&id) {
+        return aws::list_versions(&state, &id).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     let found = with_key!(state, |_key| records::history(&store, &id)).map_err(bad_request)?;
@@ -810,6 +965,10 @@ async fn read_version(
     State(state): State<Arc<AppState>>,
     Path((id, version)): Path<(String, i64)>,
 ) -> Answer {
+    if is_aws_id(&id) {
+        return aws::read_version(&state, &id, version).await;
+    }
+
     let store = state.store.lock().unwrap();
 
     let payload = with_key!(state, |key| records::read_version(&store, key, &id, version))
@@ -822,6 +981,10 @@ async fn restore_version(
     State(state): State<Arc<AppState>>,
     Path((id, version)): Path<(String, i64)>,
 ) -> Answer {
+    if is_aws_id(&id) {
+        return aws::restore_version(&state, &id, version).await;
+    }
+
     let mut store = state.store.lock().unwrap();
 
     let restored =

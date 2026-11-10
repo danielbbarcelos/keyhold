@@ -37,6 +37,7 @@ fn fixture() -> Fixture {
             name: "Servidores".into(),
             description: String::new(),
             colour: "default".into(),
+            ..Default::default()
         },
     )
     .unwrap();
@@ -70,6 +71,7 @@ fn fixture() -> Fixture {
         store: Arc::new(std::sync::Mutex::new(store)),
         lock,
         failures: std::sync::Mutex::new(0),
+        aws: Default::default(),
     });
 
     Fixture { state, record: record.id, vault: vault.id, _dir: dir }

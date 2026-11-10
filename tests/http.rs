@@ -36,6 +36,7 @@ async fn start() -> Running {
         store: shared.clone(),
         lock: Lock::new(LockPolicy::default()),
         failures: std::sync::Mutex::new(0),
+        aws: Default::default(),
     });
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

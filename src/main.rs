@@ -268,6 +268,7 @@ async fn serve(cli: Cli) -> Result<()> {
         store: std::sync::Arc::new(std::sync::Mutex::new(store)),
         lock: Lock::new(policy),
         failures: std::sync::Mutex::new(0),
+        aws: Default::default(),
     });
 
     // So a question from an agent can bring this window back when nobody has it in front of them.

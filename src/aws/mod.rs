@@ -17,6 +17,16 @@
 //! - [`s3`] is the handful of object operations attachments need.
 //! - [`error`] folds AWS's many error spellings into the few the interface can explain.
 //!
+//! On top of the clients, the vault itself:
+//!
+//! - [`mapping`] is how a record becomes a parameter and back: names, folders, the value format,
+//!   title and notes in the description, marks in tags. Pure, and tested on its own.
+//! - [`config`] is what is remembered between runs (logins, connections, favourites), sealed.
+//! - [`state`] is what is held in memory while the vault is open (tokens, credentials, caches),
+//!   and dropped when it locks.
+//!
+//! The HTTP routes that use all of this are in `http::aws`.
+//!
 //! **Secrets stay wrapped.** Credentials, tokens, client secrets, device codes and every
 //! decrypted value are held in types that zeroize on drop and print as `…`. Response bodies are
 //! wiped after parsing. That is best effort — the HTTP stack and TLS buffers have their own copies
@@ -27,11 +37,14 @@
 //! and can be pointed elsewhere with `with_endpoint`, which is how the tests run against a fake
 //! server on localhost without a single request reaching AWS.
 
+pub mod config;
 pub mod error;
+pub mod mapping;
 pub mod s3;
 pub mod sigv4;
 pub mod ssm;
 pub mod sso;
+pub mod state;
 
 pub use error::{AwsError, AwsResult};
 pub use s3::{ObjectSummary, PutObjectOutput, S3Client, S3Object};
