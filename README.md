@@ -44,7 +44,9 @@ support desk, not someone with a court order — because there is no us and no d
 
 **Nothing leaves your machine.** Keyhold only listens to your own computer, never fetches anything
 from the internet, and carries everything it displays inside the program itself. No CDN, no fonts
-downloaded, no update check, no analytics.
+downloaded, no update check, no analytics. (A planned vault type kept in AWS Parameter Store will
+be the one exception, opt-in per vault and stated where you choose it. See
+[Planned: vaults in AWS Parameter Store](#planned-vaults-in-aws-parameter-store).)
 
 ## What Keyhold does not promise
 
@@ -80,6 +82,10 @@ shortcut. Re-run it any time to upgrade in place.
 | `SKIP_DESKTOP=1` | Do not create the desktop shortcut |
 | `BIN_DIR=…` | Install the binary somewhere other than `~/.local/bin` |
 
+| Option | Effect |
+|---|---|
+| `--with=set-host[=NAME]` | Also give Keyhold a name in `/etc/hosts` (`keyhold.local` by default). Asks for sudo for that one step. See [A name instead of 127.0.0.1](#a-name-instead-of-127001) |
+
 Or build it by hand:
 
 ```bash
@@ -88,8 +94,8 @@ cargo build --release
 ./target/release/keyhold
 ```
 
-Keyhold picks a free loopback port, generates a session token, and opens your browser at
-`http://127.0.0.1:<port>/#token=…`.
+Keyhold listens on `127.0.0.1`, port 7717 (or a free one if 7717 is taken, with a warning),
+generates a session token, and opens your browser at `http://127.0.0.1:7717/#token=…`.
 
 The token is in the URL **fragment** — the one part of an address a browser never sends over the
 network. It is generated per run and never written to disk, so restarting Keyhold invalidates every
@@ -97,12 +103,31 @@ tab that was open.
 
 ```
 keyhold              # start the interface
-keyhold --port 7717  # bind a fixed port
+keyhold --port 9000  # bind another port (that one or an error)
 keyhold --no-browser # do not open a browser
 keyhold --present    # bring a running Keyhold forward (or start one)
 keyhold --replace    # close a running Keyhold without asking first
 keyhold where        # print where the vault and its directories live
+sudo keyhold set-host            # answer to keyhold.local as well
+sudo keyhold set-host --remove   # stop
 ```
+
+### A name instead of 127.0.0.1
+
+`sudo keyhold set-host [name]` writes one line to `/etc/hosts`, `127.0.0.1  keyhold.local  # keyhold`,
+and Keyhold answers to that name from its next start: `http://keyhold.local:7717`. The line is the
+only place the name lives; remove it (or run `set-host --remove`) and the name stops working.
+
+Only names that can never exist on the internet are accepted: `.local`, `.localhost`, `.internal`,
+`.test` and `.home.arpa`. Keyhold refuses requests addressed to any other name, which is what stops
+a web page from reaching it through DNS rebinding. A public name in `/etc/hosts` would work until a
+browser resolved it over DNS-over-HTTPS and skipped the file, and then its owner could serve a page
+Keyhold would take for its own.
+
+The session token still changes on every run, so a bookmark arrives without it. That tab offers
+**Abrir o Keyhold**, which asks the running Keyhold to open its own address in the browser, token
+included. The token never comes back to the tab that asked, and a request from another site is
+refused.
 
 ### Only one at a time
 
@@ -152,8 +177,8 @@ The connection is a unix socket at `~/.local/state/keyhold/agent.sock`, mode `06
 permission is the authentication, so there is no token in a config file and no port for another
 process to find.
 
-**The agent never uses the HTTP port.** That one is picked fresh on every run and belongs to your
-browser; the socket's path never changes, so a `claude mcp add` done once keeps working across
+**The agent never uses the HTTP port.** That one belongs to your browser and can change when 7717 is
+taken; the socket's path never changes, so a `claude mcp add` done once keeps working across
 restarts. The setting is remembered too — reopening Keyhold reopens the socket. An agent that
 connects before you have unlocked is told the vault is locked, which is a more useful thing to hear
 than that Keyhold is not running.
@@ -243,6 +268,47 @@ Right-clicking the icon skips the question and answers it directly: **Open and c
 rm ~/.local/share/applications/keyhold.desktop ~/.local/bin/keyhold-launch
 rm ~/.local/share/icons/hicolor/*/apps/keyhold.png
 ```
+
+## Planned: vaults in AWS Parameter Store
+
+> **Not built yet.** This is the design for the next feature, written down so it can be argued with
+> before it is code. Nothing below exists in the current release.
+
+Many teams already keep credentials in AWS Systems Manager Parameter Store, and most people on
+those teams find the console hard to use. Keyhold will be able to show and edit those parameters
+with the same interface as a local vault, while access stays where it already is: in IAM.
+
+- **Two kinds of vault.** *Local*, as today. *AWS Parameter Store*, where every record is a
+  parameter in one account and nothing is kept on this machine. Every vault shows where it lives.
+- **AWS accounts.** Keyhold signs in through IAM Identity Center (SSO) itself, without the AWS CLI,
+  and keeps the session only in memory. One sign-in can connect several accounts, each with a role
+  and an optional title; the same account never appears twice. Renew and revoke apply to the
+  sign-in, because that is what the token belongs to.
+- **IAM decides who reads.** Values are `SecureString`, encrypted with KMS, with no second layer of
+  Keyhold's own: anyone the policy allows can still use the console or the CLI. What the policy
+  denies does not appear in Keyhold at all.
+- **Folders are the path.** Every `/` is a folder. A record with one value is stored as that plain
+  value, so applications keep reading it as they do today; a record with several fields becomes
+  JSON. The first line of the parameter's description is the record's title and the rest is its
+  notes. A new parameter inherits the KMS key of the folder it is created in.
+- **Shared state, personal state.** Kind, "compromised" and "rotate by" are parameter tags, because
+  everyone using the secret needs them. Favourites stay on your machine.
+- **Staying current.** Keyhold rereads on open, when its window regains focus and every 60 seconds
+  while visible, and checks the parameter's version before saving instead of overwriting someone
+  else's change. With the session expired or no network, the vault is unavailable rather than
+  served from a stale copy.
+- **Deleting is final.** Parameter Store has no trash, so neither does an AWS vault; deleting asks
+  for the name to be typed.
+- **Attachments go to S3**, encrypted, under the same path as their parameter, so the same IAM
+  rules apply. The bucket is set per vault (suggested `keyhold-<vault name>`). Keyhold never creates
+  it: if it is missing or out of reach, the upload stops with a message saying what to ask the
+  account's administrator for.
+- **The agent surface works the same way:** off by default, enabled per vault, every value asked
+  for in the interface first.
+
+This is the one place Keyhold will send anything off the machine. It happens only for a vault you
+create as an AWS vault, only to the account that vault names, and the threat model will say so in
+those words. Local vaults stay exactly as they are.
 
 ## Where things are kept
 

@@ -14,6 +14,7 @@ promise it does not keep.
 | **F6** | Encrypted attachments, audit trail with a verifiable hash chain, encrypted export, import | **done** |
 | **F7** | Agent surface: a unix socket and an MCP server so a local coding agent can look things up without the secret passing through a chat transcript | **done** |
 | **F8** | Release: packaging, CI, signed builds | **next** |
+| **F9** | AWS Parameter Store vaults: IAM Identity Center sign-in, accounts, vaults backed by Parameter Store, attachments in S3. Design in the README, [Planned: vaults in AWS Parameter Store](../README.md#planned-vaults-in-aws-parameter-store) | **planned** |
 
 ## What F1–F4 put in place
 
