@@ -30,6 +30,7 @@ export function TreeCard({
   mode,
   filter,
   trashCount,
+  showTrash = true,
   onMode,
   onFilter,
   onRecord,
@@ -46,6 +47,7 @@ export function TreeCard({
   mode: TreeMode
   filter: TreeFilter
   trashCount: number
+  showTrash?: boolean
   onMode: (mode: TreeMode) => void
   onFilter: (filter: TreeFilter) => void
   onRecord: (id: string) => void
@@ -280,6 +282,7 @@ export function TreeCard({
         )}
       </div>
 
+      {showTrash ? (
       <button
         type="button"
         onClick={onTrash}
@@ -292,6 +295,11 @@ export function TreeCard({
         Lixeira
         <span className="ml-auto text-xs text-faint">{trashCount}</span>
       </button>
+      ) : (
+        <p className="flex h-11 shrink-0 items-center gap-2 border-t px-4 text-xs text-faint">
+          Na AWS não há lixeira: apagar é de vez.
+        </p>
+      )}
     </aside>
   )
 }

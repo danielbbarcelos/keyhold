@@ -1,11 +1,10 @@
 import { useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Lock } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-import { Logo } from '@/components/common/Logo'
 import { PasswordInput } from '@/components/common/PasswordInput'
 
 import { api, ApiError, type Status } from '../api'
@@ -52,13 +51,15 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
   return (
     <main className="grid min-h-screen place-items-center bg-background p-8">
       <form
-        className="flex w-full max-w-[26rem] flex-col items-center text-center"
+        className="flex w-full max-w-[26rem] flex-col rounded-2xl border bg-card p-8 shadow-pop"
         onSubmit={(event) => void submit(event)}
       >
-        <Logo className="size-14 rounded-2xl" />
+        <span className="grid size-12 place-items-center rounded-xl bg-amber-soft text-amber">
+          <Lock className="size-[22px]" />
+        </span>
 
-        <h1 className="mt-6 text-4xl font-bold tracking-tight">Destrancar o Keyhold</h1>
-        <p className="mt-2 mb-7 text-base text-muted-foreground">
+        <h1 className="mt-5 text-[22px] font-semibold tracking-tight">Destrancar o Keyhold</h1>
+        <p className="mt-1 mb-6 text-sm text-muted-foreground">
           {usingRecovery
             ? 'Digite a chave de recuperação que você guardou ao criar o cofre.'
             : needsPassword
@@ -72,7 +73,7 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
               id="password"
               aria-label="Senha-mestra"
               placeholder="Senha-mestra"
-              className="h-11 text-base md:text-base"
+              className="h-10"
               value={password}
               autoFocus
               onChange={(event) => setPassword(event.target.value)}
@@ -84,7 +85,7 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
               id="recovery"
               aria-label="Chave de recuperação"
               placeholder="Chave de recuperação"
-              className="h-11 text-base md:text-base"
+              className="h-10"
               value={recovery}
               autoFocus
               onChange={(event) => setRecovery(event.target.value)}
@@ -99,7 +100,7 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
                 value={code}
                 inputMode="numeric"
                 maxLength={6}
-                className="h-11 tracking-[0.3em]"
+                className="h-10 font-mono tracking-[0.3em]"
                 onChange={(event) => setCode(event.target.value)}
               />
             </div>
@@ -115,7 +116,7 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
             </p>
           )}
 
-          <Button type="submit" size="lg" className="h-11 w-full text-base" disabled={busy}>
+          <Button type="submit" size="lg" className="h-10 w-full" disabled={busy}>
             {busy && <Loader2 className="animate-spin" />}
             Destrancar
           </Button>
@@ -124,7 +125,7 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
         {needsPassword && (
           <button
             type="button"
-            className="mt-5 text-sm text-link hover:underline"
+            className="mt-5 self-center text-[13px] text-link hover:underline"
             onClick={() => {
               setUsingRecovery(!usingRecovery)
               setError('')

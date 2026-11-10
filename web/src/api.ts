@@ -132,6 +132,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** For AWS vaults: what kind of failure it was (`session_expired`, `access_denied`, ...). */
+    readonly aws?: string,
   ) {
     super(message)
   }
@@ -159,10 +161,44 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
       disown()
     }
 
-    throw new ApiError(response.status, payload.error ?? `${path} answered ${response.status}`)
+    throw new ApiError(response.status, payload.error ?? `${path} answered ${response.status}`, payload.aws)
   }
 
   return payload as T
+}
+
+/** Where a vault in AWS lives. */
+export interface AwsVault {
+  connection_id: string
+  region: string
+  bucket: string
+}
+
+export interface AwsLogin {
+  id: string
+  start_url: string
+  region: string
+  label: string
+  connected: boolean
+  expires_at: number | null
+}
+
+export interface AwsConnection {
+  id: string
+  login_id: string
+  account_id: string
+  account_name: string
+  role: string
+  title: string
+  note: string
+  used_by: string[]
+}
+
+export interface DeviceLogin {
+  user_code: string
+  verification_uri_complete: string
+  interval: number
+  expires_at: number
 }
 
 export interface VaultSummary {
@@ -170,6 +206,9 @@ export interface VaultSummary {
   name: string
   description: string
   colour: string
+  /** `local`, or `aws` for a vault kept in Parameter Store. */
+  kind?: 'local' | 'aws'
+  aws?: AwsVault | null
   agent_access: boolean
   archived: boolean
   created_at: string
@@ -311,8 +350,52 @@ export const api = {
 
   vaults: () => call<{ vaults: VaultSummary[] }>('GET', '/api/vaults'),
 
-  createVault: (name: string, colour = 'brand') =>
-    call<{ vault: VaultSummary }>('POST', '/api/vaults', { name, description: '', colour }),
+  createVault: (name: string, colour = 'brand', aws?: AwsVault) =>
+    call<{ vault: VaultSummary }>('POST', '/api/vaults', {
+      name,
+      description: '',
+      colour,
+      ...(aws ? { kind: 'aws', aws } : {}),
+    }),
+
+  aws: () => call<{ logins: AwsLogin[]; connections: AwsConnection[] }>('GET', '/api/aws'),
+
+  startAwsLogin: (startUrl: string, region: string, label: string) =>
+    call<{ login: AwsLogin; device: DeviceLogin | null }>('POST', '/api/aws/logins', {
+      start_url: startUrl,
+      region,
+      label,
+    }),
+
+  pollAwsLogin: (id: string) =>
+    call<{ state: 'pending' | 'slow_down' | 'done' | 'denied' | 'expired' }>('POST', `/api/aws/logins/${id}/poll`),
+
+  renewAwsLogin: (id: string) =>
+    call<{ login: AwsLogin; device: DeviceLogin | null }>('POST', `/api/aws/logins/${id}/renew`),
+
+  revokeAwsLogin: (id: string) => call<{ revoked: boolean }>('POST', `/api/aws/logins/${id}/revoke`),
+
+  removeAwsLogin: (id: string) => call<{ removed: boolean }>('DELETE', `/api/aws/logins/${id}`),
+
+  awsAccounts: (loginId: string) =>
+    call<{ accounts: Array<{ account_id: string; account_name: string; roles: string[] }> }>(
+      'GET',
+      `/api/aws/logins/${loginId}/accounts`,
+    ),
+
+  addAwsConnection: (connection: Omit<AwsConnection, 'id' | 'used_by'>) =>
+    call<{ connection: AwsConnection }>('POST', '/api/aws/connections', connection),
+
+  updateAwsConnection: (id: string, change: { role: string; title: string; note: string }) =>
+    call<{ connection: AwsConnection }>('PUT', `/api/aws/connections/${id}`, change),
+
+  removeAwsConnection: (id: string) => call<{ removed: boolean }>('DELETE', `/api/aws/connections/${id}`),
+
+  checkAwsVault: (vaultId: string) =>
+    call<{ parameters: boolean; bucket: 'ok' | 'missing' | 'denied' | null; message: string }>(
+      'POST',
+      `/api/aws/vaults/${vaultId}/check`,
+    ),
 
   updateVault: (id: string, meta: { name: string; description: string; colour: string }) =>
     call<{ vault: VaultSummary }>('PUT', `/api/vaults/${id}`, meta),

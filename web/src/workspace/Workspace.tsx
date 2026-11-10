@@ -7,7 +7,7 @@ import { AuditPanel } from './AuditPanel'
 import { CommandPalette } from './CommandPalette'
 import { Home, type Seen } from './Home'
 import { InstancesPanel } from './InstancesPanel'
-import { NameDialog } from './NameDialog'
+import { NewVaultDialog } from './NewVaultDialog'
 import { Settings } from './Settings'
 import { Body, Crumb, Rail, Title, TopBar, type Place } from './shell'
 import { toast, toastError, Toaster } from './toast'
@@ -129,6 +129,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
           onManageVaults={() => setPlace('settings')}
           onSearch={search}
           onSeen={onSeen}
+          onAccounts={() => setPlace('settings')}
         />
       )
     }
@@ -213,16 +214,18 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       <main className="flex min-h-0 min-w-0">{page()}</main>
 
       {askingVault && (
-        <NameDialog
-          title="Novo cofre"
-          hint="Um cofre é um agrupamento: pode ficar trancado enquanto outro está aberto, e é a unidade que um agente pode ou não enxergar."
-          onConfirm={(name) => {
+        <NewVaultDialog
+          onAccounts={() => {
+            setAskingVault(false)
+            setPlace('settings')
+          }}
+          onCreate={(name, aws) => {
             setAskingVault(false)
             void api
-              .createVault(name)
+              .createVault(name, 'default', aws)
               .then(async (made) => {
                 await refresh()
-                toast('Cofre criado', name)
+                toast('Cofre criado', aws ? `${name}, no AWS Parameter Store` : name)
                 openVault(made.vault.id)
               })
               .catch((cause) => toastError(cause, 'Não criei o cofre'))

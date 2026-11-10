@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bot, Terminal } from 'lucide-react'
+import { Bot, KeyRound, Terminal, TriangleAlert } from 'lucide-react'
 
 import {
   AlertDialog,
@@ -146,46 +146,59 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
 
   return (
     <AlertDialog open>
-      <AlertDialogContent>
+      <AlertDialogContent className="sm:max-w-[440px]">
         <AlertDialogHeader>
-          <AlertDialogTitle className="flex items-center gap-2">
-            <Bot className="size-4" />
-            {request.peer.parent ?? request.peer.process} está pedindo um segredo
+          <AlertDialogTitle>
+            {request.peer.parent ?? request.peer.process} quer {runs ? 'usar' : 'ler'} um segredo
           </AlertDialogTitle>
 
           <AlertDialogDescription asChild>
             <div className="space-y-3">
-              <p>
-                Campo <strong className="text-foreground">{request.field}</strong> de{' '}
-                <strong className="text-foreground">{request.record_title}</strong>.
-              </p>
+              <div className="flex items-center gap-3 rounded-xl border bg-raised px-4 py-3 text-left">
+                <span className="grid size-8 place-items-center rounded-lg bg-stone-soft text-muted-foreground">
+                  <Bot className="size-4" />
+                </span>
+                <span className="min-w-0">
+                  <b className="block truncate text-sm font-medium text-foreground">{request.peer.parent ?? request.peer.process}</b>
+                  <span className="block truncate text-xs">
+                    pid {request.peer.pid}
+                    {request.peer.parent ? `, pela ponte ${request.peer.process}` : ''}
+                  </span>
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3 rounded-xl border bg-raised px-4 py-3 text-left">
+                <span className="grid size-8 place-items-center rounded-lg bg-sky-soft text-sky">
+                  <KeyRound className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <b className="block truncate text-sm font-medium text-foreground">
+                    {request.record_title}, {request.field}
+                  </b>
+                </span>
+                <span className="rounded-full bg-stone-soft px-2.5 py-0.5 text-xs">{runs ? 'rodar comando' : 'ler o valor'}</span>
+              </div>
 
               {runs ? (
-                <p className="flex items-start gap-2 rounded-lg border p-3">
+                <p className="flex items-start gap-2 rounded-xl border p-3 text-left">
                   <Terminal className="mt-0.5 size-4 shrink-0" />
                   <span>
                     O valor vai para uma variável de ambiente de um comando e{' '}
-                    <strong className="text-foreground">não entra na conversa</strong> do
-                    assistente.
+                    <strong className="text-foreground">não entra na conversa</strong> do assistente.
                   </span>
                 </p>
               ) : (
-                <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-3">
-                  O valor entra no contexto do modelo e{' '}
-                  <strong className="text-foreground">sai desta máquina</strong>. Se der para
-                  resolver executando um comando, prefira isso.
+                <p className="flex items-start gap-2 rounded-xl bg-amber-soft p-3 text-left text-foreground">
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber" />
+                  <span>
+                    Um valor entregue ao assistente sai desta máquina. Se der para resolver rodando um comando com a senha
+                    no ambiente, prefira isso.
+                  </span>
                 </p>
               )}
 
-              <p className="text-xs">
-                {request.peer.parent
-                  ? `${request.peer.parent} → ${request.peer.process}`
-                  : request.peer.process}{' '}
-                · PID {request.peer.pid}
-              </p>
-
-              <div className="space-y-1.5 border-t pt-3">
-                <span className="text-foreground">Não perguntar de novo por</span>
+              <div className="space-y-1.5 pt-1 text-left">
+                <span className="text-[13px] font-medium text-foreground">Permitir por</span>
                 <Select value={window_} onValueChange={setWindow}>
                   <SelectTrigger className="w-full" aria-label="Por quanto tempo">
                     <SelectValue />
@@ -216,7 +229,7 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
         </AlertDialogHeader>
 
         <AlertDialogFooter>
-          <Button variant="ghost" onClick={() => answer(false)}>
+          <Button variant="outline" onClick={() => answer(false)}>
             Negar
           </Button>
           <Button onClick={() => answer(true)}>Permitir</Button>

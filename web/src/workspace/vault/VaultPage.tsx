@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button'
 
 import {
   api,
+  ApiError,
   type FolderNode,
   type OpenRecord,
   type Payload,
@@ -65,6 +66,7 @@ export function VaultPage({
   onManageVaults,
   onSearch,
   onSeen,
+  onAccounts,
 }: {
   status: Status
   vault: VaultSummary
@@ -76,6 +78,8 @@ export function VaultPage({
   onManageVaults: () => void
   onSearch: () => void
   onSeen: (record: RecordPreview) => void
+  /** Ajustes, at Contas AWS: where an expired AWS session is renewed. */
+  onAccounts: () => void
 }) {
   const [folders, setFolders] = useState<FolderNode[]>([])
   const [records, setRecords] = useState<RecordPreview[]>([])
@@ -91,6 +95,8 @@ export function VaultPage({
   const [deleting, setDeleting] = useState<{ id: string; title: string } | null>(null)
   const [movingToVault, setMovingToVault] = useState<{ id: string; title: string } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [unavailable, setUnavailable] = useState<{ message: string; code?: string } | null>(null)
+  const aws = vault.kind === 'aws'
 
   const refresh = useCallback(async () => {
     try {
@@ -99,6 +105,7 @@ export function VaultPage({
       setFolders(tree.folders)
       setRecords(list.records.filter((record) => !record.archived))
       setTrash(bin.records)
+      setUnavailable(null)
 
       // Atenção: what the file already knows (compromised, rotation passed) plus the health report,
       // which opens every record to judge weak and repeated passwords.
@@ -118,7 +125,11 @@ export function VaultPage({
         .then((report) => setAttention(new Set([...flagged, ...report.health.findings.map((one) => one.record_id)])))
         .catch(() => {})
     } catch (cause) {
-      toastError(cause, 'Não consegui ler o cofre')
+      if (cause instanceof ApiError && cause.aws) {
+        setUnavailable({ message: cause.message, code: cause.aws })
+      } else {
+        toastError(cause, 'Não consegui ler o cofre')
+      }
     }
   }, [vault.id])
 
@@ -128,6 +139,21 @@ export function VaultPage({
     setFilter('all')
     void refresh()
   }, [refresh])
+
+  // An AWS vault is shared with whoever else IAM lets in: read it again when the window comes
+  // back, and every minute while it is in front of somebody.
+  useEffect(() => {
+    if (!aws) return
+
+    const again = () => document.visibilityState === 'visible' && void refresh()
+    const timer = window.setInterval(again, 60_000)
+    window.addEventListener('focus', again)
+
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', again)
+    }
+  }, [aws, refresh])
 
   const openId = selection?.kind === 'record' ? selection.id : null
 
@@ -231,13 +257,16 @@ export function VaultPage({
       await api.archiveRecord(id, true)
       if (open?.id === id) onSelect(null)
       await refresh()
-      toast('Foi para a lixeira', 'Dá para restaurar de lá enquanto o prazo não vencer.')
+      toast(
+        aws ? 'Apagado da AWS' : 'Foi para a lixeira',
+        aws ? 'O parâmetro não existe mais na conta.' : 'Dá para restaurar de lá enquanto o prazo não vencer.',
+      )
     } catch (cause) {
       toastError(cause)
     }
   }
 
-  const folderEntries = (folder: FolderNode): MenuEntry[] => [
+  const folderEntries = (folder: FolderNode): MenuEntry[] => aws ? awsFolderEntries(folder) : [
     {
       kind: 'item',
       label: 'Registro novo aqui',
@@ -259,6 +288,19 @@ export function VaultPage({
     { kind: 'item', label: 'Mover', icon: MoveRight, onSelect: () => setFolderAction({ what: 'move', folder }) },
     { kind: 'separator' },
     { kind: 'item', label: 'Excluir', icon: Trash2, destructive: true, onSelect: () => setFolderAction({ what: 'delete', folder }) },
+  ]
+
+  /** In Parameter Store a folder is a path: it can hold new things and be removed when empty. */
+  const awsFolderEntries = (folder: FolderNode): MenuEntry[] => [
+    {
+      kind: 'item',
+      label: 'Registro novo aqui',
+      icon: Plus,
+      onSelect: () => setCreating({ payload: emptyPayload(), folderId: folder.id }),
+    },
+    { kind: 'item', label: 'Subpasta', icon: FolderPlus, onSelect: () => setAsking({ parentId: folder.id }) },
+    { kind: 'separator' },
+    { kind: 'item', label: 'Excluir a pasta vazia', icon: Trash2, destructive: true, onSelect: () => setFolderAction({ what: 'delete', folder }) },
   ]
 
   const recordEntries = (record: RecordPreview): MenuEntry[] => [
@@ -285,7 +327,7 @@ export function VaultPage({
     { kind: 'separator' },
     {
       kind: 'item',
-      label: 'Mandar para a lixeira',
+      label: aws ? 'Apagar de vez' : 'Mandar para a lixeira',
       icon: Trash2,
       destructive: true,
       onSelect: () => setDeleting({ id: record.id, title: record.title }),
@@ -344,6 +386,25 @@ export function VaultPage({
   )
 
   function main() {
+    if (unavailable) {
+      return (
+        <div className="grid h-full place-items-center rounded-[14px] border border-dashed p-8 text-center">
+          <div className="max-w-sm space-y-3">
+            <b className="block text-[15px] font-semibold">
+              {unavailable.code === 'session_expired' ? 'A sessão da AWS acabou' : 'O cofre na AWS não respondeu'}
+            </b>
+            <p className="text-sm text-muted-foreground">{unavailable.message}</p>
+            <div className="flex justify-center gap-2">
+              {unavailable.code === 'session_expired' && <Button onClick={onAccounts}>Renovar em Contas AWS</Button>}
+              <Button variant="outline" onClick={() => void refresh()}>
+                Tentar de novo
+              </Button>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
     if (selection?.kind === 'trash') {
       return (
         <TrashPanel
@@ -396,6 +457,7 @@ export function VaultPage({
           onMoveToFolder={(folderId) => void moveTo(open.id, folderId)}
           onMoveToVault={() => setMovingToVault({ id: open.id, title: open.payload.title })}
           onTrash={() => setDeleting({ id: open.id, title: open.payload.title })}
+          permanent={aws}
         />
       )
     }
@@ -431,6 +493,7 @@ export function VaultPage({
           mode={mode}
           filter={filter}
           trashCount={trash.length}
+          showTrash={!aws}
           onMode={setMode}
           onFilter={setFilter}
           onRecord={(id) => onSelect({ kind: 'record', id })}
@@ -509,21 +572,26 @@ export function VaultPage({
         <AlertDialog open onOpenChange={(isOpen) => !isOpen && setDeleting(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Mandar “{deleting.title}” para a lixeira?</AlertDialogTitle>
+              <AlertDialogTitle>
+                {aws ? `Apagar “${deleting.title}” de vez?` : `Mandar “${deleting.title}” para a lixeira?`}
+              </AlertDialogTitle>
               <AlertDialogDescription>
-                Dá para restaurar de lá enquanto o prazo da lixeira não vencer.
+                {aws
+                  ? 'Um cofre na AWS não tem lixeira: o parâmetro é apagado da conta agora, para todo mundo que tem acesso a ele.'
+                  : 'Dá para restaurar de lá enquanto o prazo da lixeira não vencer.'}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancelar</AlertDialogCancel>
               <AlertDialogAction
+                className={aws ? 'bg-destructive text-white hover:bg-destructive/90' : undefined}
                 onClick={() => {
                   const id = deleting.id
                   setDeleting(null)
                   void sendToTrash(id)
                 }}
               >
-                Mandar para a lixeira
+                {aws ? 'Apagar de vez' : 'Mandar para a lixeira'}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

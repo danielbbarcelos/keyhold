@@ -47,6 +47,7 @@ export function RecordView({
   onMoveToFolder,
   onMoveToVault,
   onTrash,
+  permanent = false,
 }: {
   record: OpenRecord
   folders: FolderNode[]
@@ -56,6 +57,8 @@ export function RecordView({
   onMoveToFolder: (folderId: string | null) => void
   onMoveToVault: () => void
   onTrash: () => void
+  /** AWS vaults have no trash: deleting is for good, and the menu says so. */
+  permanent?: boolean
 }) {
   const [tab, setTab] = useState<'campos' | 'arquivos' | 'historico'>('campos')
   const [versions, setVersions] = useState<VersionEntry[]>([])
@@ -183,7 +186,7 @@ export function RecordView({
                 ),
             },
             { kind: 'separator' },
-            { kind: 'item', label: 'Mandar para a lixeira', icon: Trash2, destructive: true, onSelect: onTrash },
+            { kind: 'item', label: permanent ? 'Apagar de vez' : 'Mandar para a lixeira', icon: Trash2, destructive: true, onSelect: onTrash },
           ]}
         />
       </div>

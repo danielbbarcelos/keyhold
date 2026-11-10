@@ -5,6 +5,7 @@ import {
   BellOff,
   Bot,
   Check,
+  Cloud,
   KeyRound,
   Loader2,
   Lock,
@@ -66,6 +67,7 @@ import {
   type VaultSummary,
 } from '../api'
 import { askToNotify, notifyState, type NotifyState } from '../notify'
+import { AwsAccounts } from './AwsAccounts'
 import { TransferPanel } from './TransferPanel'
 import { VaultsPanel } from './VaultsPanel'
 
@@ -92,6 +94,7 @@ const SECTIONS: Array<{ id: string; label: string; icon: LucideIcon }> = [
   { id: 'segundo-fator', label: 'Segundo fator', icon: ShieldCheck },
   { id: 'senha', label: 'Senha-mestra', icon: KeyRound },
   { id: 'cofres', label: 'Cofres', icon: Vault },
+  { id: 'aws', label: 'Contas AWS', icon: Cloud },
   { id: 'chaves', label: 'Trocar a chave', icon: RefreshCw },
   { id: 'lixeira', label: 'Lixeira', icon: Trash2 },
   { id: 'trilha', label: 'Trilha', icon: ScrollText },
@@ -148,6 +151,7 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
     'segundo-fator': <SecondFactor status={status} onChanged={onChanged} />,
     senha: <MasterPassword status={status} onChanged={onChanged} />,
     cofres: <VaultsPanel vaults={vaults} onChanged={onVaultsChanged} />,
+    aws: <AwsAccounts vaults={vaults} />,
     chaves: <Rotation vaults={vaults} onChanged={onVaultsChanged} />,
     lixeira: <Retention days={status.retention_days} onChanged={onChanged} />,
     trilha: <TrailSettings on={status.log_reads} onChanged={onChanged} />,
