@@ -199,8 +199,18 @@ export function VaultPage({
     setSaving(true)
 
     try {
-      await api.saveRecord(open.id, editing.payload)
-      if (editing.folderId !== open.folder_id) await api.moveRecord(open.id, editing.folderId)
+      await api.saveRecord(open.id, editing.payload, aws ? open.version : undefined)
+      if (editing.folderId !== open.folder_id) {
+        const moved = await api.moveRecord(open.id, editing.folderId)
+        // In AWS the name is the path, so moving gives the record a new id.
+        if (moved.id && moved.id !== open.id) {
+          setEditing(null)
+          await refresh()
+          onSelect({ kind: 'record', id: moved.id })
+          toast('Registro salvo', editing.payload.title)
+          return
+        }
+      }
       if ((editing.rotation ?? null) !== (open.rotation_due_at?.slice(0, 10) ?? null)) {
         await api.setRotationDue(open.id, editing.rotation)
       }
@@ -243,9 +253,13 @@ export function VaultPage({
 
   async function moveTo(id: string, folderId: string | null) {
     try {
-      await api.moveRecord(id, folderId)
+      const moved = await api.moveRecord(id, folderId)
       await refresh()
-      if (open?.id === id) await reloadOpen()
+      if (moved.id && moved.id !== id) {
+        if (open?.id === id) onSelect({ kind: 'record', id: moved.id })
+      } else if (open?.id === id) {
+        await reloadOpen()
+      }
       toast('Registro movido', folderPath(folders, folderId) || 'Raiz do cofre')
     } catch (cause) {
       toastError(cause, 'Não movi o registro')

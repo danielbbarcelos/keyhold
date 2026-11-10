@@ -118,6 +118,9 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
     onSection?.(SECTIONS.find((one) => one.id === active)?.label ?? '')
   }, [active, onSection])
   const page = useRef<HTMLDivElement>(null)
+  // A click on the navigation wins over the scroll it causes, which would otherwise light up
+  // whichever short section happens to end at the top.
+  const pinnedUntil = useRef(0)
 
   // Light up the section being read. The one nearest the top of the page wins.
   useEffect(() => {
@@ -133,7 +136,7 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
           .filter((entry) => entry.isIntersecting)
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
 
-        if (top) {
+        if (top && Date.now() > pinnedUntil.current) {
           setActive(top.target.id.replace('ajuste-', ''))
         }
       },
@@ -169,6 +172,7 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
             aria-current={active === id}
             onClick={() => {
               setActive(id)
+              pinnedUntil.current = Date.now() + 900
               document.getElementById(`ajuste-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
             }}
             className={cn(
@@ -1088,9 +1092,13 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
               <div key={vault.id} className="flex items-center justify-between gap-4">
                 <Label htmlFor={`agent-${vault.id}`} className="font-normal">
                   {vault.name}
+                  {vault.kind === 'aws' && (
+                    <span className="ml-2 text-xs text-faint">cofre AWS, ainda fora do alcance de agentes</span>
+                  )}
                 </Label>
                 <Switch
                   id={`agent-${vault.id}`}
+                  disabled={vault.kind === 'aws'}
                   checked={vault.agent_access}
                   onCheckedChange={(on) =>
                     void api.setAgentAccess(vault.id, on).then(() => {

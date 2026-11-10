@@ -442,15 +442,22 @@ export const api = {
 
   openRecord: (id: string) => call<{ record: OpenRecord }>('GET', `/api/records/${id}`),
 
-  saveRecord: (id: string, payload: Payload) =>
-    call<{ record: RecordHeader }>('PUT', `/api/records/${id}`, payload),
+  /**
+   * `expectedVersion` makes the save refuse (409) when somebody else changed the record in the
+   * meantime, which only happens in an AWS vault shared with other people.
+   */
+  saveRecord: (id: string, payload: Payload, expectedVersion?: number) =>
+    call<{ record: RecordHeader }>('PUT', `/api/records/${id}`, {
+      ...payload,
+      ...(expectedVersion !== undefined ? { expected_version: expectedVersion } : {}),
+    }),
 
   /**
    * Move a record. Passing `vaultId` moves it to another vault, which re-encrypts it — the folder
    * then has to be one of that vault's, or nothing.
    */
   moveRecord: (id: string, folderId: string | null, vaultId?: string) =>
-    call<{ moved: boolean }>('POST', `/api/records/${id}/move`, {
+    call<{ moved: boolean; id?: string }>('POST', `/api/records/${id}/move`, {
       folder_id: folderId,
       ...(vaultId ? { vault_id: vaultId } : {}),
     }),
