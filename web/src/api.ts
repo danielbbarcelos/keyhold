@@ -290,6 +290,8 @@ export type RecordPreview = RecordHeader & {
   subtitle: string
   url: string
   icon: RecordIcon | null
+  /** AWS only: a String/StringList parameter, which Keyhold shows but never overwrites. */
+  plaintext?: boolean
 }
 
 export interface AttachmentInfo {
@@ -301,7 +303,7 @@ export interface AttachmentInfo {
   created_at: string
 }
 
-export type OpenRecord = RecordHeader & { payload: Payload }
+export type OpenRecord = RecordHeader & { payload: Payload; plaintext?: boolean }
 
 export interface VersionEntry {
   version: number
@@ -447,7 +449,7 @@ export const api = {
    * meantime, which only happens in an AWS vault shared with other people.
    */
   saveRecord: (id: string, payload: Payload, expectedVersion?: number) =>
-    call<{ record: RecordHeader }>('PUT', `/api/records/${id}`, {
+    call<{ record: RecordHeader; warning?: string }>('PUT', `/api/records/${id}`, {
       ...payload,
       ...(expectedVersion !== undefined ? { expected_version: expectedVersion } : {}),
     }),
@@ -457,7 +459,7 @@ export const api = {
    * then has to be one of that vault's, or nothing.
    */
   moveRecord: (id: string, folderId: string | null, vaultId?: string) =>
-    call<{ moved: boolean; id?: string }>('POST', `/api/records/${id}/move`, {
+    call<{ moved: boolean; id?: string; warning?: string; history_lost?: boolean }>('POST', `/api/records/${id}/move`, {
       folder_id: folderId,
       ...(vaultId ? { vault_id: vaultId } : {}),
     }),
@@ -477,8 +479,12 @@ export const api = {
   readVersion: (id: string, version: number) =>
     call<{ payload: Payload }>('GET', `/api/records/${id}/versions/${version}`),
 
-  restoreVersion: (id: string, version: number) =>
-    call<{ record: RecordHeader }>('POST', `/api/records/${id}/versions/${version}/restore`),
+  restoreVersion: (id: string, version: number, expectedVersion?: number) =>
+    call<{ record: RecordHeader; warning?: string }>(
+      'POST',
+      `/api/records/${id}/versions/${version}/restore`,
+      expectedVersion !== undefined ? { expected_version: expectedVersion } : undefined,
+    ),
 
   attachments: (recordId: string) =>
     call<{ attachments: AttachmentInfo[]; max_bytes: number }>(

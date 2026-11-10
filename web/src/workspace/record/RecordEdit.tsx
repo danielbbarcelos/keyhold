@@ -31,9 +31,11 @@ export function RecordEdit({
   kind,
   folders,
   onChange,
+  aws = false,
 }: {
   draft: EditDraft
   kind?: string
+  aws?: boolean
   folders: FolderNode[]
   onChange: (draft: EditDraft) => void
 }) {
@@ -75,6 +77,7 @@ export function RecordEdit({
                 ))}
               </SelectContent>
             </Select>
+            {aws && <span className="text-xs text-faint">Mudar a pasta na AWS apaga o histórico do nome antigo.</span>}
           </label>
           <div className="grid w-[190px] gap-1.5">
             <span className="text-[13px] font-medium">Trocar até</span>

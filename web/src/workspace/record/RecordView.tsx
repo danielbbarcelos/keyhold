@@ -138,7 +138,7 @@ export function RecordView({
             {copied > 0 ? `Copiado, limpa em ${copied}s` : `Copiar ${primary.label.toLowerCase()}`}
           </Button>
         ) : null}
-        <Button variant={primary ? 'outline' : 'default'} onClick={onEdit}>
+        <Button variant={primary ? 'outline' : 'default'} onClick={onEdit} disabled={record.plaintext}>
           <Pencil />
           Editar
         </Button>
@@ -192,6 +192,13 @@ export function RecordView({
           ]}
         />
       </div>
+
+      {record.plaintext && (
+        <p className="mx-5 mb-4 rounded-xl bg-amber-soft px-4 py-3 text-[13px] text-foreground">
+          Este parâmetro é do tipo String, sem cifra. O Keyhold mostra mas não altera: só grava SecureString, e mudar o
+          tipo poderia quebrar quem lê este parâmetro.
+        </p>
+      )}
 
       <div className="flex gap-1 border-b px-5">
         <Tab on={tab === 'campos'} count={payload.fields.length} onClick={() => setTab('campos')}>
@@ -268,7 +275,13 @@ export function RecordView({
           onRestore={() => {
             const version = viewing
             setViewing(null)
-            void run(() => api.restoreVersion(record.id, version), `Versão ${version} restaurada`)
+            void run(
+              () =>
+                api.restoreVersion(record.id, version, permanent ? record.version : undefined).then((answer) => {
+                  if (answer.warning) toast('Restaurada, com um aviso', answer.warning, 'error')
+                }),
+              `Versão ${version} restaurada`,
+            )
           }}
         />
       )}

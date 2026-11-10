@@ -99,6 +99,7 @@ export function VaultPage({
   const [deleting, setDeleting] = useState<{ id: string; title: string } | null>(null)
   const [movingToVault, setMovingToVault] = useState<{ id: string; title: string } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [movingAws, setMovingAws] = useState<{ id: string; folderId: string | null } | null>(null)
   const [unavailable, setUnavailable] = useState<{ message: string; code?: string } | null>(null)
   const aws = vault.kind === 'aws'
   const [origin, setOrigin] = useState('')
@@ -234,12 +235,14 @@ export function VaultPage({
 
     try {
       if (payloadChanged) {
-        await api.saveRecord(id, editing.payload, aws ? open.version : undefined)
+        const saved = await api.saveRecord(id, editing.payload, aws ? open.version : undefined)
+        if (saved.warning) toast('Salvo, com um aviso', saved.warning, 'error')
         wrote = true
       }
       if (editing.folderId !== open.folder_id) {
         const moved = await api.moveRecord(id, editing.folderId)
         if (moved.id) id = moved.id
+        if (moved.warning) toast('Movido, com um aviso', moved.warning, 'error')
         wrote = true
       }
       if ((editing.rotation ?? null) !== (open.rotation_due_at?.slice(0, 10) ?? null)) {
@@ -305,9 +308,17 @@ export function VaultPage({
     }
   }
 
-  async function moveTo(id: string, folderId: string | null) {
+  async function moveTo(id: string, folderId: string | null, confirmed = false) {
+    // In Parameter Store a move is a new name: the old one, with its history, is deleted.
+    if (aws && !confirmed) {
+      setMovingAws({ id, folderId })
+
+      return
+    }
+
     try {
       const moved = await api.moveRecord(id, folderId)
+      if (moved.warning) toast('Movido, com um aviso', moved.warning, 'error')
       await refresh()
       if (moved.id && moved.id !== id) {
         if (open?.id === id) onSelect({ kind: 'record', id: moved.id })
@@ -506,7 +517,7 @@ export function VaultPage({
       if (editing) {
         return (
           <div className="h-full min-h-0 overflow-auto">
-            <RecordEdit draft={editing} kind={open.kind} folders={folders} onChange={setEditing} />
+            <RecordEdit draft={editing} kind={open.kind} aws={aws} folders={folders} onChange={setEditing} />
           </div>
         )
       }
@@ -674,6 +685,32 @@ export function VaultPage({
                 }}
               >
                 {aws ? 'Apagar de vez' : 'Mandar para a lixeira'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {movingAws && (
+        <AlertDialog open onOpenChange={(isOpen) => !isOpen && setMovingAws(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Mover na AWS?</AlertDialogTitle>
+              <AlertDialogDescription>
+                No Parameter Store, a pasta é parte do nome. Mover grava o registro com o nome novo e apaga o antigo,
+                e o histórico de versões do nome antigo vai junto com ele.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  const { id, folderId } = movingAws
+                  setMovingAws(null)
+                  void moveTo(id, folderId, true)
+                }}
+              >
+                Mover
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
