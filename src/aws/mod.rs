@@ -34,8 +34,11 @@
 //! struct for the length of a session, out of reach of a heap dump and out of every log line.
 //!
 //! **Every endpoint is a field.** Each client is built with the real AWS endpoint for its region
-//! and can be pointed elsewhere with `with_endpoint`, which is how the tests run against a fake
-//! server on localhost without a single request reaching AWS.
+//! and can be pointed elsewhere with the crate-private `with_endpoint`, which is how the tests run
+//! against a fake server on localhost without a single request reaching AWS. Only the tests set
+//! one (`AwsState::set_endpoints` exists only under `cfg(test)`), and outside the tests the HTTP
+//! client refuses anything that is not HTTPS, so a production build has no way to aim a signed
+//! request at a plain-text endpoint.
 
 pub mod config;
 pub mod error;
@@ -133,8 +136,16 @@ impl std::fmt::Debug for SecretBytes {
 /// and S3 answers a request to the wrong region with a 301 that we want to read, not follow.
 /// TLS is rustls on the `ring` provider with compiled-in roots, so nothing about it depends on
 /// the system's OpenSSL or certificate store.
+///
+/// **No proxy, and HTTPS only.** A proxy named in the environment (`HTTPS_PROXY`, `ALL_PROXY`)
+/// would see every request's host and timing, and a misconfigured one could terminate TLS; AWS's
+/// endpoints are reached directly or not at all. Outside the tests, which talk to a fake on
+/// `http://127.0.0.1`, the client refuses any URL that is not `https://`, so an endpoint override
+/// can never send a signed request or a decrypted value in the clear.
 pub fn http_client() -> AwsResult<reqwest::Client> {
     reqwest::Client::builder()
+        .no_proxy()
+        .https_only(!cfg!(test))
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
@@ -214,6 +225,44 @@ pub(crate) async fn send(request: reqwest::RequestBuilder) -> AwsResult<Response
         headers,
         body,
     })
+}
+
+/// Like [`send`], but a successful body larger than `limit` bytes is refused instead of read.
+///
+/// The `Content-Length` is checked before a single byte of the body is taken, and the body is
+/// then read chunk by chunk under the same cap, for a server that sends no length or lies about
+/// it. Error bodies (small XML documents) are read as usual.
+pub(crate) async fn send_capped(
+    request: reqwest::RequestBuilder,
+    limit: u64,
+) -> AwsResult<Response> {
+    let mut response = request.send().await?;
+    let status = response.status().as_u16();
+    let headers = response.headers().clone();
+
+    if !(200..300).contains(&status) {
+        let body = Zeroizing::new(Vec::from(response.bytes().await?));
+        return Ok(Response { status, headers, body });
+    }
+
+    if let Some(size) = response.content_length().filter(|size| *size > limit) {
+        return Err(AwsError::TooLarge { size, limit });
+    }
+
+    // Reserved up front so the buffer is not reallocated (and the old copies left unwiped) as
+    // the chunks arrive.
+    let mut body = Zeroizing::new(Vec::with_capacity(
+        response.content_length().unwrap_or(0).min(limit) as usize,
+    ));
+    while let Some(chunk) = response.chunk().await? {
+        let size = (body.len() + chunk.len()) as u64;
+        if size > limit {
+            return Err(AwsError::TooLarge { size, limit });
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    Ok(Response { status, headers, body })
 }
 
 /// A fake AWS for the tests: a local HTTP server that records every request and answers each

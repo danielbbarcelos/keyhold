@@ -22,9 +22,21 @@
 //! **Errors say what to do.** An `AwsError` becomes `{ "error": "<frase>", "aws": "<kind>" }`
 //! with a status the interface can switch on: 424 when the AWS session needs renewing (never 401,
 //! which belongs to Keyhold's own session), 403, 404, 409, 429, 502 and 400.
+//!
+//! **Fail closed on what decides protection.** A write over an existing parameter has to name its
+//! KMS key, or Parameter Store moves it to the account's default key; a new record inherits its
+//! folder's key; an attachment is encrypted with its record's key. When the key cannot be read
+//! (DescribeParameters denied and history denied too, or the listing's metadata failed), the write
+//! is refused with a sentence saying why, never sent with a guess.
+//!
+//! **A write that half-happened says so.** Some operations are two requests (a move is a put and
+//! a delete; a format switch is a put and a tag). When the second fails after the first landed,
+//! the answer is a success with a `warning` in Portuguese for the interface to show, and the
+//! caches are cleared on every path, errors included, so the next read sees what is really there.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
+use std::time::Duration;
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -37,11 +49,11 @@ use super::{bad_request, conflict, locked, Answer, AppState, Failure};
 use crate::attachments::Attachment;
 use crate::audit::{self, Detail};
 use crate::aws::config::{self, AwsConfig, Connection, Login};
-use crate::aws::mapping::{self, encode_id};
+use crate::aws::mapping::{self, attachment_id, folder_id, record_id, IdKind};
 use crate::aws::state::{Pending, Snapshot, SNAPSHOT_SECONDS, TAGS_SECONDS};
 use crate::aws::{
-    now_unix, AwsError, Credentials, Parameter, ParameterMetadata, Poll, PutParameter, SsmClient,
-    SsoToken, Tag,
+    now_unix, AwsError, Credentials, Parameter, ParameterMetadata, Poll, PutParameter, S3Client,
+    SsmClient, SsoToken, Tag,
 };
 use crate::records::{OpenRecord, Payload, RecordHeader, RecordPreview, VersionEntry};
 use crate::vaults::{self, AwsVault};
@@ -107,6 +119,15 @@ pub(crate) fn aws_failure(error: AwsError) -> Failure {
             StatusCode::BAD_REQUEST,
             "invalid",
             format!("a AWS recusou o pedido: {detail}"),
+        ),
+        AwsError::TooLarge { size, limit } => (
+            StatusCode::BAD_REQUEST,
+            "invalid",
+            format!(
+                "esse arquivo tem {:.1} MB, acima do limite de {} MB que o Keyhold abre",
+                *size as f64 / (1024.0 * 1024.0),
+                limit / (1024 * 1024)
+            ),
         ),
         AwsError::Other { code, .. } => (
             StatusCode::BAD_GATEWAY,
@@ -293,6 +314,7 @@ async fn start_login(State(state): State<Arc<AppState>>, Json(body): Json<NewLog
         .map_err(|_| bad_request(format!("'{region}' não é uma região da AWS")))?;
 
     let config = load(&state)?;
+    let generation = state.aws.generation(&state.lock).ok_or_else(locked)?;
 
     // The same organisation and region is the same login: logging in again renews it rather than
     // listing it twice.
@@ -317,11 +339,12 @@ async fn start_login(State(state): State<Arc<AppState>>, Json(body): Json<NewLog
         ),
     };
 
-    device_login(&state, login, known).await
+    device_login(&state, login, known, generation).await
 }
 
-/// Register, start the device authorization, and remember it until it is approved.
-async fn device_login(state: &AppState, login: Login, known: bool) -> Answer {
+/// Register, start the device authorization, and remember it until it is approved, unless the
+/// vault locked while AWS was answering.
+async fn device_login(state: &AppState, login: Login, known: bool, generation: u64) -> Answer {
     let sso = state.aws.sso(&login.region).map_err(aws_failure)?;
     let device = sso.start_device_login(&login.start_url).await.map_err(aws_failure)?;
 
@@ -337,7 +360,7 @@ async fn device_login(state: &AppState, login: Login, known: bool) -> Answer {
 
     state
         .aws
-        .with(&state.lock, |inner| {
+        .with_generation(&state.lock, generation, |inner| {
             inner.pending.insert(login.id.clone(), Pending { login, device, known });
         })
         .ok_or_else(locked)?;
@@ -347,9 +370,10 @@ async fn device_login(state: &AppState, login: Login, known: bool) -> Answer {
 
 /// Ask AWS once whether the person approved the login. The interface calls this every `interval`.
 async fn poll_login(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    let generation = state.aws.generation(&state.lock).ok_or_else(locked)?;
     let waiting = state
         .aws
-        .with(&state.lock, |inner| {
+        .with_generation(&state.lock, generation, |inner| {
             let device = inner.pending.get(&id).map(|p| (p.device.clone(), p.login.clone(), p.known));
             (device, inner.tokens.contains_key(&id))
         })
@@ -367,7 +391,7 @@ async fn poll_login(State(state): State<Arc<AppState>>, Path(id): Path<String>) 
     let answer = match outcome {
         Poll::Pending => "pending",
         Poll::SlowDown => {
-            state.aws.with(&state.lock, |inner| {
+            state.aws.with_generation(&state.lock, generation, |inner| {
                 if let Some(pending) = inner.pending.get_mut(&id) {
                     pending.device.interval += 5;
                 }
@@ -383,9 +407,10 @@ async fn poll_login(State(state): State<Arc<AppState>>, Path(id): Path<String>) 
             "expired"
         }
         Poll::Done(token) => {
+            // A token approved for an unlock that is over is dropped here, not kept for the next.
             state
                 .aws
-                .with(&state.lock, |inner| {
+                .with_generation(&state.lock, generation, |inner| {
                     inner.pending.remove(&id);
                     inner.tokens.insert(id.clone(), token);
                     // A new token can see different roles; credentials are fetched again.
@@ -414,10 +439,11 @@ async fn poll_login(State(state): State<Arc<AppState>>, Path(id): Path<String>) 
 async fn renew_login(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
     let config = load(&state)?;
     let login = config.login(&id).cloned().ok_or_else(|| not_found("essa conta AWS não existe"))?;
+    let generation = state.aws.generation(&state.lock).ok_or_else(locked)?;
 
     let held = state
         .aws
-        .with(&state.lock, |inner| inner.tokens.get(&id).cloned())
+        .with_generation(&state.lock, generation, |inner| inner.tokens.get(&id).cloned())
         .ok_or_else(locked)?;
 
     if let Some(token) = held.filter(|t| t.refresh_token().is_some()) {
@@ -425,13 +451,16 @@ async fn renew_login(State(state): State<Arc<AppState>>, Path(id): Path<String>)
 
         if let Ok(fresh) = sso.refresh(&token).await {
             let expires_at = fresh.expires_at();
-            state.aws.with(&state.lock, |inner| inner.tokens.insert(id.clone(), fresh));
+            state
+                .aws
+                .with_generation(&state.lock, generation, |inner| inner.tokens.insert(id.clone(), fresh))
+                .ok_or_else(locked)?;
 
             return Ok(Json(json!({ "login": login_json(&login, Some(expires_at)), "device": null })));
         }
     }
 
-    device_login(&state, login, true).await
+    device_login(&state, login, true, generation).await
 }
 
 /// Log out of Identity Center. The login stays listed, disconnected (A4).
@@ -462,33 +491,40 @@ async fn revoke_login(State(state): State<Arc<AppState>>, Path(id): Path<String>
     Ok(Json(json!({ "revoked": true })))
 }
 
+/// Remove a login. A token still held is revoked on AWS's side first, as `revoke` does: removing
+/// the login from the list must not leave a live Identity Center session behind it.
 async fn delete_login(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
-    change(&state, |config, _| {
-        if config.login(&id).is_none() {
-            return Err(not_found("essa conta AWS não existe"));
-        }
+    let removed = change(&state, |config, _| {
+        let login = config.login(&id).cloned().ok_or_else(|| not_found("essa conta AWS não existe"))?;
         if config.connections.iter().any(|c| c.login_id == id) {
             return Err(conflict(
                 "esse login ainda tem conexões. Remova as conexões antes de remover o login",
             ));
         }
         config.logins.retain(|l| l.id != id);
-        Ok(())
+        Ok(login)
     })?;
 
-    state.aws.with(&state.lock, |inner| {
-        inner.tokens.remove(&id);
+    let token = state.aws.with(&state.lock, |inner| {
         inner.pending.remove(&id);
+        inner.tokens.remove(&id)
     });
+
+    if let Some(token) = token.flatten() {
+        if let Ok(sso) = state.aws.sso(&removed.region) {
+            let _ = sso.logout(&token).await;
+        }
+    }
 
     Ok(Json(json!({ "deleted": true })))
 }
 
-/// The login's token, refreshed if it ran out and AWS still accepts the refresh token.
-async fn token_for(state: &AppState, login: &Login) -> Result<SsoToken, Failure> {
+/// The login's token, refreshed if it ran out and AWS still accepts the refresh token. A refresh
+/// that finishes after the vault locked is not stored.
+async fn token_for(state: &AppState, login: &Login, generation: u64) -> Result<SsoToken, Failure> {
     let held = state
         .aws
-        .with(&state.lock, |inner| inner.tokens.get(&login.id).cloned())
+        .with_generation(&state.lock, generation, |inner| inner.tokens.get(&login.id).cloned())
         .ok_or_else(locked)?
         .ok_or_else(session_expired)?;
 
@@ -499,7 +535,12 @@ async fn token_for(state: &AppState, login: &Login) -> Result<SsoToken, Failure>
     let sso = state.aws.sso(&login.region).map_err(aws_failure)?;
     let fresh = sso.refresh(&held).await.map_err(|_| session_expired())?;
 
-    state.aws.with(&state.lock, |inner| inner.tokens.insert(login.id.clone(), fresh.clone()));
+    state
+        .aws
+        .with_generation(&state.lock, generation, |inner| {
+            inner.tokens.insert(login.id.clone(), fresh.clone())
+        })
+        .ok_or_else(locked)?;
 
     Ok(fresh)
 }
@@ -508,8 +549,9 @@ async fn token_for(state: &AppState, login: &Login) -> Result<SsoToken, Failure>
 async fn list_accounts(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
     let config = load(&state)?;
     let login = config.login(&id).cloned().ok_or_else(|| not_found("essa conta AWS não existe"))?;
+    let generation = state.aws.generation(&state.lock).ok_or_else(locked)?;
 
-    let token = Arc::new(token_for(&state, &login).await?);
+    let token = Arc::new(token_for(&state, &login, generation).await?);
     let sso = Arc::new(state.aws.sso(&login.region).map_err(aws_failure)?);
 
     let mut accounts = sso.list_accounts(&token).await.map_err(aws_failure)?;
@@ -703,6 +745,10 @@ pub(crate) fn is_aws_vault(state: &AppState, vault_id: &str) -> bool {
 }
 
 async fn place(state: &AppState, vault_id: &str) -> Result<Place, Failure> {
+    // Which unlock this request belongs to. Credentials fetched below are only kept if the vault
+    // is still in this one when they arrive.
+    let generation = state.aws.generation(&state.lock).ok_or_else(locked)?;
+
     let (vault, connection, login) = {
         let store = state.store.lock().unwrap();
 
@@ -725,7 +771,7 @@ async fn place(state: &AppState, vault_id: &str) -> Result<Place, Failure> {
             .ok_or_else(locked)??
     };
 
-    let credentials = credentials_for(state, &connection, login.as_ref()).await?;
+    let credentials = credentials_for(state, &connection, login.as_ref(), generation).await?;
     let ssm = state.aws.ssm(&vault.region, credentials.clone()).map_err(aws_failure)?;
 
     Ok(Place { vault_id: vault_id.to_string(), vault, connection, ssm: Arc::new(ssm), credentials })
@@ -737,11 +783,12 @@ async fn credentials_for(
     state: &AppState,
     connection: &Connection,
     login: Option<&Login>,
+    generation: u64,
 ) -> Result<Credentials, Failure> {
     let now = now_unix();
     let held = state
         .aws
-        .with(&state.lock, |inner| inner.credentials.get(&connection.id).cloned())
+        .with_generation(&state.lock, generation, |inner| inner.credentials.get(&connection.id).cloned())
         .ok_or_else(locked)?;
 
     if let Some(held) = held.filter(|c| !c.is_expired(now, CREDENTIALS_MARGIN)) {
@@ -749,7 +796,7 @@ async fn credentials_for(
     }
 
     let login = login.ok_or_else(session_expired)?;
-    let token = token_for(state, login).await?;
+    let token = token_for(state, login, generation).await?;
     let sso = state.aws.sso(&login.region).map_err(aws_failure)?;
 
     let fresh = sso
@@ -768,20 +815,53 @@ async fn credentials_for(
             other => aws_failure(other),
         })?;
 
+    // Credentials for an unlock that is over are dropped here, and the request refused with them.
     state
         .aws
-        .with(&state.lock, |inner| inner.credentials.insert(connection.id.clone(), fresh.clone()));
+        .with_generation(&state.lock, generation, |inner| {
+            inner.credentials.insert(connection.id.clone(), fresh.clone())
+        })
+        .ok_or_else(locked)?;
 
     Ok(fresh)
 }
 
-/// The vault and parameter (or path, or object key) an AWS id points at.
-fn target(id: &str) -> Result<(String, String), Failure> {
-    mapping::decode_id(id).ok_or_else(|| not_found("esse registro não existe"))
+/// An S3 client for the vault's bucket that refuses a bucket of any account but the connection's
+/// (`x-amz-expected-bucket-owner` on every request).
+fn s3_of(state: &AppState, place: &Place) -> Result<S3Client, Failure> {
+    state
+        .aws
+        .s3(&place.vault.region, place.credentials.clone(), &place.connection.account_id)
+        .map_err(aws_failure)
+}
+
+/// The vault and target of an id of the given kind. Any other kind, or an id that is not AWS's,
+/// is "not found": a folder id handed to a record route never reaches a parameter.
+fn target_of(id: &str, kind: IdKind, missing: &str) -> Result<(String, String), Failure> {
+    match mapping::decode_id(id) {
+        Some((found, vault, target)) if found == kind => Ok((vault, target)),
+        _ => Err(not_found(missing)),
+    }
+}
+
+fn target_record(id: &str) -> Result<(String, String), Failure> {
+    target_of(id, IdKind::Record, "esse registro não existe")
+}
+
+fn target_folder(id: &str) -> Result<(String, String), Failure> {
+    target_of(id, IdKind::Folder, "essa pasta não existe")
+}
+
+fn target_attachment(id: &str) -> Result<(String, String), Failure> {
+    target_of(id, IdKind::Attachment, "esse anexo não existe")
 }
 
 /// The whole vault, read once: GetParametersByPath from `/` (A6), and the description and key of
 /// those parameters, and only those, from DescribeParameters.
+///
+/// A failed DescribeParameters still gives a listing (titled by name), with the failure kept in
+/// `metadata_error` so that nothing that needs a key decides from an empty map. Such a snapshot is
+/// not cached: the next request tries again rather than living with a throttle for ten seconds.
 async fn snapshot(state: &AppState, place: &Place) -> Result<Arc<Snapshot>, Failure> {
     let now = now_unix();
     let cached = state
@@ -795,37 +875,106 @@ async fn snapshot(state: &AppState, place: &Place) -> Result<Arc<Snapshot>, Fail
 
     let parameters = place.ssm.get_parameters_by_path("/", true).await.map_err(aws_failure)?;
 
-    // Descriptions are titles. A role that may read values but not describe them still gets a
-    // list, titled by name.
     let wanted: std::collections::HashSet<&str> = parameters.iter().map(|p| p.name.as_str()).collect();
-    let metadata = match place.ssm.describe_parameters("/", true).await {
-        Ok(found) => found
-            .into_iter()
-            .filter(|m| wanted.contains(m.name.as_str()))
-            .map(|m| (m.name.clone(), m))
-            .collect(),
-        Err(_) => HashMap::new(),
+    let (metadata, metadata_error) = match place.ssm.describe_parameters("/", true).await {
+        Ok(found) => (
+            found
+                .into_iter()
+                .filter(|m| wanted.contains(m.name.as_str()))
+                .map(|m| (m.name.clone(), m))
+                .collect(),
+            None,
+        ),
+        Err(error) => (HashMap::new(), Some(error)),
     };
 
-    let fresh = Arc::new(Snapshot { at: now, parameters, metadata });
-    state.aws.with(&state.lock, |inner| {
-        inner.snapshots.insert(place.vault_id.clone(), fresh.clone());
-    });
+    let complete = metadata_error.is_none();
+    let fresh = Arc::new(Snapshot { at: now, parameters, metadata, metadata_error });
+
+    if complete {
+        state.aws.with(&state.lock, |inner| {
+            inner.snapshots.insert(place.vault_id.clone(), fresh.clone());
+        });
+    }
 
     Ok(fresh)
 }
 
-/// The metadata of one parameter: its description, key and tier.
-async fn metadata_of(place: &Place, name: &str) -> Option<ParameterMetadata> {
-    let folder = mapping::parent_path(name).unwrap_or_else(|| "/".into());
+/// Why the key, tier or description of a parameter could not be read, as a refusal.
+fn metadata_failure(error: AwsError, name: &str) -> Failure {
+    match error {
+        AwsError::AccessDenied(_) => aws_refusal(
+            StatusCode::FORBIDDEN,
+            "access_denied",
+            format!(
+                "não consegui ler a chave KMS de {name}: a função desta conexão precisa de \
+                 ssm:DescribeParameters ou de ssm:GetParameterHistory. Sem saber a chave, gravar \
+                 trocaria a proteção do segredo pela chave padrão da conta, então nada foi gravado"
+            ),
+        ),
+        other => aws_failure(other),
+    }
+}
 
-    place
-        .ssm
-        .describe_parameters(&folder, false)
-        .await
-        .ok()?
-        .into_iter()
-        .find(|m| m.name == name)
+/// The metadata of one parameter: its description, key and tier.
+///
+/// DescribeParameters by exact name first; when that is refused or finds nothing, the newest
+/// entry of the parameter's history, which carries the same key, description and tier. When
+/// neither can be read the answer is an error, never `None`: every caller is about to write, and
+/// writing without the key would move the parameter to the account's default key.
+async fn metadata_of(place: &Place, name: &str) -> Result<ParameterMetadata, Failure> {
+    let described = match place.ssm.describe_parameter(name).await {
+        Ok(Some(found)) => return Ok(found),
+        Ok(None) => None,
+        Err(error) => Some(error),
+    };
+
+    match place.ssm.latest_history(name).await {
+        Ok(Some(entry)) => Ok(entry.metadata()),
+        Ok(None) => Err(not_found("esse registro não existe mais na AWS")),
+        Err(AwsError::NotFound(message)) if described.is_none() => {
+            Err(aws_failure(AwsError::NotFound(message)))
+        }
+        Err(history_error) => Err(metadata_failure(described.unwrap_or(history_error), name)),
+    }
+}
+
+/// The KMS key a SecureString was written with. AWS always reports one; if it did not, the write
+/// is refused rather than sent without one.
+fn key_of(metadata: &ParameterMetadata, name: &str) -> Result<String, Failure> {
+    metadata.key_id.clone().filter(|k| !k.is_empty()).ok_or_else(|| {
+        aws_refusal(
+            StatusCode::BAD_GATEWAY,
+            "other",
+            format!(
+                "a AWS não disse com que chave KMS {name} está guardado. Sem isso, gravar trocaria \
+                 a proteção do segredo, então nada foi gravado"
+            ),
+        )
+    })
+}
+
+/// Whether Parameter Store keeps this type encrypted.
+fn is_secure(kind: &str) -> bool {
+    kind == "SecureString"
+}
+
+/// A `String` or `StringList` parameter is not overwritten: Keyhold only writes SecureString, and
+/// changing the type under an application that reads it as plain text could break it.
+fn refuse_plaintext(kind: &str, name: &str) -> Result<(), Failure> {
+    if is_secure(kind) {
+        return Ok(());
+    }
+
+    Err(aws_refusal(
+        StatusCode::BAD_REQUEST,
+        "invalid",
+        format!(
+            "{name} é um parâmetro {kind}, guardado sem criptografia. O Keyhold só grava \
+             SecureString, e trocar o tipo pode quebrar as aplicações que leem esse parâmetro. \
+             Se for o caso, mude o tipo na própria AWS"
+        ),
+    ))
 }
 
 /// Tags for many parameters, from the cache or with a few requests at a time. A parameter whose
@@ -908,9 +1057,9 @@ fn header_for(
     let when = mapping::iso_from_unix(last_modified.unwrap_or(now_unix() as i64));
 
     RecordHeader {
-        id: encode_id(&place.vault_id, name),
+        id: record_id(&place.vault_id, name),
         vault_id: place.vault_id.clone(),
-        folder_id: mapping::parent_path(name).map(|p| encode_id(&place.vault_id, &p)),
+        folder_id: mapping::parent_path(name).map(|p| folder_id(&place.vault_id, &p)),
         kind: "item".into(),
         version,
         favourite: config.is_favourite(&place.connection.account_id, name),
@@ -923,14 +1072,36 @@ fn header_for(
     }
 }
 
-/// A parameter, opened into the shape a local record has.
+/// A JSON object with `warning` added when there is one to give.
+fn with_warning(mut answer: Value, warning: Option<String>) -> Value {
+    if let Some(warning) = warning {
+        answer["warning"] = json!(warning);
+    }
+    answer
+}
+
+/// A record, or a preview, with `plaintext` set: whether the parameter is a `String` or
+/// `StringList` that Parameter Store keeps unencrypted (and that Keyhold will not overwrite).
+fn with_plaintext(record: impl serde::Serialize, kind: &str) -> Value {
+    let mut value = serde_json::to_value(record).unwrap_or(Value::Null);
+    if let Some(object) = value.as_object_mut() {
+        object.insert("plaintext".into(), json!(!is_secure(kind)));
+    }
+    value
+}
+
+/// A parameter, opened into the shape a local record has, with its type.
+///
+/// Reading is lenient where writing is not: a role that may read the value but neither describe
+/// nor read history still sees the record, titled by its name. Saving it then fails closed in
+/// [`write_over`], which needs the key.
 async fn open_parameter(
     state: &AppState,
     place: &Place,
     name: &str,
-) -> Result<(OpenRecord, Option<ParameterMetadata>, Option<Vec<Tag>>), Failure> {
+) -> Result<(OpenRecord, String), Failure> {
     let parameter = place.ssm.get_parameter(name).await.map_err(aws_failure)?;
-    let metadata = metadata_of(place, name).await;
+    let metadata = metadata_of(place, name).await.ok();
     let tags = tags_of(state, place, name).await;
     let config = load(state)?;
 
@@ -950,7 +1121,7 @@ async fn open_parameter(
         tags.as_deref(),
     );
 
-    Ok((OpenRecord { header, payload }, metadata, tags))
+    Ok((OpenRecord { header, payload }, parameter.kind.clone()))
 }
 
 // ── folders ─────────────────────────────────────────────────────────────────────────────────────
@@ -988,9 +1159,9 @@ pub(crate) async fn create_folder(
         return Err(aws_refusal(StatusCode::CONFLICT, "conflict", "essa pasta já existe"));
     }
 
-    let key_id = mapping::inherit_key(Some(&path), &known_keys(&snapshot));
+    let key_id = mapping::inherit_key(Some(&path), &known_keys(&snapshot)?);
 
-    place
+    let written = place
         .ssm
         .put_parameter(&PutParameter {
             name: marker.clone(),
@@ -1000,22 +1171,22 @@ pub(crate) async fn create_folder(
             overwrite: false,
             ..PutParameter::default()
         })
-        .await
-        .map_err(|e| write_failure(e, &marker))?;
+        .await;
 
     state.aws.invalidate(vault_id);
+    written.map_err(|e| write_failure(e, &marker))?;
 
     let node = mapping::folder_nodes(vault_id, [marker.as_str()])
         .into_iter()
-        .find(|n| n.id == encode_id(vault_id, &path))
+        .find(|n| n.id == folder_id(vault_id, &path))
         .ok_or_else(|| bad_request("a pasta não foi criada"))?;
 
     Ok(Json(json!({ "folder": node })))
 }
 
 /// Delete an empty folder's marker. A folder with anything in it stays (A7).
-pub(crate) async fn delete_folder(state: &AppState, folder_id: &str) -> Answer {
-    let (vault_id, path) = target(folder_id)?;
+pub(crate) async fn delete_folder(state: &AppState, id: &str) -> Answer {
+    let (vault_id, path) = target_folder(id)?;
     let place = place(state, &vault_id).await?;
 
     // Read fresh: deleting on a listing ten seconds old could miss what somebody just put there.
@@ -1027,26 +1198,24 @@ pub(crate) async fn delete_folder(state: &AppState, folder_id: &str) -> Answer {
     }
 
     let marker = mapping::join(Some(&path), mapping::KEEP);
-    let exists = snapshot.parameters.iter().any(|p| mapping::absolute(&p.name) == marker);
+    let found = snapshot
+        .parameters
+        .iter()
+        .find(|p| mapping::absolute(&p.name) == marker)
+        .map(|p| p.name.clone());
 
-    if exists {
-        let name = snapshot
-            .parameters
-            .iter()
-            .find(|p| mapping::absolute(&p.name) == marker)
-            .map(|p| p.name.clone())
-            .unwrap_or(marker);
-        place.ssm.delete_parameter(&name).await.map_err(aws_failure)?;
+    if let Some(name) = found {
+        let deleted = place.ssm.delete_parameter(&name).await;
+        state.aws.invalidate(&vault_id);
+        deleted.map_err(aws_failure)?;
     }
-
-    state.aws.invalidate(&vault_id);
 
     Ok(Json(json!({ "deleted": true })))
 }
 
-fn folder_path(vault_id: &str, folder_id: Option<&str>) -> Result<Option<String>, Failure> {
-    let Some(folder_id) = folder_id else { return Ok(None) };
-    let (owner, path) = target(folder_id)?;
+fn folder_path(vault_id: &str, id: Option<&str>) -> Result<Option<String>, Failure> {
+    let Some(id) = id else { return Ok(None) };
+    let (owner, path) = target_folder(id)?;
 
     if owner != vault_id {
         return Err(bad_request("essa pasta é de outro cofre"));
@@ -1055,12 +1224,28 @@ fn folder_path(vault_id: &str, folder_id: Option<&str>) -> Result<Option<String>
     Ok(Some(path))
 }
 
-fn known_keys(snapshot: &Snapshot) -> Vec<(String, Option<String>)> {
-    snapshot
+/// Every name the listing has, with its key, for [`mapping::inherit_key`]. Refused when the
+/// listing's metadata could not be read: an empty map would make every new record inherit the
+/// account's default key, silently, in a folder that uses a key of its own.
+fn known_keys(snapshot: &Snapshot) -> Result<Vec<(String, Option<String>)>, Failure> {
+    if let Some(error) = &snapshot.metadata_error {
+        return Err(match error {
+            AwsError::AccessDenied(_) => aws_refusal(
+                StatusCode::FORBIDDEN,
+                "access_denied",
+                "não consegui ler as chaves KMS desta conta (a função precisa de \
+                 ssm:DescribeParameters), então não sei com que chave proteger o que seria criado \
+                 nesta pasta. Nada foi gravado",
+            ),
+            other => aws_failure(other.clone()),
+        });
+    }
+
+    Ok(snapshot
         .parameters
         .iter()
         .map(|p| (p.name.clone(), snapshot.metadata.get(&p.name).and_then(|m| m.key_id.clone())))
-        .collect()
+        .collect())
 }
 
 /// A write AWS refused, in words that name what was being written (A10).
@@ -1094,7 +1279,7 @@ pub(crate) async fn list_records(state: &AppState, vault_id: &str) -> Answer {
         snapshot.parameters.iter().filter(|p| !mapping::is_keep(&p.name)).collect();
     let tags = tags_for(state, &place, visible.iter().map(|p| p.name.clone()).collect()).await;
 
-    let mut previews: Vec<RecordPreview> = visible
+    let mut previews: Vec<(RecordPreview, &str)> = visible
         .into_iter()
         .map(|parameter| {
             let tags = tags.get(&parameter.name).cloned().flatten();
@@ -1105,7 +1290,7 @@ pub(crate) async fn list_records(state: &AppState, vault_id: &str) -> Answer {
                 tagged_json(tags.as_deref()),
             );
 
-            RecordPreview {
+            let preview = RecordPreview {
                 header: header_for(
                     &place,
                     &config,
@@ -1118,21 +1303,27 @@ pub(crate) async fn list_records(state: &AppState, vault_id: &str) -> Answer {
                 url: payload.first_url(),
                 title: payload.title,
                 icon: payload.icon,
-            }
+            };
+
+            (preview, parameter.kind.as_str())
         })
         .collect();
 
-    previews.sort_by(|a, b| b.header.updated_at.cmp(&a.header.updated_at));
+    previews.sort_by(|a, b| b.0.header.updated_at.cmp(&a.0.header.updated_at));
 
-    Ok(Json(json!({ "records": previews })))
+    let records: Vec<Value> =
+        previews.into_iter().map(|(preview, kind)| with_plaintext(preview, kind)).collect();
+
+    Ok(Json(json!({ "records": records })))
 }
 
-/// The record a body describes, checked against what AWS can hold.
+/// The record a body describes, checked against what AWS can hold: the description (the title
+/// alone), the value (fields, icon and notes), and whether that value is Keyhold's JSON.
 fn prepared(payload: &Payload) -> Result<(Payload, String, String, bool), Failure> {
     payload.check().map_err(bad_request)?;
     let payload = payload.clone().normalise();
 
-    let description = mapping::join_description(&payload.title, &payload.notes).map_err(bad_request)?;
+    let description = mapping::description_for(&payload.title).map_err(bad_request)?;
     let (value, json) = mapping::encode_value(&payload).map_err(bad_request)?;
 
     Ok((payload, description, value, json))
@@ -1157,14 +1348,15 @@ pub(crate) async fn create_record(
 
     let place = place(state, vault_id).await?;
     let snapshot = snapshot(state, &place).await?;
-    let key_id = mapping::inherit_key(mapping::parent_path(&name).as_deref(), &known_keys(&snapshot));
+    let key_id =
+        mapping::inherit_key(mapping::parent_path(&name).as_deref(), &known_keys(&snapshot)?);
 
     let mut tags = Vec::new();
     if json {
         tags.push(Tag::new(mapping::TAG_FORMAT, mapping::TAG_FORMAT_JSON));
     }
 
-    let version = place
+    let written = place
         .ssm
         .put_parameter(&PutParameter {
             name: name.clone(),
@@ -1175,10 +1367,10 @@ pub(crate) async fn create_record(
             overwrite: false,
             tags: tags.clone(),
         })
-        .await
-        .map_err(|e| write_failure(e, &name))?;
+        .await;
 
     state.aws.invalidate(vault_id);
+    let version = written.map_err(|e| write_failure(e, &name))?;
 
     let config = load(state)?;
     let header = header_for(&place, &config, &name, version, None, Some(&tags));
@@ -1188,25 +1380,55 @@ pub(crate) async fn create_record(
 }
 
 pub(crate) async fn open_record(state: &AppState, id: &str) -> Answer {
-    let (vault_id, name) = target(id)?;
+    let (vault_id, name) = target_record(id)?;
     let place = place(state, &vault_id).await?;
-    let (opened, _, _) = open_parameter(state, &place, &name).await?;
+    let (opened, kind) = open_parameter(state, &place, &name).await?;
 
-    Ok(Json(json!({ "record": opened })))
+    Ok(Json(json!({ "record": with_plaintext(opened, &kind) })))
+}
+
+/// What a write over an existing parameter produced: the new header, and a sentence for the person
+/// when something around the write did not go as planned.
+struct Written {
+    header: RecordHeader,
+    warning: Option<String>,
 }
 
 /// Write a new version over an existing parameter, keeping its key and tier, and switching the
 /// format tag when the value changed format (A8). With `expected`, refuse if AWS has moved on (A12).
+///
+/// The order is what keeps the gaps small and harmless:
+///
+/// 1. Everything slow is read first (metadata, tags), so only `GetParameter` sits between the
+///    version check and the write. Parameter Store has no conditional put; this is as close as it
+///    gets, and step 4 reports the race it cannot prevent.
+/// 2. Going to JSON, the `keyhold:formato=json` tag is added **before** the put: if the put then
+///    fails, a plain value with the tag still reads as plain (the reader falls back by shape),
+///    while a JSON value without the tag would read as one plain field.
+/// 3. The put, with the key and description the parameter had (fail closed when unknown).
+/// 4. If the new version is past `expected + 1`, somebody else wrote in between: the save stands,
+///    and the answer carries a warning.
+/// 5. Going to plain, the tag is removed **after** the put; a failure there is a warning, since the
+///    value reads correctly either way.
+///
+/// The caches are cleared on every path past the first write, errors included.
 async fn write_over(
     state: &AppState,
     place: &Place,
     name: &str,
     payload: &Payload,
     expected: Option<i64>,
-) -> Result<RecordHeader, Failure> {
+) -> Result<Written, Failure> {
     let (_, description, value, json) = prepared(payload)?;
 
+    let metadata = metadata_of(place, name).await?;
+    refuse_plaintext(&metadata.kind, name)?;
+    let key_id = key_of(&metadata, name)?;
+    let tags = place.ssm.list_tags_for_resource(name).await.ok();
+    let was_json = tagged_json(tags.as_deref());
+
     let current = place.ssm.get_parameter(name).await.map_err(aws_failure)?;
+    refuse_plaintext(&current.kind, name)?;
 
     if let Some(expected) = expected.filter(|v| *v != current.version) {
         return Err(aws_refusal(
@@ -1219,74 +1441,150 @@ async fn write_over(
             ),
         ));
     }
-
-    let metadata = metadata_of(place, name).await;
-    let tags = place.ssm.list_tags_for_resource(name).await.ok();
-    let was_json = tagged_json(tags.as_deref()).unwrap_or(false);
-
-    let version = place
-        .ssm
-        .put_parameter(&PutParameter {
-            name: name.to_string(),
-            advanced: value.len() > mapping::STANDARD_LIMIT
-                || metadata.as_ref().and_then(|m| m.tier.as_deref()) == Some("Advanced"),
-            value: value.into(),
-            // Overwriting without a key would move the parameter to the account's default key.
-            key_id: metadata.as_ref().and_then(|m| m.key_id.clone()),
-            description: Some(description),
-            overwrite: true,
-            tags: Vec::new(),
-        })
-        .await
-        .map_err(|e| write_failure(e, name))?;
+    let baseline = expected.unwrap_or(current.version);
 
     let mut tags = tags.unwrap_or_default();
-    if json && !was_json {
-        let format = Tag::new(mapping::TAG_FORMAT, mapping::TAG_FORMAT_JSON);
-        place.ssm.add_tags_to_resource(name, std::slice::from_ref(&format)).await.map_err(aws_failure)?;
-        tags.push(format);
-    } else if !json && was_json {
-        place
+    let mut warnings: Vec<String> = Vec::new();
+
+    let outcome: Result<i64, Failure> = async {
+        if json && was_json != Some(true) {
+            let format = Tag::new(mapping::TAG_FORMAT, mapping::TAG_FORMAT_JSON);
+            place
+                .ssm
+                .add_tags_to_resource(name, std::slice::from_ref(&format))
+                .await
+                .map_err(|e| write_failure(e, name))?;
+            tags.retain(|t| t.key != mapping::TAG_FORMAT);
+            tags.push(format);
+        }
+
+        let version = place
             .ssm
-            .remove_tags_from_resource(name, &[mapping::TAG_FORMAT.to_string()])
+            .put_parameter(&PutParameter {
+                name: name.to_string(),
+                advanced: value.len() > mapping::STANDARD_LIMIT
+                    || metadata.tier.as_deref() == Some("Advanced"),
+                value: value.into(),
+                // Overwriting without a key would move the parameter to the account's default key.
+                key_id: Some(key_id),
+                description: Some(description),
+                overwrite: true,
+                tags: Vec::new(),
+            })
             .await
-            .map_err(aws_failure)?;
-        tags.retain(|t| t.key != mapping::TAG_FORMAT);
+            .map_err(|e| write_failure(e, name))?;
+
+        if version > baseline + 1 {
+            warnings.push(format!(
+                "outra versão de {name} foi salva na AWS enquanto esta era gravada: a sua virou a \
+                 versão {version}, e não a {}. Abra o histórico para conferir se nada se perdeu",
+                baseline + 1
+            ));
+        }
+
+        if !json && was_json != Some(false) {
+            match place
+                .ssm
+                .remove_tags_from_resource(name, &[mapping::TAG_FORMAT.to_string()])
+                .await
+            {
+                Ok(()) => tags.retain(|t| t.key != mapping::TAG_FORMAT),
+                // Tags that could not even be read are not worth a warning when they cannot be
+                // removed either; a tag known to be there is.
+                Err(_) if was_json == Some(true) => warnings.push(format!(
+                    "o registro foi salvo, mas não consegui tirar a marca {}={} de {name}. O \
+                     Keyhold continua lendo certo pelo formato do valor; remova a marca na AWS se \
+                     ela confundir quem lê o parâmetro",
+                    mapping::TAG_FORMAT,
+                    mapping::TAG_FORMAT_JSON
+                )),
+                Err(_) => {}
+            }
+        }
+
+        Ok(version)
     }
+    .await;
 
     state.aws.invalidate(&place.vault_id);
+    let version = outcome?;
 
     let config = load(state)?;
-    Ok(header_for(place, &config, name, version, None, Some(&tags)))
+    let header = header_for(place, &config, name, version, None, Some(&tags));
+    let warning = (!warnings.is_empty()).then(|| warnings.join(". "));
+
+    Ok(Written { header, warning })
 }
 
 /// Save a record. `expected` is the version the person opened, from the body's
 /// `expected_version` or the `x-keyhold-expected-version` header; without it the save is not
-/// checked (A12 needs to know what was opened to know whether it changed).
+/// checked (A12 needs to know what was opened to know whether it changed), though a race with
+/// another writer is still reported as a `warning`.
 pub(crate) async fn update_record(
     state: &AppState,
     id: &str,
     payload: &Payload,
     expected: Option<i64>,
 ) -> Answer {
-    let (vault_id, name) = target(id)?;
+    let (vault_id, name) = target_record(id)?;
     let place = place(state, &vault_id).await?;
-    let header = write_over(state, &place, &name, payload, expected).await?;
+    let written = write_over(state, &place, &name, payload, expected).await?;
 
-    note(state, audit::action::RECORD_UPDATED, id, Detail::new().with("version", header.version));
+    note(
+        state,
+        audit::action::RECORD_UPDATED,
+        id,
+        Detail::new().with("version", written.header.version),
+    );
 
-    Ok(Json(json!({ "record": header })))
+    Ok(Json(with_warning(json!({ "record": written.header }), written.warning)))
+}
+
+/// The object keys of a record's own attachments (one level under its prefix), with the bucket and
+/// a client, or `None` when the vault has no bucket or the parameter cannot have attachments.
+async fn attachments_in(
+    state: &AppState,
+    place: &Place,
+    name: &str,
+) -> Result<Option<(S3Client, String, Vec<String>)>, Result<Failure, Failure>> {
+    let (Some(bucket), Some(prefix)) = (place.vault.bucket.clone(), mapping::attachment_prefix(name))
+    else {
+        return Ok(None);
+    };
+
+    let s3 = s3_of(state, place).map_err(Err)?;
+    let keys = s3
+        .list_objects_v2(&bucket, &prefix)
+        .await
+        .map_err(|e| Ok(s3_failure(e, &bucket, &place.vault.region)))?
+        .into_iter()
+        .filter(|o| mapping::is_attachment_of(&prefix, &o.key))
+        .map(|o| o.key)
+        .collect();
+
+    Ok(Some((s3, bucket, keys)))
+}
+
+/// A refusal that explains why the bucket was needed before saying what went wrong in it.
+fn because(why: &str, failure: Failure) -> Failure {
+    Failure(failure.0, format!("{why}: {}", failure.1), failure.2)
 }
 
 /// Move a parameter to another folder: write it under the new name with its tags and key, then
 /// delete the old one. Parameter Store has no rename, and this is the order that never loses it.
+///
+/// What a move costs, said in the answer: the new parameter starts its history at version 1
+/// (`history_lost: true`, for the interface to warn before and after). A record with attachments
+/// is not moved at all, since its files live under the old name's prefix and would be orphaned.
+/// If the old name cannot be deleted after the copy landed, the move still answers success, with
+/// a `warning` that both copies exist.
 pub(crate) async fn move_record(
     state: &AppState,
     id: &str,
     folder_id: Option<&str>,
     to_vault: Option<&str>,
 ) -> Answer {
-    let (vault_id, name) = target(id)?;
+    let (vault_id, name) = target_record(id)?;
 
     if to_vault.is_some_and(|to| to != vault_id) {
         return Err(bad_request(
@@ -1300,15 +1598,51 @@ pub(crate) async fn move_record(
     mapping::validate_name(&new_name).map_err(bad_request)?;
 
     if mapping::absolute(&new_name) == mapping::absolute(&name) {
-        return Ok(Json(json!({ "moved": true, "id": id })));
+        return Ok(Json(json!({ "moved": true, "id": id, "history_lost": false })));
     }
 
     let place = place(state, &vault_id).await?;
-    let parameter = place.ssm.get_parameter(&name).await.map_err(aws_failure)?;
-    let metadata = metadata_of(&place, &name).await;
+    let outcome = move_parameter(state, &place, id, &name, &new_name).await;
+    state.aws.invalidate(&vault_id);
+
+    outcome
+}
+
+async fn move_parameter(
+    state: &AppState,
+    place: &Place,
+    id: &str,
+    name: &str,
+    new_name: &str,
+) -> Answer {
+    // No metadata, no move: the copy would land on the default key, without its title.
+    let metadata = metadata_of(place, name).await?;
+    refuse_plaintext(&metadata.kind, name)?;
+    let key_id = key_of(&metadata, name)?;
+
+    let why = "não movi o registro porque precisei conferir se ele tem anexos no bucket";
+    match attachments_in(state, place, name).await {
+        Ok(Some((_, bucket, keys))) if !keys.is_empty() => {
+            return Err(aws_refusal(
+                StatusCode::CONFLICT,
+                "conflict",
+                format!(
+                    "esse registro tem {} anexo(s) no bucket {bucket}, guardados sob o nome atual. \
+                     Mover deixaria os arquivos para trás. Baixe e remova os anexos, mova o \
+                     registro e anexe de novo",
+                    keys.len()
+                ),
+            ));
+        }
+        Ok(_) => {}
+        Err(Ok(failure)) => return Err(because(why, failure)),
+        Err(Err(failure)) => return Err(failure),
+    }
+
+    let parameter = place.ssm.get_parameter(name).await.map_err(aws_failure)?;
     let tags: Vec<Tag> = place
         .ssm
-        .list_tags_for_resource(&name)
+        .list_tags_for_resource(name)
         .await
         .map_err(aws_failure)?
         .into_iter()
@@ -1318,64 +1652,115 @@ pub(crate) async fn move_record(
     place
         .ssm
         .put_parameter(&PutParameter {
-            name: new_name.clone(),
+            name: new_name.to_string(),
             advanced: parameter.value.expose().len() > mapping::STANDARD_LIMIT
-                || metadata.as_ref().and_then(|m| m.tier.as_deref()) == Some("Advanced"),
+                || metadata.tier.as_deref() == Some("Advanced"),
             value: parameter.value.clone(),
-            key_id: metadata.as_ref().and_then(|m| m.key_id.clone()),
-            description: metadata.as_ref().and_then(|m| m.description.clone()),
+            key_id: Some(key_id),
+            description: metadata.description.clone(),
             overwrite: false,
             tags,
         })
         .await
-        .map_err(|e| write_failure(e, &new_name))?;
+        .map_err(|e| write_failure(e, new_name))?;
 
-    place.ssm.delete_parameter(&name).await.map_err(aws_failure)?;
-
+    // From here the new name exists, so the favourite follows it whatever happens to the old one.
     let account = place.connection.account_id.clone();
-    change(state, |config, _| {
-        if config.is_favourite(&account, &name) {
-            config.set_favourite(&account, &name, false);
-            config.set_favourite(&account, &new_name, true);
+    let _ = change(state, |config, _| {
+        if config.is_favourite(&account, name) {
+            config.set_favourite(&account, name, false);
+            config.set_favourite(&account, new_name, true);
         }
         Ok(())
-    })?;
+    });
 
-    state.aws.invalidate(&vault_id);
+    let warning = match place.ssm.delete_parameter(name).await {
+        Ok(()) => None,
+        Err(error) => Some(format!(
+            "o registro foi copiado para {new_name}, mas não consegui apagar {name} ({}). Agora as \
+             duas cópias existem na AWS: apague a antiga quando puder",
+            aws_failure(error).1
+        )),
+    };
 
-    let new_id = encode_id(&vault_id, &new_name);
+    let new_id = record_id(&place.vault_id, new_name);
     note(state, audit::action::RECORD_MOVED, &new_id, Detail::new().with("from", id));
 
-    Ok(Json(json!({ "moved": true, "id": new_id })))
+    Ok(Json(with_warning(
+        json!({ "moved": true, "id": new_id, "history_lost": true }),
+        warning,
+    )))
 }
 
 /// Delete for good (A16). There is no trash in Parameter Store, and pretending otherwise would
 /// mean keeping a copy here.
+///
+/// The record's attachments go first. If the vault has a bucket and it cannot be listed, or one
+/// file cannot be deleted, the record stays and the answer says why: deleting the parameter anyway
+/// would leave files in the bucket that nothing in Keyhold points at any more.
 pub(crate) async fn delete_record(state: &AppState, id: &str, on: bool) -> Answer {
     if !on {
         return Err(bad_request("cofres AWS não têm lixeira: o que foi apagado não volta"));
     }
 
-    let (vault_id, name) = target(id)?;
+    let (vault_id, name) = target_record(id)?;
     let place = place(state, &vault_id).await?;
+    let outcome = delete_parameter_and_files(state, &place, id, &name).await;
+    state.aws.invalidate(&vault_id);
 
-    place.ssm.delete_parameter(&name).await.map_err(aws_failure)?;
+    outcome
+}
+
+async fn delete_parameter_and_files(
+    state: &AppState,
+    place: &Place,
+    id: &str,
+    name: &str,
+) -> Answer {
+    let mut files = 0i64;
+
+    match attachments_in(state, place, name).await {
+        Ok(Some((s3, bucket, keys))) => {
+            for key in keys {
+                s3.delete_object(&bucket, &key).await.map_err(|e| {
+                    because(
+                        &format!(
+                            "não apaguei o registro porque o anexo {} não saiu do bucket",
+                            mapping::leaf(&key)
+                        ),
+                        s3_failure(e, &bucket, &place.vault.region),
+                    )
+                })?;
+                files += 1;
+            }
+        }
+        Ok(None) => {}
+        Err(Ok(failure)) => {
+            return Err(because(
+                "não apaguei o registro porque ele pode ter anexos no bucket e não consegui \
+                 listá-los. Apagar agora deixaria os arquivos para trás",
+                failure,
+            ))
+        }
+        Err(Err(failure)) => return Err(failure),
+    }
+
+    place.ssm.delete_parameter(name).await.map_err(aws_failure)?;
 
     let account = place.connection.account_id.clone();
-    change(state, |config, _| {
-        config.set_favourite(&account, &name, false);
+    let _ = change(state, |config, _| {
+        config.set_favourite(&account, name, false);
         Ok(())
-    })?;
+    });
 
-    state.aws.invalidate(&vault_id);
-    note(state, audit::action::RECORD_DESTROYED, id, Detail::new());
+    note(state, audit::action::RECORD_DESTROYED, id, Detail::new().with("attachments", files));
 
     Ok(Json(json!({ "archived": true, "destroyed": true })))
 }
 
 /// Favourites are personal, so they stay here (A14).
 pub(crate) async fn set_favourite(state: &AppState, id: &str, on: bool) -> Answer {
-    let (vault_id, name) = target(id)?;
+    let (vault_id, name) = target_record(id)?;
     let vault = aws_vault_of(state, &vault_id)?.ok_or_else(|| not_found("esse cofre não existe"))?;
 
     change(state, |config, _| {
@@ -1391,18 +1776,16 @@ pub(crate) async fn set_favourite(state: &AppState, id: &str, on: bool) -> Answe
 }
 
 async fn set_tag(state: &AppState, id: &str, key: &str, value: Option<String>) -> Result<(), Failure> {
-    let (vault_id, name) = target(id)?;
+    let (vault_id, name) = target_record(id)?;
     let place = place(state, &vault_id).await?;
 
-    match value {
+    let done = match value {
         Some(value) => place.ssm.add_tags_to_resource(&name, &[Tag::new(key, value)]).await,
         None => place.ssm.remove_tags_from_resource(&name, &[key.to_string()]).await,
-    }
-    .map_err(|e| write_failure(e, &name))?;
+    };
 
     state.aws.invalidate(&vault_id);
-
-    Ok(())
+    done.map_err(|e| write_failure(e, &name))
 }
 
 pub(crate) async fn set_compromised(state: &AppState, id: &str, on: bool) -> Answer {
@@ -1439,7 +1822,7 @@ async fn history(place: &Place, name: &str) -> Result<Vec<crate::aws::ParameterH
 
 /// The versions before the current one, newest first, the way the local history lists them.
 pub(crate) async fn list_versions(state: &AppState, id: &str) -> Answer {
-    let (vault_id, name) = target(id)?;
+    let (vault_id, name) = target_record(id)?;
     let place = place(state, &vault_id).await?;
     let mut entries = history(&place, &name).await?;
 
@@ -1456,46 +1839,60 @@ pub(crate) async fn list_versions(state: &AppState, id: &str) -> Answer {
     Ok(Json(json!({ "versions": versions })))
 }
 
-/// An old version's payload. Tags are not versioned, so the format is read from the value's shape.
-async fn version_payload(place: &Place, name: &str, version: i64) -> Result<Payload, Failure> {
-    let entry = history(place, name)
-        .await?
+/// An old version's payload, and the current version number at the time history was read. Tags
+/// are not versioned, so the format is read from the value's shape.
+async fn version_payload(place: &Place, name: &str, version: i64) -> Result<(Payload, i64), Failure> {
+    let entries = history(place, name).await?;
+    let current = entries.last().map(|e| e.version).unwrap_or(version);
+
+    let entry = entries
         .into_iter()
         .find(|e| e.version == version)
         .ok_or_else(|| not_found("essa versão não existe mais na AWS"))?;
 
-    Ok(mapping::payload_from(name, entry.description.as_deref(), entry.value.expose(), None))
+    let payload = mapping::payload_from(name, entry.description.as_deref(), entry.value.expose(), None);
+
+    Ok((payload, current))
 }
 
 pub(crate) async fn read_version(state: &AppState, id: &str, version: i64) -> Answer {
-    let (vault_id, name) = target(id)?;
+    let (vault_id, name) = target_record(id)?;
     let place = place(state, &vault_id).await?;
-    let payload = version_payload(&place, &name, version).await?;
+    let (payload, _) = version_payload(&place, &name, version).await?;
 
     Ok(Json(json!({ "payload": payload })))
 }
 
 /// Bring an old version back by writing it as a new one: AWS's history only grows.
-pub(crate) async fn restore_version(state: &AppState, id: &str, version: i64) -> Answer {
-    let (vault_id, name) = target(id)?;
+///
+/// Checked like a save (A12): against `expected`, the version the person had open, or, when the
+/// interface does not send one, against the current version as history reported it when this
+/// request started. A restore never lands silently on top of somebody else's write.
+pub(crate) async fn restore_version(
+    state: &AppState,
+    id: &str,
+    version: i64,
+    expected: Option<i64>,
+) -> Answer {
+    let (vault_id, name) = target_record(id)?;
     let place = place(state, &vault_id).await?;
-    let payload = version_payload(&place, &name, version).await?;
-    let header = write_over(state, &place, &name, &payload, None).await?;
+    let (payload, current) = version_payload(&place, &name, version).await?;
+    let written = write_over(state, &place, &name, &payload, expected.or(Some(current))).await?;
 
     note(
         state,
         audit::action::RECORD_UPDATED,
         id,
-        Detail::new().with("version", header.version).with("restored", version),
+        Detail::new().with("version", written.header.version).with("restored", version),
     );
 
-    Ok(Json(json!({ "record": header })))
+    Ok(Json(with_warning(json!({ "record": written.header }), written.warning)))
 }
 
 pub(crate) async fn totp_code(state: &AppState, id: &str, index: usize) -> Answer {
-    let (vault_id, name) = target(id)?;
+    let (vault_id, name) = target_record(id)?;
     let place = place(state, &vault_id).await?;
-    let (opened, _, _) = open_parameter(state, &place, &name).await?;
+    let (opened, _) = open_parameter(state, &place, &name).await?;
 
     let field = opened
         .payload
@@ -1513,14 +1910,20 @@ pub(crate) async fn totp_code(state: &AppState, id: &str, index: usize) -> Answe
 
 // ── attachments (A18) ───────────────────────────────────────────────────────────────────────────
 
-/// Where a parameter's files go: `<name without the leading slash>/`.
-fn prefix_of(name: &str) -> String {
-    format!("{}/", name.trim_start_matches('/'))
-}
-
 fn bucket_of(place: &Place) -> Result<String, Failure> {
     place.vault.bucket.clone().ok_or_else(|| {
         bad_request("este cofre AWS não tem um bucket S3 para anexos. Defina um nas configurações do cofre")
+    })
+}
+
+/// Where a parameter's files go, or a refusal for a parameter whose name has no leading `/`
+/// (whose prefix would be shared with the parameter of the same name with one).
+fn prefix_for(name: &str) -> Result<String, Failure> {
+    mapping::attachment_prefix(name).ok_or_else(|| {
+        bad_request(
+            "anexos só funcionam em parâmetros cujo nome começa com '/'. Mova o registro para uma \
+             pasta para poder anexar arquivos",
+        )
     })
 }
 
@@ -1528,7 +1931,7 @@ fn attachment_of(vault_id: &str, record_id: &str, key: &str, size: u64, at: &str
     let name = mapping::leaf(key).to_string();
 
     Attachment {
-        id: encode_id(vault_id, key),
+        id: attachment_id(vault_id, key),
         record_id: record_id.to_string(),
         mime: mime_guess::from_path(&name).first_or_octet_stream().to_string(),
         name,
@@ -1538,22 +1941,22 @@ fn attachment_of(vault_id: &str, record_id: &str, key: &str, size: u64, at: &str
 }
 
 pub(crate) async fn list_attachments(state: &AppState, record_id: &str) -> Answer {
-    let (vault_id, name) = target(record_id)?;
+    let (vault_id, name) = target_record(record_id)?;
     let place = place(state, &vault_id).await?;
 
-    let Some(bucket) = place.vault.bucket.clone() else {
+    let (Some(bucket), Some(prefix)) = (place.vault.bucket.clone(), mapping::attachment_prefix(&name))
+    else {
         return Ok(Json(json!({ "attachments": [], "max_bytes": crate::attachments::MAX_BYTES })));
     };
 
-    let s3 = state.aws.s3(&place.vault.region, place.credentials.clone()).map_err(aws_failure)?;
-    let prefix = prefix_of(&name);
+    let s3 = s3_of(state, &place)?;
 
     let found: Vec<Attachment> = s3
         .list_objects_v2(&bucket, &prefix)
         .await
         .map_err(|e| s3_failure(e, &bucket, &place.vault.region))?
         .into_iter()
-        .filter(|o| o.key.len() > prefix.len() && !o.key[prefix.len()..].contains('/'))
+        .filter(|o| mapping::is_attachment_of(&prefix, &o.key))
         .map(|o| attachment_of(&vault_id, record_id, &o.key, o.size, &o.last_modified))
         .collect();
 
@@ -1562,6 +1965,8 @@ pub(crate) async fn list_attachments(state: &AppState, record_id: &str) -> Answe
 
 /// Upload a file next to its parameter, encrypted with the parameter's own key (A18). A parameter
 /// on the account's default key (`alias/aws/ssm`, which S3 cannot use) gets S3's default, `aws/s3`.
+/// When the parameter's key cannot be read, nothing is uploaded: guessing would mean `aws/s3` for
+/// a file that belongs under a customer key.
 pub(crate) async fn add_attachment(
     state: &AppState,
     record_id: &str,
@@ -1587,17 +1992,16 @@ pub(crate) async fn add_attachment(
         )));
     }
 
-    let (vault_id, name) = target(record_id)?;
+    let (vault_id, name) = target_record(record_id)?;
+    let prefix = prefix_for(&name)?;
     let place = place(state, &vault_id).await?;
     let bucket = bucket_of(&place)?;
 
-    let key_id = metadata_of(&place, &name)
-        .await
-        .and_then(|m| m.key_id)
-        .filter(|k| k != mapping::DEFAULT_SSM_KEY);
+    let metadata = metadata_of(&place, &name).await?;
+    let key_id = Some(key_of(&metadata, &name)?).filter(|k| k != mapping::DEFAULT_SSM_KEY);
 
-    let s3 = state.aws.s3(&place.vault.region, place.credentials.clone()).map_err(aws_failure)?;
-    let key = format!("{}{file_name}", prefix_of(&name));
+    let s3 = s3_of(state, &place)?;
+    let key = format!("{prefix}{file_name}");
 
     s3.put_object(&bucket, &key, bytes, key_id.as_deref(), Some(mime))
         .await
@@ -1621,14 +2025,16 @@ pub(crate) async fn add_attachment(
     Ok(Json(json!({ "attachment": added })))
 }
 
+/// Hand back one file, refusing one past the attachment limit before its body is read: a file
+/// somebody put in the bucket by hand can be any size.
 pub(crate) async fn open_attachment(state: &AppState, id: &str) -> Answer {
-    let (vault_id, key) = target(id)?;
+    let (vault_id, key) = target_attachment(id)?;
     let place = place(state, &vault_id).await?;
     let bucket = bucket_of(&place)?;
-    let s3 = state.aws.s3(&place.vault.region, place.credentials.clone()).map_err(aws_failure)?;
+    let s3 = s3_of(state, &place)?;
 
     let object = s3
-        .get_object(&bucket, &key)
+        .get_object(&bucket, &key, crate::attachments::MAX_BYTES as u64)
         .await
         .map_err(|e| s3_failure(e, &bucket, &place.vault.region))?;
 
@@ -1652,10 +2058,10 @@ pub(crate) async fn open_attachment(state: &AppState, id: &str) -> Answer {
 }
 
 pub(crate) async fn delete_attachment(state: &AppState, id: &str) -> Answer {
-    let (vault_id, key) = target(id)?;
+    let (vault_id, key) = target_attachment(id)?;
     let place = place(state, &vault_id).await?;
     let bucket = bucket_of(&place)?;
-    let s3 = state.aws.s3(&place.vault.region, place.credentials.clone()).map_err(aws_failure)?;
+    let s3 = s3_of(state, &place)?;
 
     s3.delete_object(&bucket, &key)
         .await
@@ -1683,7 +2089,7 @@ async fn check_vault(State(state): State<Arc<AppState>>, Path(id): Path<String>)
     let (bucket, bucket_message) = match place.vault.bucket.as_deref() {
         None => (Value::Null, None),
         Some(bucket) => {
-            let s3 = state.aws.s3(&place.vault.region, place.credentials.clone()).map_err(aws_failure)?;
+            let s3 = s3_of(&state, &place)?;
             match s3.head_bucket(bucket).await {
                 Ok(()) => (json!("ok"), None),
                 Err(AwsError::NotFound(_)) => (
@@ -1696,8 +2102,10 @@ async fn check_vault(State(state): State<Arc<AppState>>, Path(id): Path<String>)
                 Err(AwsError::AccessDenied(_)) | Err(AwsError::Invalid(_)) => (
                     json!("denied"),
                     Some(format!(
-                        "sem acesso ao bucket {bucket} (ou ele está em outra região). A função \
-                         precisa de s3:ListBucket, s3:GetObject, s3:PutObject e s3:DeleteObject"
+                        "sem acesso ao bucket {bucket}, ou ele está em outra região, ou não é da \
+                         conta {}. A função precisa de s3:ListBucket, s3:GetObject, s3:PutObject e \
+                         s3:DeleteObject",
+                        place.connection.account_id
                     )),
                 ),
                 Err(other) => return Err(aws_failure(other)),
@@ -1712,6 +2120,28 @@ async fn check_vault(State(state): State<Arc<AppState>>, Path(id): Path<String>)
     };
 
     Ok(Json(json!({ "parameters": parameters, "bucket": bucket, "message": message })))
+}
+
+// ── forgetting on lock ──────────────────────────────────────────────────────────────────────────
+
+/// Sweep the AWS state every `every`, so a vault that auto-locks with nobody at the screen drops
+/// its tokens, credentials and caches within seconds, not at the next request (L1).
+///
+/// The lock itself has no timer: it notices it ran out when somebody asks (`Lock::generation`).
+/// This is the somebody. It holds the app state weakly, so it ends with the server.
+pub(crate) fn start_sweeper(state: &Arc<AppState>, every: Duration) -> tokio::task::JoinHandle<()> {
+    let weak: Weak<AppState> = Arc::downgrade(state);
+
+    tokio::spawn(async move {
+        let mut ticks = tokio::time::interval(every);
+        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        loop {
+            ticks.tick().await;
+            let Some(state) = weak.upgrade() else { return };
+            state.aws.sweep(&state.lock);
+        }
+    })
 }
 
 #[cfg(test)]

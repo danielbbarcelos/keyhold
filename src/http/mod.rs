@@ -68,6 +68,16 @@ pub struct AppState {
     pub aws: crate::aws::state::AwsState,
 }
 
+/// How often the AWS state is swept for a lock that happened on its own (see `start_aws_sweeper`).
+const AWS_SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Start the background task that drops AWS tokens, credentials and caches within seconds of the
+/// vault locking, auto-lock included, even when nothing is asking the server anything. Call once,
+/// from inside the runtime, after the state is built.
+pub fn start_aws_sweeper(state: &Arc<AppState>) {
+    aws::start_sweeper(state, AWS_SWEEP_EVERY);
+}
+
 /// After this many wrong answers, keyhold stops accepting them for a while.
 const MAX_FAILURES: u32 = 5;
 

@@ -104,6 +104,11 @@ async fn update_vault(
 
     let updated = with_key!(state, |key| vaults::update_vault(&store, key, &id, meta))
         .map_err(bad_request)?;
+    drop(store);
+
+    // Another connection, region or bucket is another view of AWS: nothing cached for the old one
+    // may answer for the new one.
+    state.aws.invalidate(&id);
 
     Ok(Json(json!({ "vault": updated })))
 }
@@ -147,6 +152,10 @@ async fn delete_vault(
             .with("records", destroyed.records)
             .with("folders", destroyed.folders),
     );
+    drop(store);
+
+    // An AWS vault's listing stays in memory for seconds; a deleted vault's must not.
+    state.aws.invalidate(&id);
 
     Ok(Json(json!({ "deleted": destroyed })))
 }
@@ -165,6 +174,9 @@ async fn archive_vault(
     let store = state.store.lock().unwrap();
 
     with_key!(state, |_key| vaults::set_archived(&store, &id, flag.on)).map_err(bad_request)?;
+    drop(store);
+
+    state.aws.invalidate(&id);
 
     Ok(Json(json!({ "archived": flag.on })))
 }
@@ -977,12 +989,31 @@ async fn read_version(
     Ok(Json(json!({ "payload": payload })))
 }
 
+/// Bring an old version back.
+///
+/// For an AWS record the body may carry `expected_version` (or the `x-keyhold-expected-version`
+/// header): the version the person had open, checked like a save (A12). Without one, the check is
+/// against the current version as the restore found it. A local record needs neither, and the
+/// body may be absent.
 async fn restore_version(
     State(state): State<Arc<AppState>>,
     Path((id, version)): Path<(String, i64)>,
+    headers: axum::http::HeaderMap,
+    body: Option<Json<serde_json::Value>>,
 ) -> Answer {
     if is_aws_id(&id) {
-        return aws::restore_version(&state, &id, version).await;
+        let expected = body
+            .as_ref()
+            .and_then(|Json(body)| body.get("expected_version"))
+            .and_then(|v| v.as_i64())
+            .or_else(|| {
+                headers
+                    .get(EXPECTED_VERSION_HEADER)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.trim().parse().ok())
+            });
+
+        return aws::restore_version(&state, &id, version, expected).await;
     }
 
     let mut store = state.store.lock().unwrap();

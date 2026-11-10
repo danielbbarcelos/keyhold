@@ -275,6 +275,9 @@ async fn serve(cli: Cli) -> Result<()> {
         aws: Default::default(),
     });
 
+    // So an auto-lock forgets every AWS session within seconds, with or without a request after it.
+    http::start_aws_sweeper(&state);
+
     // So a question from an agent can bring this window back when nobody has it in front of them.
     state.agent.set_door(url.clone());
 

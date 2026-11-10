@@ -13,13 +13,21 @@
 //!   the copy button) is stored as Keyhold's JSON, `{"keyhold":1,"fields":[...],"icon":...}`, and
 //!   the parameter carries the tag `keyhold:formato=json` so an application's own JSON config is
 //!   never mistaken for one of ours.
-//! - **Title and notes live in the description.** First line the title, the rest the notes. A
-//!   parameter nobody described is titled after the last segment of its name.
+//! - **The title lives in the description; the notes live in the value.** The description is not
+//!   encrypted: anyone allowed `ssm:DescribeParameters` reads it, and CloudTrail records it with
+//!   every `PutParameter`. A title is a label and can live there; notes are where people write
+//!   "the backup PIN is 4411", so a record with notes is always stored as Keyhold's JSON with the
+//!   notes inside the encrypted value. A parameter nobody described is titled after the last
+//!   segment of its name. Descriptions written before this rule (title, newline, notes) are still
+//!   read, and the next save moves those notes into the value.
 //! - **Marks live in tags.** `keyhold:comprometido` (an ISO date) and `keyhold:trocar-ate`
 //!   (`YYYY-MM-DD`). Favourites are personal and stay on this machine.
-//! - **Ids carry where they point.** `aws~<vault id>~<base64url(name or path)>`, so a route that
-//!   receives one knows it is AWS, which vault, and which parameter, without a lookup table that
-//!   would be a local copy of somebody's account.
+//! - **Ids carry where they point, and what they point at.**
+//!   `aws~<vault id>~<r|f|a>~<base64url(name, path or object key)>`, so a route that receives one
+//!   knows it is AWS, which vault, whether it is a record, a folder or an attachment, and which
+//!   one, without a lookup table that would be a local copy of somebody's account. The kind is
+//!   checked: a folder id handed to a record route is "not found", never a parameter of the same
+//!   name.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -70,24 +78,111 @@ pub fn is_aws_id(id: &str) -> bool {
     id.starts_with(ID_PREFIX)
 }
 
-/// `aws~<vault id>~<base64url(target)>`, for a record (target = parameter name), a folder (target
-/// = path) or an attachment (target = object key).
-pub fn encode_id(vault_id: &str, target: &str) -> String {
-    format!("{ID_PREFIX}{vault_id}~{}", base64url(target.as_bytes()))
+/// What an AWS id points at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IdKind {
+    /// A parameter; the target is its name.
+    Record,
+    /// A path; the target is the folder's path.
+    Folder,
+    /// An S3 object; the target is its key, `<record prefix><file name>`.
+    Attachment,
 }
 
-/// The vault id and the target an AWS id points at, or `None` for anything that is not one.
-pub fn decode_id(id: &str) -> Option<(String, String)> {
+impl IdKind {
+    fn tag(self) -> &'static str {
+        match self {
+            IdKind::Record => "r",
+            IdKind::Folder => "f",
+            IdKind::Attachment => "a",
+        }
+    }
+
+    fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "r" => Some(IdKind::Record),
+            "f" => Some(IdKind::Folder),
+            "a" => Some(IdKind::Attachment),
+            _ => None,
+        }
+    }
+}
+
+/// `aws~<vault id>~<kind>~<base64url(target)>`.
+pub fn encode_id(kind: IdKind, vault_id: &str, target: &str) -> String {
+    format!("{ID_PREFIX}{vault_id}~{}~{}", kind.tag(), base64url(target.as_bytes()))
+}
+
+pub fn record_id(vault_id: &str, name: &str) -> String {
+    encode_id(IdKind::Record, vault_id, name)
+}
+
+pub fn folder_id(vault_id: &str, path: &str) -> String {
+    encode_id(IdKind::Folder, vault_id, path)
+}
+
+pub fn attachment_id(vault_id: &str, key: &str) -> String {
+    encode_id(IdKind::Attachment, vault_id, key)
+}
+
+/// The kind, the vault id and the target an AWS id points at, or `None` for anything that is not
+/// one. An attachment id whose key is not one file directly under a record's prefix is not one
+/// either (see [`attachment_record`]).
+pub fn decode_id(id: &str) -> Option<(IdKind, String, String)> {
     let rest = id.strip_prefix(ID_PREFIX)?;
-    let (vault, encoded) = rest.split_once('~')?;
+    let mut parts = rest.splitn(3, '~');
+    let (vault, tag, encoded) = (parts.next()?, parts.next()?, parts.next()?);
 
     if vault.is_empty() || encoded.is_empty() {
         return None;
     }
 
+    let kind = IdKind::from_tag(tag)?;
     let target = String::from_utf8(from_base64url(encoded)?).ok()?;
 
-    Some((vault.to_string(), target))
+    if kind == IdKind::Attachment {
+        attachment_record(&target)?;
+    }
+
+    Some((kind, vault.to_string(), target))
+}
+
+/// Where a parameter's files go in the bucket: `<name without the leading slash>/`.
+///
+/// Only for names that start with `/`. Parameter Store keeps `db` and `/db` apart, but both would
+/// map to the prefix `db/`, and the files of one would show up (and be deleted) as the other's.
+/// Keyhold always writes names with the slash; a parameter without one simply has no attachments.
+pub fn attachment_prefix(name: &str) -> Option<String> {
+    let rest = name.strip_prefix('/')?;
+    if rest.is_empty() || rest.starts_with('/') {
+        return None;
+    }
+    Some(format!("{rest}/"))
+}
+
+/// The parameter an attachment key belongs to, or `None` when the key is not exactly one file
+/// directly under a valid record's prefix: no leading `/`, no `.` or `..`, nothing nested.
+pub fn attachment_record(key: &str) -> Option<String> {
+    let (record, file) = key.rsplit_once('/')?;
+
+    if record.is_empty() || record.starts_with('/') || file.is_empty() {
+        return None;
+    }
+    // Parameter Store allows a segment called `..`; a URL would resolve it into another key.
+    if key.split('/').any(|segment| segment == "." || segment == "..") {
+        return None;
+    }
+
+    let name = format!("/{record}");
+    validate_name(&name).ok()?;
+
+    Some(name)
+}
+
+/// Whether an object key is one of this record's attachments (and not a file of a record nested
+/// under it, which shares the prefix).
+pub fn is_attachment_of(prefix: &str, key: &str) -> bool {
+    key.strip_prefix(prefix).is_some_and(|file| !file.is_empty() && !file.contains('/'))
 }
 
 // ── names and paths ─────────────────────────────────────────────────────────────────────────────
@@ -244,9 +339,12 @@ fn fold_accent(c: char) -> Vec<char> {
     vec![plain]
 }
 
-// ── description: title and notes ────────────────────────────────────────────────────────────────
+// ── description: the title ──────────────────────────────────────────────────────────────────────
 
 /// The title and the notes a description holds. No description: the title is the last segment.
+///
+/// Keyhold now writes only the title there; the notes are read for the descriptions written
+/// before that, which carried them after the first line.
 pub fn split_description(description: Option<&str>, name: &str) -> (String, String) {
     let description = description.unwrap_or_default();
 
@@ -259,29 +357,25 @@ pub fn split_description(description: Option<&str>, name: &str) -> (String, Stri
     }
 }
 
-/// A description from a title and notes, or the reason it cannot be one.
-pub fn join_description(title: &str, notes: &str) -> Result<String, String> {
+/// The description Keyhold writes: the title alone, on one line, or the reason it cannot be one.
+///
+/// Only the title, because the description is readable by anyone allowed `DescribeParameters` and
+/// lands in CloudTrail with every write. The notes go into the encrypted value instead
+/// ([`encode_value`]).
+pub fn description_for(title: &str) -> Result<String, String> {
     validate_title(title)?;
 
     let title = title.trim().replace(['\r', '\n'], " ");
-    let notes = notes.trim_end();
-
-    let joined = if notes.is_empty() {
-        title
-    } else {
-        format!("{title}\n{notes}")
-    };
-
-    let length = joined.chars().count();
+    let length = title.chars().count();
 
     if length > DESCRIPTION_LIMIT {
         return Err(format!(
-            "na AWS, título e notas juntos cabem em {DESCRIPTION_LIMIT} caracteres, e estes têm \
-             {length}. Encurte as notas ou guarde o texto num anexo"
+            "na AWS o título cabe em {DESCRIPTION_LIMIT} caracteres, e este tem {length}. \
+             Encurte o título"
         ));
     }
 
-    Ok(joined)
+    Ok(title)
 }
 
 // ── the value: plain or Keyhold's JSON ──────────────────────────────────────────────────────────
@@ -293,15 +387,30 @@ struct Stored {
     fields: Vec<Field>,
     #[serde(default)]
     icon: Option<Icon>,
+    /// The record's notes, inside the encrypted value rather than in the plaintext description.
+    /// Absent in values written before notes moved here, and when there are none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    notes: String,
+}
+
+/// What a value holds: the fields, the icon, and the notes when it is Keyhold's JSON with notes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Decoded {
+    pub fields: Vec<Field>,
+    pub icon: Option<Icon>,
+    pub notes: String,
 }
 
 /// What a record's value becomes, and whether that is Keyhold's JSON.
 ///
 /// Plain only when there is nothing a plain value could not carry back: exactly one field, of the
-/// kind a plain value reads back as (a password), with no composite parts, no marks, and no icon.
-/// The single field's label is not kept in that case; it reads back as "Valor". Anything else is
-/// JSON, so nothing the person set up is lost on the round trip.
+/// kind a plain value reads back as (a password), with no composite parts, no marks, no icon and
+/// no notes. The single field's label is not kept in that case; it reads back as "Valor". Anything
+/// else is JSON, so nothing the person set up is lost on the round trip, and notes always have
+/// somewhere encrypted to go instead of the description.
 pub fn encode_value(payload: &Payload) -> Result<(String, bool), String> {
+    let notes = payload.notes.trim_end();
+
     let plain = match payload.fields.as_slice() {
         [only] => {
             only.kind == PLAIN_KIND
@@ -310,6 +419,7 @@ pub fn encode_value(payload: &Payload) -> Result<(String, bool), String> {
                 && !only.primary
                 && !only.value.is_empty()
                 && payload.icon.is_none()
+                && notes.is_empty()
         }
         _ => false,
     };
@@ -321,14 +431,15 @@ pub fn encode_value(payload: &Payload) -> Result<(String, bool), String> {
             keyhold: 1,
             fields: payload.fields.clone(),
             icon: payload.icon.clone(),
+            notes: notes.to_string(),
         })
         .map_err(|e| e.to_string())?
     };
 
     if value.len() > ADVANCED_LIMIT {
         return Err(format!(
-            "na AWS um parâmetro guarda até {} KB, e este registro tem {:.1} KB. Guarde o que é \
-             grande num anexo",
+            "na AWS um parâmetro guarda até {} KB, e este registro (campos e notas) tem {:.1} KB. \
+             Guarde o que é grande num anexo",
             ADVANCED_LIMIT / 1024,
             value.len() as f64 / 1024.0
         ));
@@ -337,35 +448,44 @@ pub fn encode_value(payload: &Payload) -> Result<(String, bool), String> {
     Ok((value, !plain))
 }
 
-/// The fields and icon a value holds.
+/// The fields, icon and notes a value holds.
 ///
 /// `tagged_json` is what the parameter's tags say: `Some(true)` for Keyhold's tag, `Some(false)`
 /// for tags read and no tag there, `None` when the tags could not be read. Only the first and the
 /// last let a value be read as Keyhold's JSON, and only when it really is Keyhold's shape; anything
 /// else is one plain field, which is how an application's own JSON config stays readable.
-pub fn decode_value(value: &str, tagged_json: Option<bool>) -> (Vec<Field>, Option<Icon>) {
+pub fn decode_value(value: &str, tagged_json: Option<bool>) -> Decoded {
     if tagged_json != Some(false) {
         if let Ok(stored) = serde_json::from_str::<Stored>(value) {
             if stored.keyhold == 1 {
-                return (stored.fields, stored.icon);
+                return Decoded { fields: stored.fields, icon: stored.icon, notes: stored.notes };
             }
         }
     }
 
-    (vec![Field::new(PLAIN_LABEL, PLAIN_KIND, value)], None)
+    Decoded {
+        fields: vec![Field::new(PLAIN_LABEL, PLAIN_KIND, value)],
+        icon: None,
+        notes: String::new(),
+    }
 }
 
 /// A whole payload from what Parameter Store keeps.
+///
+/// Notes come from the value when it has them; otherwise from a description written the old way,
+/// with notes after the title, so nothing written before the move is lost on the way in (and the
+/// next save carries them into the value).
 pub fn payload_from(
     name: &str,
     description: Option<&str>,
     value: &str,
     tagged_json: Option<bool>,
 ) -> Payload {
-    let (title, notes) = split_description(description, name);
-    let (fields, icon) = decode_value(value, tagged_json);
+    let (title, legacy_notes) = split_description(description, name);
+    let decoded = decode_value(value, tagged_json);
+    let notes = if decoded.notes.is_empty() { legacy_notes } else { decoded.notes };
 
-    Payload { title, notes, fields, icon, ..Payload::default() }
+    Payload { title, notes, fields: decoded.fields, icon: decoded.icon, ..Payload::default() }
 }
 
 // ── folders ─────────────────────────────────────────────────────────────────────────────────────
@@ -391,9 +511,9 @@ pub fn folder_nodes<'a>(vault_id: &str, names: impl IntoIterator<Item = &'a str>
     folder_paths(names)
         .into_iter()
         .map(|path| FolderNode {
-            id: encode_id(vault_id, &path),
+            id: folder_id(vault_id, &path),
             vault_id: vault_id.to_string(),
-            parent_id: parent_path(&path).map(|parent| encode_id(vault_id, &parent)),
+            parent_id: parent_path(&path).map(|parent| folder_id(vault_id, &parent)),
             name: leaf(&path).to_string(),
             colour: None,
             depth: path.matches('/').count().saturating_sub(1),
@@ -512,12 +632,33 @@ mod tests {
 
     #[test]
     fn an_id_says_which_vault_and_which_parameter_and_comes_back_whole() {
-        let id = encode_id("VAULT", "/app/prod/senha do banco+ç");
+        let id = record_id("VAULT", "/app/prod/senha do banco+ç");
         assert!(is_aws_id(&id));
         assert_eq!(
             decode_id(&id),
-            Some(("VAULT".to_string(), "/app/prod/senha do banco+ç".to_string()))
+            Some((IdKind::Record, "VAULT".to_string(), "/app/prod/senha do banco+ç".to_string()))
         );
+        assert_eq!(decode_id(&folder_id("V", "/app")).unwrap().0, IdKind::Folder);
+        assert_ne!(record_id("V", "/app"), folder_id("V", "/app"), "the kind is part of the id");
+    }
+
+    #[test]
+    fn an_attachment_id_is_one_file_directly_under_a_record() {
+        let id = attachment_id("V", "app/prod/db/chave.pem");
+        assert_eq!(decode_id(&id).unwrap().2, "app/prod/db/chave.pem");
+        assert_eq!(attachment_record("app/prod/db/chave.pem").as_deref(), Some("/app/prod/db"));
+
+        for bad in ["/app/db/x", "x", "app/db/", "app/db/..", "app/.keep/x", "aws/db/x", "a b/x"] {
+            assert!(decode_id(&attachment_id("V", bad)).is_none(), "{bad}");
+        }
+
+        // `db` and `/db` are two parameters; only the one with the slash has a prefix, so their
+        // files can never be mistaken for each other's.
+        assert_eq!(attachment_prefix("/db").as_deref(), Some("db/"));
+        assert_eq!(attachment_prefix("db"), None);
+        assert!(is_attachment_of("app/db/", "app/db/a.pdf"));
+        assert!(!is_attachment_of("app/db/", "app/db/nested/a.pdf"));
+        assert!(!is_attachment_of("app/db/", "app/db/"));
     }
 
     #[test]
@@ -569,26 +710,43 @@ mod tests {
             ("db".to_string(), String::new())
         );
 
-        let joined = join_description("Banco", "conta da empresa").unwrap();
-        assert_eq!(joined, "Banco\nconta da empresa");
-        assert_eq!(
-            split_description(Some(&joined), "/x"),
-            ("Banco".to_string(), "conta da empresa".to_string())
-        );
-        assert_eq!(join_description("Banco", "").unwrap(), "Banco");
+        assert_eq!(description_for(" Banco\nda empresa ").unwrap(), "Banco da empresa");
     }
 
     #[test]
-    fn a_description_past_the_limit_is_refused_in_words() {
-        let notes = "x".repeat(DESCRIPTION_LIMIT);
-        let error = join_description("Banco", &notes).unwrap_err();
+    fn notes_go_into_the_encrypted_value_never_into_the_description() {
+        let original = Payload {
+            notes: "PIN do backup: 4411".into(),
+            ..payload(vec![field("Senha", "password", "hunter2")])
+        };
+
+        let description = description_for(&original.title).unwrap();
+        assert!(!description.contains("4411"));
+
+        let (value, json) = encode_value(&original).unwrap();
+        assert!(json, "a record with notes is always Keyhold's JSON");
+        assert!(value.contains("4411"));
+
+        let back = payload_from("/app/db", Some(&description), &value, Some(true));
+        assert_eq!(back.notes, "PIN do backup: 4411");
+        assert_eq!(back.fields, original.fields);
+
+        // Written the old way: notes after the title in the description. Still read.
+        let old = payload_from("/app/db", Some("Banco\nnota antiga"), "hunter2", Some(false));
+        assert_eq!(old.notes, "nota antiga");
+        assert_eq!(old.title, "Banco");
+    }
+
+    #[test]
+    fn a_title_past_the_limit_is_refused_in_words() {
+        let error = description_for(&"x".repeat(DESCRIPTION_LIMIT + 1)).unwrap_err();
         assert!(error.contains("1024"), "{error}");
         assert!(!error.contains('—'));
     }
 
     #[test]
     fn a_title_with_a_slash_is_refused() {
-        assert!(join_description("a/b", "").is_err());
+        assert!(description_for("a/b").is_err());
         assert!(validate_title("").is_err());
     }
 
@@ -624,26 +782,27 @@ mod tests {
             assert!(json, "{value}");
             assert!(value.starts_with("{\"keyhold\":1,"), "{value}");
 
-            let (fields, icon) = decode_value(&value, Some(true));
-            assert_eq!(fields, original.fields);
-            assert_eq!(icon, original.icon);
+            let decoded = decode_value(&value, Some(true));
+            assert_eq!(decoded.fields, original.fields);
+            assert_eq!(decoded.icon, original.icon);
+            assert!(!value.contains("\"notes\""), "no notes, no key: {value}");
         }
     }
 
     #[test]
     fn an_applications_own_json_is_shown_as_a_plain_value() {
         let config = r#"{"host":"db","password":"x"}"#;
-        let (fields, _) = decode_value(config, Some(false));
+        let fields = decode_value(config, Some(false)).fields;
         assert_eq!(fields, vec![field(PLAIN_LABEL, PLAIN_KIND, config)]);
 
         // Even Keyhold's shape, without Keyhold's tag, is somebody else's value.
         let ours = r#"{"keyhold":1,"fields":[]}"#;
-        assert_eq!(decode_value(ours, Some(false)).0.len(), 1);
-        assert_eq!(decode_value(ours, Some(false)).0[0].value, ours);
+        assert_eq!(decode_value(ours, Some(false)).fields.len(), 1);
+        assert_eq!(decode_value(ours, Some(false)).fields[0].value, ours);
 
         // Tags unreadable: only Keyhold's exact shape is read as Keyhold's.
-        assert!(decode_value(ours, None).0.is_empty());
-        assert_eq!(decode_value(config, None).0[0].value, config);
+        assert!(decode_value(ours, None).fields.is_empty());
+        assert_eq!(decode_value(config, None).fields[0].value, config);
     }
 
     #[test]
@@ -661,9 +820,9 @@ mod tests {
             .iter()
             .map(|n| {
                 (
-                    decode_id(&n.id).unwrap().1,
+                    decode_id(&n.id).unwrap().2,
                     n.depth,
-                    n.parent_id.as_deref().map(|p| decode_id(p).unwrap().1),
+                    n.parent_id.as_deref().map(|p| decode_id(p).unwrap().2),
                 )
             })
             .collect();

@@ -278,8 +278,11 @@ impl SsoClient {
         })
     }
 
-    /// Point both endpoints elsewhere, for tests.
-    pub fn with_endpoints(mut self, oidc: &str, portal: &str) -> Self {
+    /// Point both endpoints elsewhere.
+    ///
+    /// Crate-private on purpose: only `AwsState` calls it, with endpoints only the tests can set,
+    /// and outside the tests the HTTP client refuses anything that is not HTTPS.
+    pub(crate) fn with_endpoints(mut self, oidc: &str, portal: &str) -> Self {
         self.oidc_endpoint = trim_endpoint(oidc);
         self.portal_endpoint = trim_endpoint(portal);
         self

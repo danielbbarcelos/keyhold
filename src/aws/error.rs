@@ -50,6 +50,12 @@ pub enum AwsError {
     #[error("invalid request: {0}")]
     Invalid(String),
 
+    /// A response body larger than the caller agreed to read: an S3 object past the attachment
+    /// limit. Refused from its `Content-Length`, before the body is read, so a huge object in
+    /// somebody's bucket cannot fill this process's memory.
+    #[error("the object is {size} bytes, over the limit of {limit}")]
+    TooLarge { size: u64, limit: u64 },
+
     /// Anything else, kept verbatim so it can at least be reported.
     #[error("AWS error {code} (HTTP {status}): {message}")]
     Other {
@@ -72,6 +78,7 @@ impl AwsError {
             AwsError::Throttled(_) => "throttled",
             AwsError::Network(_) => "network",
             AwsError::Invalid(_) => "invalid",
+            AwsError::TooLarge { .. } => "too_large",
             AwsError::Other { .. } => "other",
         }
     }

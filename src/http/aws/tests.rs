@@ -40,6 +40,14 @@ struct FakeParameter {
     /// (version, value, description, modified)
     history: Vec<(i64, String, Option<String>, f64)>,
     modified: f64,
+    /// `SecureString` when empty; `String` or `StringList` for the plain-text kinds.
+    kind: String,
+}
+
+impl FakeParameter {
+    fn kind(&self) -> &str {
+        if self.kind.is_empty() { "SecureString" } else { &self.kind }
+    }
 }
 
 #[derive(Default)]
@@ -47,9 +55,23 @@ struct Ssm {
     parameters: BTreeMap<String, FakeParameter>,
     /// Names under this prefix exist, but this role may not read them.
     denied: Vec<String>,
+    /// The role may not call DescribeParameters at all.
+    describe_denied: bool,
+    /// The role may not call GetParameterHistory.
+    history_denied: bool,
+    /// Names whose PutParameter is refused (everything else about them is allowed).
+    put_denied: Vec<String>,
+    /// Names whose DeleteParameter is refused.
+    delete_denied: Vec<String>,
+    /// RemoveTagsFromResource is refused.
+    untag_denied: bool,
+    /// Names where somebody else writes a version just before the next PutParameter lands.
+    race: Vec<String>,
     clock: f64,
     /// Every `PutParameter` body, to check what was asked for.
     puts: Vec<Value>,
+    /// Every operation, in order, with the name it was about.
+    calls: Vec<(String, String)>,
 }
 
 type Shared = Arc<Mutex<Ssm>>;
@@ -67,6 +89,7 @@ impl Ssm {
                 tags: tags.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
                 history: vec![(1, value.into(), description.map(str::to_string), self.clock)],
                 modified: self.clock,
+                kind: String::new(),
             },
         );
     }
@@ -121,6 +144,8 @@ async fn ssm(State(shared): State<Shared>, request: Request) -> Response {
     let body: Value = serde_json::from_slice(&body).unwrap();
     let text = |key: &str| body[key].as_str().unwrap_or_default().to_string();
     let mut ssm = shared.lock().unwrap();
+    let about = if body["Name"].is_string() { text("Name") } else { text("ResourceId") };
+    ssm.calls.push((target.clone(), about));
 
     match target.as_str() {
         "GetParametersByPath" => {
@@ -130,7 +155,7 @@ async fn ssm(State(shared): State<Shared>, request: Request) -> Response {
                 .filter(|(name, _)| !ssm.denied(name))
                 .map(|(name, p)| {
                     json!({
-                        "Name": name, "Type": "SecureString", "Value": p.value,
+                        "Name": name, "Type": p.kind(), "Value": p.value,
                         "Version": p.version, "LastModifiedDate": p.modified,
                     })
                 })
@@ -139,20 +164,25 @@ async fn ssm(State(shared): State<Shared>, request: Request) -> Response {
             ok(json!({ "Parameters": items, "NextToken": next }))
         }
         "DescribeParameters" => {
+            if ssm.describe_denied {
+                return error("AccessDeniedException", "not allowed to describe");
+            }
             let filter = &body["ParameterFilters"][0];
-            let path = filter["Values"][0].as_str().unwrap_or("/").to_string();
-            let recursive = filter["Option"] == "Recursive";
-            // Describe sees everything, denied or not. Keyhold must not show what it only saw here.
-            let items: Vec<Value> = ssm
-                .under(&path, recursive)
-                .map(|(name, p)| {
-                    json!({
-                        "Name": name, "Type": "SecureString", "KeyId": p.key_id,
-                        "Description": p.description, "Version": p.version,
-                        "LastModifiedDate": p.modified, "Tier": "Standard",
-                    })
+            let value = filter["Values"][0].as_str().unwrap_or("/").to_string();
+            let describe = |name: &String, p: &FakeParameter| {
+                json!({
+                    "Name": name, "Type": p.kind(),
+                    "KeyId": (p.kind() == "SecureString").then(|| p.key_id.clone()),
+                    "Description": p.description, "Version": p.version,
+                    "LastModifiedDate": p.modified, "Tier": "Standard",
                 })
-                .collect();
+            };
+            // Describe sees everything, denied or not. Keyhold must not show what it only saw here.
+            let items: Vec<Value> = if filter["Key"] == "Name" {
+                ssm.parameters.iter().filter(|(name, _)| **name == value).map(|(n, p)| describe(n, p)).collect()
+            } else {
+                ssm.under(&value, filter["Option"] == "Recursive").map(|(n, p)| describe(n, p)).collect()
+            };
             let (items, next) = page(items, 50, body["NextToken"].as_str());
             ok(json!({ "Parameters": items, "NextToken": next }))
         }
@@ -164,7 +194,7 @@ async fn ssm(State(shared): State<Shared>, request: Request) -> Response {
             match ssm.parameters.get(&name) {
                 None => error("ParameterNotFound", "nope"),
                 Some(p) => ok(json!({ "Parameter": {
-                    "Name": name, "Type": "SecureString", "Value": p.value,
+                    "Name": name, "Type": p.kind(), "Value": p.value,
                     "Version": p.version, "LastModifiedDate": p.modified,
                 }})),
             }
@@ -172,19 +202,27 @@ async fn ssm(State(shared): State<Shared>, request: Request) -> Response {
         "PutParameter" => {
             let name = text("Name");
             ssm.puts.push(body.clone());
-            if ssm.denied(&name) {
+            if ssm.denied(&name) || ssm.put_denied.contains(&name) {
                 return error("AccessDeniedException", "not allowed");
             }
+            assert_eq!(body["Type"], "SecureString");
             let overwrite = body["Overwrite"].as_bool().unwrap_or(false);
             ssm.clock += 1.0;
             let clock = ssm.clock;
             let key = body["KeyId"].as_str().unwrap_or("alias/aws/ssm").to_string();
             let description = body["Description"].as_str().map(str::to_string);
             let value = text("Value");
+            let raced = ssm.race.contains(&name);
+            ssm.race.retain(|n| *n != name);
 
             let version = match ssm.parameters.get_mut(&name) {
                 Some(_) if !overwrite => return error("ParameterAlreadyExists", "exists"),
                 Some(existing) => {
+                    if raced {
+                        existing.version += 1;
+                        let v = existing.version;
+                        existing.history.push((v, "de outra pessoa".into(), existing.description.clone(), clock));
+                    }
                     existing.version += 1;
                     existing.value = value.clone();
                     existing.key_id = key;
@@ -212,6 +250,7 @@ async fn ssm(State(shared): State<Shared>, request: Request) -> Response {
                             tags,
                             history: vec![(1, value, description, clock)],
                             modified: clock,
+                            kind: String::new(),
                         },
                     );
                     1
@@ -219,12 +258,22 @@ async fn ssm(State(shared): State<Shared>, request: Request) -> Response {
             };
             ok(json!({ "Version": version, "Tier": "Standard" }))
         }
-        "DeleteParameter" => match ssm.parameters.remove(&text("Name")) {
-            Some(_) => ok(json!({})),
-            None => error("ParameterNotFound", "nope"),
-        },
-        "GetParameterHistory" => {
+        "DeleteParameter" => {
             let name = text("Name");
+            if ssm.delete_denied.contains(&name) {
+                return error("AccessDeniedException", "not allowed to delete");
+            }
+            match ssm.parameters.remove(&name) {
+                Some(_) => ok(json!({})),
+                None => error("ParameterNotFound", "nope"),
+            }
+        }
+        "GetParameterHistory" => {
+            if ssm.history_denied {
+                return error("AccessDeniedException", "not allowed to read history");
+            }
+            let name = text("Name");
+            let decrypt = body["WithDecryption"].as_bool().unwrap_or(false);
             let Some(p) = ssm.parameters.get(&name) else {
                 return error("ParameterNotFound", "nope");
             };
@@ -233,9 +282,10 @@ async fn ssm(State(shared): State<Shared>, request: Request) -> Response {
                 .iter()
                 .map(|(version, value, description, at)| {
                     json!({
-                        "Name": name, "Type": "SecureString", "KeyId": p.key_id,
-                        "Description": description, "Value": value, "Version": version,
-                        "LastModifiedDate": at,
+                        "Name": name, "Type": p.kind(), "KeyId": p.key_id,
+                        "Description": description,
+                        "Value": if decrypt { value.clone() } else { "(cifrado)".to_string() },
+                        "Version": version, "LastModifiedDate": at, "Tier": "Standard",
                     })
                 })
                 .collect();
@@ -257,6 +307,9 @@ async fn ssm(State(shared): State<Shared>, request: Request) -> Response {
             ok(json!({}))
         }
         "RemoveTagsFromResource" => {
+            if ssm.untag_denied {
+                return error("AccessDeniedException", "not allowed to untag");
+            }
             let Some(p) = ssm.parameters.get_mut(&text("ResourceId")) else {
                 return error("InvalidResourceId", "nope");
             };
@@ -322,7 +375,19 @@ impl Harness {
     }
 
     fn id(&self, name: &str) -> String {
-        crate::aws::mapping::encode_id(&self.vault, name)
+        crate::aws::mapping::record_id(&self.vault, name)
+    }
+
+    fn folder(&self, path: &str) -> String {
+        crate::aws::mapping::folder_id(&self.vault, path)
+    }
+
+    fn attachment(&self, key: &str) -> String {
+        crate::aws::mapping::attachment_id(&self.vault, key)
+    }
+
+    fn with_ssm<T>(&self, f: impl FnOnce(&mut Ssm) -> T) -> T {
+        f(&mut self.ssm.lock().unwrap())
     }
 
     fn parameter(&self, name: &str) -> Option<FakeParameter> {
@@ -446,7 +511,7 @@ async fn an_aws_vault_lists_what_the_role_can_read_in_the_shapes_a_local_vault_u
         .as_array()
         .unwrap()
         .iter()
-        .map(|f| crate::aws::mapping::decode_id(f["id"].as_str().unwrap()).unwrap().1)
+        .map(|f| crate::aws::mapping::decode_id(f["id"].as_str().unwrap()).unwrap().2)
         .collect();
     // `/secreto` is only visible to DescribeParameters, so it is not a folder here (A6).
     assert_eq!(paths, vec!["/app", "/app/dev", "/app/prod", "/config"]);
@@ -463,7 +528,7 @@ async fn an_aws_vault_lists_what_the_role_can_read_in_the_shapes_a_local_vault_u
     assert_eq!(db["version"], 1);
     assert_eq!(db["archived"], false);
     assert_eq!(db["compromised_at"], "2026-01-01T00:00:00Z");
-    assert_eq!(db["folder_id"], h.id("/app/prod"));
+    assert_eq!(db["folder_id"], h.folder("/app/prod"));
 
     let api = records.iter().find(|r| r["id"] == h.id("/app/prod/api")).unwrap();
     assert_eq!(api["subtitle"], "deploy");
@@ -498,7 +563,7 @@ async fn a_record_is_written_with_a_suggested_name_and_the_key_of_its_folder() {
         .post(
             &format!("/vaults/{}/records", h.vault),
             json!({
-                "folder_id": h.id("/app/prod"),
+                "folder_id": h.folder("/app/prod"),
                 "payload": {
                     "title": "Senha do Redis (produção)",
                     "notes": "rotacionar todo mês",
@@ -515,15 +580,17 @@ async fn a_record_is_written_with_a_suggested_name_and_the_key_of_its_folder() {
 
     let stored = h.parameter("/app/prod/senha-do-redis-producao").unwrap();
     assert_eq!(stored.key_id, "alias/prod", "inherited from the folder (A11)");
-    assert_eq!(stored.description.as_deref(), Some("Senha do Redis (produção)\nrotacionar todo mês"));
+    // M1: the title in the description, the notes in the encrypted value.
+    assert_eq!(stored.description.as_deref(), Some("Senha do Redis (produção)"));
     assert!(stored.value.starts_with(r#"{"keyhold":1,"#));
+    assert!(stored.value.contains(r#""notes":"rotacionar todo mês""#), "{}", stored.value);
     assert!(stored.tags.contains(&("keyhold:formato".into(), "json".into())));
 
     // In an empty folder, the marker's key is the folder's key.
     h.post(
         &format!("/vaults/{}/records", h.vault),
         json!({
-            "folder_id": h.id("/app/dev"),
+            "folder_id": h.folder("/app/dev"),
             "name": "token",
             "payload": { "title": "Token", "fields": [{ "label": "Senha", "kind": "password", "value": "t" }] }
         }),
@@ -539,7 +606,7 @@ async fn a_record_is_written_with_a_suggested_name_and_the_key_of_its_folder() {
         .post(
             &format!("/vaults/{}/records", h.vault),
             json!({
-                "folder_id": h.id("/app/dev"),
+                "folder_id": h.folder("/app/dev"),
                 "name": "token",
                 "payload": { "title": "Outro", "fields": [{ "label": "Senha", "kind": "password", "value": "x" }] }
             }),
@@ -624,10 +691,25 @@ async fn saving_checks_the_version_and_switches_the_format_with_the_field_count(
     let old = h.get(&format!("/records/{id}/versions/1")).await;
     assert_eq!(old.body["payload"]["fields"][0]["value"], "hunter2");
 
+    // A restore checked against a version that is no longer current is refused, like a save.
+    let stale = h
+        .post(&format!("/records/{id}/versions/1/restore"), json!({ "expected_version": 2 }))
+        .await;
+    assert_eq!(stale.status, 409, "{}", stale.body);
+
     let restored = h.post(&format!("/records/{id}/versions/1/restore"), json!({})).await;
     assert_eq!(restored.status, 200, "{}", restored.body);
     assert_eq!(restored.body["record"]["version"], 4);
-    assert_eq!(h.parameter("/app/prod/db").unwrap().value, "hunter2");
+    assert!(restored.body.get("warning").is_none(), "{}", restored.body);
+
+    // Version 1 had its notes in the description (the old way). Restored, they move into the value.
+    let back = h.parameter("/app/prod/db").unwrap();
+    assert!(back.value.contains("hunter2") && back.value.contains("só para o deploy"), "{}", back.value);
+    assert_eq!(back.description.as_deref(), Some("Banco de produção"));
+    assert!(back.tags.contains(&("keyhold:formato".into(), "json".into())));
+    let opened = h.get(&format!("/records/{id}")).await;
+    assert_eq!(opened.body["record"]["payload"]["notes"], "só para o deploy");
+    assert_eq!(opened.body["record"]["payload"]["fields"][0]["value"], "hunter2");
 }
 
 #[tokio::test]
@@ -635,22 +717,22 @@ async fn folders_are_markers_and_a_full_one_is_not_deleted() {
     let h = start(account, None, None).await;
 
     let made = h
-        .post(&format!("/vaults/{}/folders", h.vault), json!({ "name": "novo", "parent_id": h.id("/app") }))
+        .post(&format!("/vaults/{}/folders", h.vault), json!({ "name": "novo", "parent_id": h.folder("/app") }))
         .await;
     assert_eq!(made.status, 200, "{}", made.body);
-    assert_eq!(made.body["folder"]["id"], h.id("/app/novo"));
+    assert_eq!(made.body["folder"]["id"], h.folder("/app/novo"));
     assert_eq!(made.body["folder"]["depth"], 1);
     assert!(h.parameter("/app/novo/.keep").is_some());
 
-    let full = h.call("DELETE", &format!("/folders/{}", h.id("/app/prod")), None).await;
+    let full = h.call("DELETE", &format!("/folders/{}", h.folder("/app/prod")), None).await;
     assert_eq!(full.status, 409);
     assert!(h.parameter("/app/prod/db").is_some());
 
-    let empty = h.call("DELETE", &format!("/folders/{}", h.id("/app/novo")), None).await;
+    let empty = h.call("DELETE", &format!("/folders/{}", h.folder("/app/novo")), None).await;
     assert_eq!(empty.status, 200, "{}", empty.body);
     assert!(h.parameter("/app/novo/.keep").is_none());
 
-    let rename = h.put(&format!("/folders/{}", h.id("/app/dev")), json!({ "name": "x" })).await;
+    let rename = h.put(&format!("/folders/{}", h.folder("/app/dev")), json!({ "name": "x" })).await;
     assert_eq!(rename.status, 400);
 }
 
@@ -662,9 +744,11 @@ async fn moving_renames_with_tags_and_deleting_is_for_good() {
     let starred = h.post(&format!("/records/{id}/favourite"), json!({ "on": true })).await;
     assert_eq!(starred.status, 200);
 
-    let moved = h.post(&format!("/records/{id}/move"), json!({ "folder_id": h.id("/app/dev") })).await;
+    let moved = h.post(&format!("/records/{id}/move"), json!({ "folder_id": h.folder("/app/dev") })).await;
     assert_eq!(moved.status, 200, "{}", moved.body);
     assert_eq!(moved.body["id"], h.id("/app/dev/db"));
+    assert_eq!(moved.body["history_lost"], true, "a move starts the history over (M3)");
+    assert!(moved.body.get("warning").is_none());
     assert!(h.parameter("/app/prod/db").is_none());
 
     let there = h.parameter("/app/dev/db").unwrap();
@@ -786,13 +870,13 @@ async fn attachments_go_to_the_bucket_under_the_parameter_name_with_its_key() {
         )
         .await;
     assert_eq!(added.status, 200, "{}", added.body);
-    assert_eq!(added.body["attachment"]["id"], h.id("app/prod/db/chave.pem"));
+    assert_eq!(added.body["attachment"]["id"], h.attachment("app/prod/db/chave.pem"));
 
     let listed = h.get(&format!("/records/{id}/attachments")).await;
     let names: Vec<&str> = listed.body["attachments"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap()).collect();
     assert_eq!(names, vec!["chave.pem"]);
 
-    let denied = h.get(&format!("/attachments/{}", h.id("app/prod/db/chave.pem"))).await;
+    let denied = h.get(&format!("/attachments/{}", h.attachment("app/prod/db/chave.pem"))).await;
     assert_eq!(denied.status, 403);
     assert!(denied.body["error"].as_str().unwrap().contains("keyhold-producao"));
 
@@ -801,6 +885,9 @@ async fn attachments_go_to_the_bucket_under_the_parameter_name_with_its_key() {
     assert_eq!(requests[0].uri, "/keyhold-producao/app/prod/db/chave.pem");
     assert_eq!(requests[0].header("x-amz-server-side-encryption"), Some("aws:kms"));
     assert_eq!(requests[0].header("x-amz-server-side-encryption-aws-kms-key-id"), Some("alias/prod"));
+    for request in &requests {
+        assert_eq!(request.header("x-amz-expected-bucket-owner"), Some("123456789012"), "M5");
+    }
 }
 
 #[tokio::test]
@@ -873,4 +960,377 @@ async fn a_device_login_is_started_polled_kept_in_memory_and_revoked() {
     let requests = sso.requests();
     assert_eq!(requests.last().unwrap().uri, "/logout");
     assert_eq!(requests.last().unwrap().header("x-amz-sso_bearer_token"), Some("access"));
+}
+
+// ── the security review's findings ──────────────────────────────────────────────────────────────
+
+fn save_body(expected: i64, fields: Value) -> Value {
+    json!({ "expected_version": expected, "title": "Banco", "fields": fields })
+}
+
+fn one_password(value: &str) -> Value {
+    json!([{ "label": "Senha", "kind": "password", "value": value }])
+}
+
+fn two_fields() -> Value {
+    json!([
+        { "label": "Usuário", "kind": "text", "value": "admin" },
+        { "label": "Senha", "kind": "password", "value": "novo" }
+    ])
+}
+
+#[tokio::test]
+async fn without_describe_the_key_comes_from_history_and_without_both_nothing_is_written() {
+    let h = start(account, None, None).await;
+    let id = h.id("/app/prod/db");
+    h.with_ssm(|ssm| ssm.describe_denied = true);
+
+    // Describe refused: the newest history entry still says which key the secret is under.
+    let saved = h.put(&format!("/records/{id}"), save_body(1, one_password("novo"))).await;
+    assert_eq!(saved.status, 200, "{}", saved.body);
+    assert_eq!(h.parameter("/app/prod/db").unwrap().key_id, "alias/prod", "never downgraded (H1)");
+    let put = h.with_ssm(|ssm| ssm.puts.last().cloned().unwrap());
+    assert_eq!(put["KeyId"], "alias/prod");
+
+    // History refused too: nothing is sent at all.
+    h.with_ssm(|ssm| ssm.history_denied = true);
+    let puts_before = h.with_ssm(|ssm| ssm.puts.len());
+
+    let refused = h.put(&format!("/records/{id}"), save_body(2, one_password("outro"))).await;
+    assert_eq!(refused.status, 403, "{}", refused.body);
+    assert_eq!(refused.body["aws"], "access_denied");
+    let text = refused.body["error"].as_str().unwrap();
+    assert!(text.contains("ssm:DescribeParameters") && !text.contains('—'), "{text}");
+
+    let moved = h.post(&format!("/records/{id}/move"), json!({ "folder_id": h.folder("/app/dev") })).await;
+    assert_eq!(moved.status, 403, "a move without metadata is aborted: {}", moved.body);
+    assert!(h.parameter("/app/prod/db").is_some() && h.parameter("/app/dev/db").is_none());
+
+    // A new record cannot inherit a key from a listing whose keys could not be read.
+    let created = h
+        .post(
+            &format!("/vaults/{}/records", h.vault),
+            json!({ "folder_id": h.folder("/app/prod"), "payload": { "title": "Novo", "fields": one_password("x") } }),
+        )
+        .await;
+    assert_eq!(created.status, 403, "{}", created.body);
+    let folder = h
+        .post(&format!("/vaults/{}/folders", h.vault), json!({ "name": "nova", "parent_id": h.folder("/app/prod") }))
+        .await;
+    assert_eq!(folder.status, 403, "{}", folder.body);
+
+    assert_eq!(h.with_ssm(|ssm| ssm.puts.len()), puts_before, "not one PutParameter");
+    assert_eq!(h.parameter("/app/prod/db").unwrap().value, "novo");
+
+    // Reading still works, titled by name: only writing needs the key.
+    let records = h.records().await;
+    assert!(records.iter().any(|r| r["title"] == "db"));
+}
+
+#[tokio::test]
+async fn a_parameter_without_a_leading_slash_is_described_by_its_exact_name() {
+    let h = start(
+        |ssm| ssm.seed("solto", "hunter2", Some("Solto"), "alias/solto", &[]),
+        None,
+        None,
+    )
+    .await;
+
+    let saved = h.put(&format!("/records/{}", h.id("solto")), save_body(1, one_password("novo"))).await;
+    assert_eq!(saved.status, 200, "{}", saved.body);
+    assert_eq!(h.parameter("solto").unwrap().key_id, "alias/solto");
+
+    let describe = h.with_ssm(|ssm| ssm.calls.iter().filter(|(op, _)| op == "DescribeParameters").count());
+    assert!(describe >= 1);
+}
+
+#[tokio::test]
+async fn notes_are_kept_in_the_value_and_old_ones_move_there_on_the_next_save() {
+    let h = start(account, None, None).await;
+    let id = h.id("/app/prod/db");
+
+    // Written the old way: notes after the title in the description. Still read.
+    let opened = h.get(&format!("/records/{id}")).await;
+    assert_eq!(opened.body["record"]["payload"]["notes"], "só para o deploy");
+
+    let saved = h
+        .put(
+            &format!("/records/{id}"),
+            json!({
+                "expected_version": 1, "title": "Banco de produção", "notes": "só para o deploy",
+                "fields": one_password("hunter2")
+            }),
+        )
+        .await;
+    assert_eq!(saved.status, 200, "{}", saved.body);
+
+    let stored = h.parameter("/app/prod/db").unwrap();
+    assert_eq!(stored.description.as_deref(), Some("Banco de produção"), "the title alone");
+    assert!(stored.value.contains("só para o deploy"));
+    assert!(stored.tags.contains(&("keyhold:formato".into(), "json".into())));
+
+    let again = h.get(&format!("/records/{id}")).await;
+    assert_eq!(again.body["record"]["payload"]["notes"], "só para o deploy");
+    assert_eq!(again.body["record"]["payload"]["fields"][0]["value"], "hunter2");
+}
+
+#[tokio::test]
+async fn a_write_that_lands_after_somebody_elses_still_succeeds_and_says_so() {
+    let h = start(account, None, None).await;
+    let id = h.id("/app/prod/db");
+    h.with_ssm(|ssm| ssm.race.push("/app/prod/db".into()));
+
+    let saved = h.put(&format!("/records/{id}"), save_body(1, one_password("meu"))).await;
+    assert_eq!(saved.status, 200, "{}", saved.body);
+    assert_eq!(saved.body["record"]["version"], 3);
+    let warning = saved.body["warning"].as_str().expect("a warning (M2)");
+    assert!(warning.contains("versão 3") && warning.contains("histórico") && !warning.contains('—'), "{warning}");
+
+    // Metadata and tags are read before the version check, so only GetParameter sits between
+    // the check and the write.
+    let calls = h.with_ssm(|ssm| ssm.calls.clone());
+    let ops: Vec<&str> = calls.iter().map(|(op, _)| op.as_str()).collect();
+    let put = ops.iter().rposition(|op| *op == "PutParameter").unwrap();
+    assert_eq!(ops[put - 1], "GetParameter", "{ops:?}");
+
+    // Without a race there is nothing to warn about.
+    let calm = h.put(&format!("/records/{id}"), save_body(3, one_password("de novo"))).await;
+    assert_eq!(calm.status, 200);
+    assert!(calm.body.get("warning").is_none(), "{}", calm.body);
+}
+
+#[tokio::test]
+async fn the_format_tag_goes_on_before_the_put_and_comes_off_after_it() {
+    let h = start(account, None, None).await;
+    let id = h.id("/app/prod/db");
+
+    // To JSON with the put refused: the tag went first, the value did not change, and it still
+    // reads as the plain value it is.
+    h.with_ssm(|ssm| ssm.put_denied.push("/app/prod/db".into()));
+    let refused = h.put(&format!("/records/{id}"), save_body(1, two_fields())).await;
+    assert_eq!(refused.status, 403, "{}", refused.body);
+    let stored = h.parameter("/app/prod/db").unwrap();
+    assert_eq!(stored.value, "hunter2");
+    assert!(stored.tags.contains(&("keyhold:formato".into(), "json".into())));
+    let opened = h.get(&format!("/records/{id}")).await;
+    assert_eq!(opened.body["record"]["payload"]["fields"][0]["value"], "hunter2", "fresh after the error");
+
+    h.with_ssm(|ssm| ssm.put_denied.clear());
+    let calls_before = h.with_ssm(|ssm| ssm.calls.len());
+    let to_json = h.put(&format!("/records/{id}"), save_body(1, two_fields())).await;
+    assert_eq!(to_json.status, 200, "{}", to_json.body);
+    let calls = h.with_ssm(|ssm| ssm.calls[calls_before..].to_vec());
+    let ops: Vec<&str> = calls.iter().map(|(op, _)| op.as_str()).collect();
+    assert!(!ops.contains(&"AddTagsToResource"), "already tagged: {ops:?}");
+
+    // Back to plain with the untag refused: saved, with a warning, and it reads as plain.
+    h.with_ssm(|ssm| ssm.untag_denied = true);
+    let to_plain = h.put(&format!("/records/{id}"), save_body(2, one_password("so-isso"))).await;
+    assert_eq!(to_plain.status, 200, "{}", to_plain.body);
+    assert!(to_plain.body["warning"].as_str().unwrap().contains("keyhold:formato"), "{}", to_plain.body);
+    let opened = h.get(&format!("/records/{id}")).await;
+    assert_eq!(opened.body["record"]["payload"]["fields"][0]["value"], "so-isso");
+    assert_eq!(opened.body["record"]["payload"]["fields"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_move_that_cannot_delete_the_old_name_succeeds_with_both_copies_and_says_so() {
+    let h = start(account, None, None).await;
+    let id = h.id("/app/prod/db");
+    h.post(&format!("/records/{id}/favourite"), json!({ "on": true })).await;
+    h.with_ssm(|ssm| ssm.delete_denied.push("/app/prod/db".into()));
+
+    let moved = h.post(&format!("/records/{id}/move"), json!({ "folder_id": h.folder("/app/dev") })).await;
+    assert_eq!(moved.status, 200, "{}", moved.body);
+    assert_eq!(moved.body["moved"], true);
+    assert_eq!(moved.body["id"], h.id("/app/dev/db"));
+    assert_eq!(moved.body["history_lost"], true);
+    let warning = moved.body["warning"].as_str().unwrap();
+    assert!(warning.contains("duas cópias") && !warning.contains('—'), "{warning}");
+    assert!(h.parameter("/app/prod/db").is_some() && h.parameter("/app/dev/db").is_some());
+    assert_eq!(h.parameter("/app/dev/db").unwrap().description.as_deref(), Some("Banco de produção\nsó para o deploy"));
+
+    // Both copies show up right away (the caches were cleared), and the favourite went with the move.
+    let records = h.records().await;
+    let new = records.iter().find(|r| r["id"] == h.id("/app/dev/db")).unwrap();
+    let old = records.iter().find(|r| r["id"] == h.id("/app/prod/db")).unwrap();
+    assert_eq!(new["favourite"], true);
+    assert_eq!(old["favourite"], false);
+}
+
+#[tokio::test]
+async fn a_record_with_attachments_is_not_moved_and_its_files_go_when_it_is_deleted() {
+    let listing = "<ListBucketResult><IsTruncated>false</IsTruncated>\
+         <Contents><Key>app/prod/db/chave.pem</Key><Size>5</Size><LastModified>2026-01-01T00:00:00.000Z</LastModified></Contents>\
+         <Contents><Key>app/prod/db/sub/outro</Key><Size>1</Size><LastModified>2026-01-01T00:00:00.000Z</LastModified></Contents>\
+         </ListBucketResult>";
+    let s3 = FakeAws::start(vec![
+        Canned::xml(200, listing),
+        Canned::xml(200, listing),
+        Canned::empty(204),
+    ])
+    .await;
+    let h = start(account, Some("keyhold-producao".into()), Some(s3.base.clone())).await;
+    let id = h.id("/app/prod/db");
+
+    let moved = h.post(&format!("/records/{id}/move"), json!({ "folder_id": h.folder("/app/dev") })).await;
+    assert_eq!(moved.status, 409, "{}", moved.body);
+    assert!(moved.body["error"].as_str().unwrap().contains("anexo"), "{}", moved.body);
+    assert!(h.parameter("/app/prod/db").is_some() && h.parameter("/app/dev/db").is_none());
+
+    let deleted = h.post(&format!("/records/{id}/archive"), json!({ "on": true })).await;
+    assert_eq!(deleted.status, 200, "{}", deleted.body);
+    assert!(h.parameter("/app/prod/db").is_none());
+
+    let requests = s3.requests();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[2].method, "DELETE");
+    assert_eq!(requests[2].uri, "/keyhold-producao/app/prod/db/chave.pem", "only its own file, not a nested record's");
+}
+
+#[tokio::test]
+async fn a_record_whose_bucket_cannot_be_listed_is_not_deleted() {
+    let s3 = FakeAws::start(vec![Canned::xml(403, "<Error><Code>AccessDenied</Code><Message>no</Message></Error>")]).await;
+    let h = start(account, Some("keyhold-producao".into()), Some(s3.base.clone())).await;
+
+    let refused = h.post(&format!("/records/{}/archive", h.id("/app/prod/db")), json!({ "on": true })).await;
+    assert_eq!(refused.status, 403, "{}", refused.body);
+    let text = refused.body["error"].as_str().unwrap();
+    assert!(text.contains("não apaguei") && text.contains("keyhold-producao") && !text.contains('—'), "{text}");
+    assert!(h.parameter("/app/prod/db").is_some());
+
+    // Without a bucket there is nothing to leave behind, and the record goes as before.
+    let plain = start(account, None, None).await;
+    let gone = plain.post(&format!("/records/{}/archive", plain.id("/app/prod/db")), json!({ "on": true })).await;
+    assert_eq!(gone.status, 200);
+}
+
+#[tokio::test]
+async fn a_plain_text_parameter_is_flagged_and_never_overwritten() {
+    let h = start(
+        |ssm| {
+            account(ssm);
+            ssm.seed("/config/url", "https://exemplo", Some("URL"), "", &[]);
+            ssm.parameters.get_mut("/config/url").unwrap().kind = "String".into();
+        },
+        None,
+        None,
+    )
+    .await;
+    let id = h.id("/config/url");
+
+    let records = h.records().await;
+    let row = records.iter().find(|r| r["id"] == id).unwrap();
+    assert_eq!(row["plaintext"], true);
+    let db = records.iter().find(|r| r["id"] == h.id("/app/prod/db")).unwrap();
+    assert_eq!(db["plaintext"], false);
+
+    let opened = h.get(&format!("/records/{id}")).await;
+    assert_eq!(opened.body["record"]["plaintext"], true);
+
+    let refused = h.put(&format!("/records/{id}"), save_body(1, one_password("x"))).await;
+    assert_eq!(refused.status, 400, "{}", refused.body);
+    assert!(refused.body["error"].as_str().unwrap().contains("SecureString"));
+    let moved = h.post(&format!("/records/{id}/move"), json!({ "folder_id": h.folder("/app/dev") })).await;
+    assert_eq!(moved.status, 400);
+    assert_eq!(h.parameter("/config/url").unwrap().value, "https://exemplo");
+    assert!(h.with_ssm(|ssm| ssm.puts.is_empty()));
+}
+
+#[tokio::test]
+async fn an_id_of_one_kind_is_not_accepted_where_another_is_expected() {
+    let h = start(account, None, None).await;
+
+    // A folder id on a record route, and a record id on a folder route.
+    let folder_as_record = h.get(&format!("/records/{}", h.folder("/app/prod/db"))).await;
+    assert_eq!(folder_as_record.status, 404);
+    let record_as_folder = h.call("DELETE", &format!("/folders/{}", h.id("/app/dev")), None).await;
+    assert_eq!(record_as_folder.status, 404);
+
+    // An attachment id that is not one file directly under a record.
+    for key in ["/app/prod/db/x", "app/prod/db/../x", "app"] {
+        let bad = h.get(&format!("/attachments/{}", h.attachment(key))).await;
+        assert_eq!(bad.status, 404, "{key}");
+    }
+}
+
+#[tokio::test]
+async fn editing_or_archiving_a_vault_forgets_what_was_cached_for_it() {
+    let h = start(account, None, None).await;
+    h.records().await;
+    let cached = |h: &Harness| h.state.aws.with(&h.state.lock, |i| i.snapshots.contains_key(&h.vault)).unwrap();
+    assert!(cached(&h));
+
+    let edited = h
+        .put(
+            &format!("/vaults/{}", h.vault),
+            json!({ "name": "Produção", "kind": "aws", "aws": { "connection_id": "CONN", "region": "sa-east-1" } }),
+        )
+        .await;
+    assert_eq!(edited.status, 200, "{}", edited.body);
+    assert!(!cached(&h));
+
+    h.records().await;
+    let archived = h.post(&format!("/vaults/{}/archive", h.vault), json!({ "on": true })).await;
+    assert_eq!(archived.status, 200);
+    assert!(!cached(&h));
+}
+
+#[tokio::test]
+async fn an_auto_lock_with_nobody_asking_still_forgets_the_aws_session() {
+    let h = start(account, None, None).await;
+    h.records().await;
+    assert!(h.state.aws.held() > 0);
+
+    super::start_sweeper(&h.state, std::time::Duration::from_millis(20));
+    h.state.lock.lock();
+
+    for _ in 0..100 {
+        if h.state.aws.held() == 0 {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("the sweeper left {} things in memory after the lock", h.state.aws.held());
+}
+
+#[tokio::test]
+async fn removing_a_login_logs_it_out_of_identity_center() {
+    let sso = FakeAws::start(vec![Canned::empty(200)]).await;
+    let h = start(account, None, None).await;
+    h.state.aws.set_endpoints(Endpoints {
+        oidc: Some(sso.base.clone()),
+        portal: Some(sso.base.clone()),
+        ssm: None,
+        s3: None,
+    });
+
+    {
+        let store = h.state.store.lock().unwrap();
+        h.state
+            .lock
+            .with_key(|key| {
+                let mut config = config::load(&store, key).unwrap();
+                config.logins.push(Login {
+                    id: "SOLTO".into(),
+                    start_url: "https://solto.awsapps.com/start".into(),
+                    region: "us-east-1".into(),
+                    label: "Solto".into(),
+                });
+                config::save(&store, key, &config).unwrap();
+            })
+            .unwrap();
+    }
+    let registration = crate::aws::ClientRegistration::from_parts("c".into(), "s".into(), 4_000_000_000);
+    let token = crate::aws::SsoToken::from_parts("vivo".into(), None, 4_000_000_000, registration);
+    h.state.aws.with(&h.state.lock, |inner| inner.tokens.insert("SOLTO".into(), token));
+
+    let removed = h.call("DELETE", "/aws/logins/SOLTO", None).await;
+    assert_eq!(removed.status, 200, "{}", removed.body);
+
+    let requests = sso.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].uri, "/logout");
+    assert_eq!(requests[0].header("x-amz-sso_bearer_token"), Some("vivo"));
+    assert_eq!(h.state.aws.with(&h.state.lock, |i| i.tokens.len()), Some(0));
 }

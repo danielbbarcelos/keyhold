@@ -106,6 +106,28 @@ pub struct ParameterHistoryEntry {
     pub last_modified_user: Option<String>,
     #[serde(default)]
     pub labels: Vec<String>,
+    /// `Standard`, `Advanced` or `Intelligent-Tiering`, when AWS reports it.
+    #[serde(default)]
+    pub tier: Option<String>,
+}
+
+impl ParameterHistoryEntry {
+    /// The metadata this version carries, in the shape `DescribeParameters` would have given.
+    ///
+    /// The newest entry of a parameter's history has the same key, description and tier as the
+    /// parameter itself, so this is the fallback for a role that may read history but not describe.
+    pub fn metadata(&self) -> ParameterMetadata {
+        ParameterMetadata {
+            name: self.name.clone(),
+            kind: self.kind.clone(),
+            key_id: self.key_id.clone(),
+            description: self.description.clone(),
+            version: self.version,
+            last_modified: self.last_modified,
+            last_modified_user: self.last_modified_user.clone(),
+            tier: self.tier.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,9 +214,11 @@ impl SsmClient {
         })
     }
 
-    /// Send requests somewhere else: a VPC endpoint, a FIPS endpoint, or a fake server in tests.
-    /// The region is still the one signed.
-    pub fn with_endpoint(mut self, endpoint: &str) -> Self {
+    /// Send requests somewhere else. The region is still the one signed.
+    ///
+    /// Crate-private on purpose: only `AwsState` calls it, with an endpoint only the tests can set,
+    /// and outside the tests the HTTP client refuses anything that is not HTTPS.
+    pub(crate) fn with_endpoint(mut self, endpoint: &str) -> Self {
         self.endpoint = trim_endpoint(endpoint);
         self
     }
@@ -300,6 +324,49 @@ impl SsmClient {
         Err(too_many_pages())
     }
 
+    /// The metadata of exactly one parameter, or `None` when it does not exist.
+    ///
+    /// Filtered by `Name Equals`, not by its folder: a path filter only matches names that start
+    /// with `/`, so a parameter called `db-password` would never be found that way. AWS may answer
+    /// a filtered describe with empty pages and a `NextToken`, so the pages are followed.
+    pub async fn describe_parameter(&self, name: &str) -> AwsResult<Option<ParameterMetadata>> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Page {
+            #[serde(default)]
+            parameters: Vec<ParameterMetadata>,
+            #[serde(default)]
+            next_token: Option<String>,
+        }
+
+        let mut token: Option<String> = None;
+        for _ in 0..MAX_PAGES {
+            let mut body = json!({
+                "ParameterFilters": [{ "Key": "Name", "Option": "Equals", "Values": [name] }],
+                "MaxResults": PAGE_SIZE_HISTORY,
+            });
+            if let Some(token) = &token {
+                body["NextToken"] = json!(token);
+            }
+            let page: Page = self.call_json("DescribeParameters", &body).await?;
+            if let Some(found) = page.parameters.into_iter().find(|m| m.name == name) {
+                return Ok(Some(found));
+            }
+            match next_token(page.next_token, &token)? {
+                Some(next) => token = Some(next),
+                None => return Ok(None),
+            }
+        }
+        Err(too_many_pages())
+    }
+
+    /// The newest version of a parameter, **without** its value: what history knows of its key,
+    /// description and tier. For a role that may read history but not describe.
+    pub async fn latest_history(&self, name: &str) -> AwsResult<Option<ParameterHistoryEntry>> {
+        let entries = self.history(name, false).await?;
+        Ok(entries.into_iter().max_by_key(|e| e.version))
+    }
+
     /// Write a SecureString. Returns the new version number.
     pub async fn put_parameter(&self, input: &PutParameter) -> AwsResult<i64> {
         if input.overwrite && !input.tags.is_empty() {
@@ -336,6 +403,10 @@ impl SsmClient {
 
     /// Every version of a parameter, oldest first (AWS's order), decrypted.
     pub async fn get_parameter_history(&self, name: &str) -> AwsResult<Vec<ParameterHistoryEntry>> {
+        self.history(name, true).await
+    }
+
+    async fn history(&self, name: &str, decrypt: bool) -> AwsResult<Vec<ParameterHistoryEntry>> {
         #[derive(Deserialize)]
         #[serde(rename_all = "PascalCase")]
         struct Page {
@@ -350,7 +421,7 @@ impl SsmClient {
         for _ in 0..MAX_PAGES {
             let mut body = json!({
                 "Name": name,
-                "WithDecryption": true,
+                "WithDecryption": decrypt,
                 "MaxResults": PAGE_SIZE_HISTORY,
             });
             if let Some(token) = &token {
@@ -812,6 +883,49 @@ mod tests {
             client.get_parameters_by_path("/kh/", true).await,
             Err(AwsError::Other { code, .. }) if code == "PaginationLoop"
         ));
+    }
+
+    #[tokio::test]
+    async fn one_parameter_is_described_by_its_exact_name_across_empty_pages() {
+        let (client, fake) = client(vec![
+            Canned::json(200, json!({ "Parameters": [], "NextToken": "t" })),
+            Canned::json(
+                200,
+                json!({ "Parameters": [{
+                    "Name": "db-password", "Type": "SecureString", "KeyId": "alias/app",
+                    "Description": "Banco", "Version": 3, "Tier": "Advanced"
+                }] }),
+            ),
+        ])
+        .await;
+
+        let found = client.describe_parameter("db-password").await.unwrap().unwrap();
+        assert_eq!(found.key_id.as_deref(), Some("alias/app"));
+        assert_eq!(found.tier.as_deref(), Some("Advanced"));
+
+        let first = fake.requests()[0].json();
+        assert_eq!(
+            first["ParameterFilters"],
+            json!([{ "Key": "Name", "Option": "Equals", "Values": ["db-password"] }])
+        );
+    }
+
+    #[tokio::test]
+    async fn the_latest_history_entry_is_read_without_decrypting() {
+        let (client, fake) = client(vec![Canned::json(
+            200,
+            json!({ "Parameters": [
+                { "Name": "/a", "Type": "SecureString", "KeyId": "alias/old", "Version": 1 },
+                { "Name": "/a", "Type": "SecureString", "KeyId": "alias/new", "Version": 2,
+                  "Description": "A", "Tier": "Standard" }
+            ] }),
+        )])
+        .await;
+
+        let latest = client.latest_history("/a").await.unwrap().unwrap().metadata();
+        assert_eq!(latest.key_id.as_deref(), Some("alias/new"));
+        assert_eq!(latest.description.as_deref(), Some("A"));
+        assert_eq!(fake.requests()[0].json()["WithDecryption"], false);
     }
 
     #[test]

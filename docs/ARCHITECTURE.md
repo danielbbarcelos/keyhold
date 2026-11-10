@@ -59,7 +59,25 @@ src/http/
 **Same routes, same shapes.** `http/contents.rs` checks, before it touches the store, whether the
 vault is an AWS one or the id starts with `aws~`; if so the request goes to `http/aws.rs`, which
 answers with the same `FolderNode`, `RecordPreview`, `OpenRecord` and `Attachment` the local side
-uses. Ids carry their place: `aws~<vault id>~<base64url(parameter name, path or object key)>`.
+uses. Ids carry their place and their kind: `aws~<vault id>~<r|f|a>~<base64url(parameter name,
+path or object key)>`, and a route refuses an id of the wrong kind as "not found". An attachment
+id must be one file directly under a record's prefix (`<name without its leading slash>/`), and
+only names that start with `/` have a prefix, so `db` and `/db` can never share files.
+
+**Where a record's parts live.** The value (encrypted) holds the fields and the notes, either as
+the plain secret (one password, nothing else) or as Keyhold's JSON. The description holds the title
+alone, the path is the folder, and tags hold the marks: all three are readable by anyone allowed to
+describe the account, which is why notes are not among them.
+
+**What the AWS routes add to the shared shapes.** Records (list and open) carry `plaintext: true`
+for a `String`/`StringList` parameter, which Keyhold will not overwrite. A save or restore may
+answer `warning` (another version landed in between, or the format tag could not be removed). A
+restore takes `expected_version` in its body (or the `x-keyhold-expected-version` header), like a
+save. A move answers `history_lost: true`, and `warning` when the old name could not be deleted.
+
+**Fail closed on the key.** Every write that must name a KMS key (overwrite, move, attachment, and
+create, which inherits the folder's) reads it first (DescribeParameters by exact name, then the
+newest history entry, or the listing's metadata for inheritance) and refuses when it cannot.
 
 **The store's lock is never held across a request to AWS.** It is a `std::sync::Mutex`; every AWS
 function takes it, reads what it needs, lets go, and only then awaits the network.
@@ -67,7 +85,16 @@ function takes it, reads what it needs, lets go, and only then awaits the networ
 **Tied to the lock.** `Lock` keeps a generation that changes on every unlock and every lock
 (including the automatic one). `AwsState` remembers the generation its tokens were made in and
 drops everything when it no longer matches, so a lock forgets every AWS session and the person logs
-in again after unlocking.
+in again after unlocking. The generation is read under `AwsState`'s own mutex; requests that fetch
+tokens or credentials capture it when they start and store through `with_generation`, which refuses
+if a lock happened meanwhile. A background task (`http::start_aws_sweeper`, every five seconds)
+sweeps the state, so an auto-lock forgets everything without waiting for the next request, and
+stale cache entries are removed rather than skipped.
+
+**Clients.** The HTTP client ignores system proxies and, outside the tests, refuses non-HTTPS URLs;
+endpoint overrides are crate-private and only the tests set them. S3 requests carry a signed
+`x-amz-expected-bucket-owner` with the connection's account, and downloads are capped at the
+attachment limit before the body is read.
 
 **Errors that say what to do.** `AwsError` becomes `{ "error": "<frase>", "aws": "<kind>" }` with
 424 for an expired AWS session (401 stays reserved for Keyhold's own session token), 403, 404, 409,

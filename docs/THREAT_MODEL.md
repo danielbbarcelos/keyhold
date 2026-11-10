@@ -155,16 +155,49 @@ What that exception rests on, and what it does not claim:
   own. Anyone the account's policies allow can read them with the console or the CLI, and a
   compromise of that account is a compromise of that vault. Keyhold adds nothing on AWS's side and
   says so.
+- **Only the value is encrypted, and only the value holds secrets.** A record's title is written to
+  the parameter's description, its folders are the parameter's path, and its marks are
+  `keyhold:*` tags. None of that is encrypted: anyone allowed `ssm:DescribeParameters` or
+  `ssm:ListTagsForResource` on the account reads titles, folder paths and marks, and CloudTrail
+  records the description of every write. Notes are not metadata (people write PINs in them), so
+  they live inside the encrypted value: a record with notes is always stored as Keyhold's JSON.
+  Descriptions written before this rule (title, then notes) are still read, and the next save moves
+  the notes into the value.
 - **What the policy denies does not appear.** Content is listed only with `GetParametersByPath`,
   which respects a Deny. `DescribeParameters` is used only for the description and KMS key of
   parameters that were already returned.
+- **The protection a secret has is never downgraded by a guess.** Overwriting a parameter, moving
+  it, creating one in a folder (which inherits the folder's key) and attaching a file all need the
+  KMS key the parameter or folder already uses. It is read by exact name from
+  `DescribeParameters`, falling back to the newest `GetParameterHistory` entry; when neither can be
+  read the write is refused with a sentence saying which permission is missing, never sent without
+  a key (which would move the secret to `alias/aws/ssm`, or its attachment to `aws/s3`).
+  `String` and `StringList` parameters are shown with `plaintext: true` and never overwritten:
+  Keyhold writes only SecureString, and changing the type could break whatever reads them.
+- **Writes say what happened, including half of it.** Parameter Store has no conditional write, so
+  the version check (A12) is a read right before the put, with everything slow read earlier; a
+  version that lands in between is reported as a `warning`, not hidden. A move (a put and a
+  delete) answers `history_lost: true`, is refused while the record has attachments (they would be
+  orphaned under the old name), and when the old name cannot be deleted it answers success with a
+  warning that both copies exist. Deleting a record deletes its attachments first, and is refused if
+  the bucket cannot be listed.
+- **The bucket must be the account's own.** Every S3 request carries a signed
+  `x-amz-expected-bucket-owner` with the connection's account id, so a bucket name taken over by
+  another account after the original was deleted is answered with a 403, not with our files.
+  Downloads are refused past the attachment limit from `Content-Length`, before the body is read.
 - **Credentials are short and stay in memory.** Sign-in is IAM Identity Center's device flow.
-  Tokens and role credentials are never written to disk and are dropped when the vault locks; the
-  logins and connections that are remembered are sealed under the master key like everything else.
+  Tokens and role credentials are never written to disk and are dropped when the vault locks,
+  including the auto-lock: a background sweep checks every few seconds, so nobody has to click for
+  them to go. A login or refresh that completes after a lock is discarded, not stored for the next
+  unlock. Removing a login logs it out of Identity Center first. The logins and connections that
+  are remembered are sealed under the master key like everything else.
 - **No local copy.** Values read from AWS are not written to the vault file. Two caches of a few
-  seconds live in memory while the vault is open, and are dropped on lock.
+  seconds live in memory while the vault is open; stale entries are removed (not just skipped),
+  editing, archiving or deleting a vault clears its entries, and everything is dropped on lock.
 - **Signed requests go only to AWS's own endpoints** for the configured regions, over rustls with
-  compiled-in roots and with redirects off, so a signed request is never replayed to another host.
+  compiled-in roots, with redirects off (a signed request is never replayed to another host), with
+  any system proxy ignored, and HTTPS only: the endpoint overrides the tests use do not exist in a
+  release build.
 - **The agent surface does not reach AWS vaults** yet: an assistant sees only local vaults.
 
 ## What Keyhold does not defend against

@@ -22,7 +22,8 @@
 use super::error::{classify, AwsError, AwsResult};
 use super::sigv4::{self, Credentials, SigningInput};
 use super::{
-    host_header, http_client, now_unix, send, trim_endpoint, validate_region, Response, SecretBytes,
+    host_header, http_client, now_unix, send, send_capped, trim_endpoint, validate_region, Response,
+    SecretBytes,
 };
 
 const EXPIRY_MARGIN_SECONDS: u64 = 30;
@@ -66,6 +67,8 @@ pub struct S3Client {
     /// When set, every request goes path-style to this endpoint instead of to AWS.
     endpoint: Option<String>,
     credentials: Credentials,
+    /// The account the bucket must belong to, sent as `x-amz-expected-bucket-owner`.
+    expected_owner: Option<String>,
 }
 
 impl std::fmt::Debug for S3Client {
@@ -74,6 +77,7 @@ impl std::fmt::Debug for S3Client {
             .field("region", &self.region)
             .field("endpoint", &self.endpoint)
             .field("credentials", &self.credentials)
+            .field("expected_owner", &self.expected_owner)
             .finish()
     }
 }
@@ -86,12 +90,27 @@ impl S3Client {
             region: region.to_string(),
             endpoint: None,
             credentials,
+            expected_owner: None,
         })
     }
 
-    /// Send every request path-style to `endpoint` instead (tests, S3-compatible stores).
-    pub fn with_endpoint(mut self, endpoint: &str) -> Self {
+    /// Send every request path-style to `endpoint` instead.
+    ///
+    /// Crate-private on purpose: only `AwsState` calls it, with an endpoint only the tests can set,
+    /// and outside the tests the HTTP client refuses anything that is not HTTPS.
+    pub(crate) fn with_endpoint(mut self, endpoint: &str) -> Self {
         self.endpoint = Some(trim_endpoint(endpoint));
+        self
+    }
+
+    /// Refuse to talk to a bucket that is not owned by `account_id`.
+    ///
+    /// Bucket names are global. If the vault's bucket is ever deleted and somebody else creates
+    /// one with the same name, every attachment written afterwards would land in *their* account,
+    /// encrypted with a key they choose to honour. With this header (signed, like every other)
+    /// S3 answers 403 instead of serving or accepting anything from a bucket of another account.
+    pub fn with_expected_owner(mut self, account_id: &str) -> Self {
+        self.expected_owner = Some(account_id.to_string());
         self
     }
 
@@ -138,9 +157,11 @@ impl S3Client {
         })
     }
 
-    pub async fn get_object(&self, bucket: &str, key: &str) -> AwsResult<S3Object> {
+    /// Read an object whole, refusing one larger than `max_bytes` before its body is read
+    /// ([`AwsError::TooLarge`]).
+    pub async fn get_object(&self, bucket: &str, key: &str, max_bytes: u64) -> AwsResult<S3Object> {
         let mut response = self
-            .request("GET", bucket, Some(key), &[], &[], Vec::new())
+            .request_capped("GET", bucket, Some(key), &[], &[], Vec::new(), Some(max_bytes))
             .await?;
         self.check(&response)?;
         let header = |name: &str| response.header(name).map(str::to_string);
@@ -254,6 +275,21 @@ impl S3Client {
         headers: &[(&str, &str)],
         body: Vec<u8>,
     ) -> AwsResult<Response> {
+        self.request_capped(method, bucket, key, query, headers, body, None).await
+    }
+
+    /// [`S3Client::request`], reading at most `cap` bytes of a successful body.
+    #[allow(clippy::too_many_arguments)]
+    async fn request_capped(
+        &self,
+        method: &str,
+        bucket: &str,
+        key: Option<&str>,
+        query: &[(&str, &str)],
+        headers: &[(&str, &str)],
+        body: Vec<u8>,
+        cap: Option<u64>,
+    ) -> AwsResult<Response> {
         validate_bucket(bucket)?;
         if let Some(key) = key {
             validate_key(key)?;
@@ -269,6 +305,10 @@ impl S3Client {
         let payload_hash = sigv4::sha256_hex(&body);
         let mut all_headers: Vec<(&str, &str)> = headers.to_vec();
         all_headers.push(("x-amz-content-sha256", &payload_hash));
+        // Signed with the rest, so it cannot be stripped on the way without breaking the request.
+        if let Some(owner) = self.expected_owner.as_deref() {
+            all_headers.push(("x-amz-expected-bucket-owner", owner));
+        }
 
         let probe = reqwest::Url::parse(&format!("{origin}{path}"))
             .map_err(|e| AwsError::Invalid(format!("bad S3 endpoint: {e}")))?;
@@ -304,7 +344,10 @@ impl S3Client {
         for (name, value) in &signed.headers {
             request = request.header(name.as_str(), value.as_str());
         }
-        send(request).await
+        match cap {
+            Some(limit) => send_capped(request, limit).await,
+            None => send(request).await,
+        }
     }
 
     /// The origin (`scheme://host[:port]`) and the wire path for a bucket and optional key.
@@ -535,7 +578,7 @@ mod tests {
         }])
         .await;
 
-        let object = client.get_object("vault-bucket", "k").await.unwrap();
+        let object = client.get_object("vault-bucket", "k", 1024).await.unwrap();
         assert_eq!(object.body.expose(), b"hello");
         assert_eq!(object.etag.as_deref(), Some("\"e\""));
         assert_eq!(object.content_type.as_deref(), Some("text/plain"));
@@ -614,7 +657,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            client.get_object("vault-bucket", "k").await.unwrap_err(),
+            client.get_object("vault-bucket", "k", 1024).await.unwrap_err(),
             AwsError::AccessDenied("Access Denied".into())
         );
         assert!(matches!(
@@ -668,14 +711,64 @@ mod tests {
             Err(AwsError::Invalid(_))
         ));
         assert!(matches!(
-            client.get_object("vault-bucket", "a/../b").await,
+            client.get_object("vault-bucket", "a/../b", 1024).await,
             Err(AwsError::Invalid(_))
         ));
         assert!(matches!(
-            client.get_object("vault-bucket", "").await,
+            client.get_object("vault-bucket", "", 1024).await,
             Err(AwsError::Invalid(_))
         ));
         assert!(fake.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn every_request_names_the_account_that_must_own_the_bucket_and_signs_it() {
+        let list = "<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>";
+        let fake = FakeAws::start(vec![
+            Canned::empty(200),
+            Canned::empty(200),
+            Canned::empty(200),
+            Canned::empty(204),
+            Canned::xml(200, list),
+        ])
+        .await;
+        let client = S3Client::new("sa-east-1", credentials())
+            .unwrap()
+            .with_endpoint(&fake.base)
+            .with_expected_owner("123456789012");
+
+        client.head_bucket("vault-bucket").await.unwrap();
+        client.put_object("vault-bucket", "k", b"x", None, None).await.unwrap();
+        client.get_object("vault-bucket", "k", 10).await.unwrap();
+        client.delete_object("vault-bucket", "k").await.unwrap();
+        client.list_objects_v2("vault-bucket", "p/").await.unwrap();
+
+        let requests = fake.requests();
+        assert_eq!(requests.len(), 5);
+        for request in &requests {
+            assert_eq!(request.header("x-amz-expected-bucket-owner"), Some("123456789012"));
+            let authorization = request.header("authorization").unwrap();
+            assert!(
+                authorization.contains("x-amz-expected-bucket-owner"),
+                "the owner is signed: {authorization}"
+            );
+            assert_signature_verifies(request, &credentials(), "sa-east-1", "s3");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_object_past_the_limit_is_refused_before_its_body_is_kept() {
+        let (client, _fake) = client(vec![
+            Canned { status: 200, headers: vec![], body: vec![7u8; 64] },
+            Canned { status: 200, headers: vec![], body: vec![7u8; 8] },
+        ])
+        .await;
+
+        assert_eq!(
+            client.get_object("vault-bucket", "k", 16).await.unwrap_err(),
+            AwsError::TooLarge { size: 64, limit: 16 }
+        );
+        assert_eq!(client.get_object("vault-bucket", "k", 16).await.unwrap().body.len(), 8);
     }
 
     #[test]
