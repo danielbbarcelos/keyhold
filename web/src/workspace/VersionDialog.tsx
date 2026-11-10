@@ -12,7 +12,7 @@ import {
 import { Button } from '@/components/ui/button'
 
 import { api, ApiError, type Payload } from '../api'
-import { SecretLine } from './SecretLine'
+import { FieldRow } from './record/FieldRow'
 
 /**
  * Reading an old version before deciding to restore it.
@@ -57,19 +57,14 @@ export function VersionDialog({ recordId, version, onRestore, onCancel }: Versio
         {error && <p className="text-sm text-destructive">{error}</p>}
 
         {payload && (
-          <div className="rounded-lg border px-4">
-            <SecretLine label="Título" value={payload.title} masked={false} />
-            {payload.username && (
-              <SecretLine label="Usuário" value={payload.username} masked={false} />
-            )}
+          <div className="overflow-hidden rounded-xl border bg-raised">
+            <div className="border-b px-5 py-3 text-sm font-semibold">{payload.title}</div>
             {payload.fields.map((field, index) => (
-              <SecretLine
-                key={index}
-                label={field.label || 'Sem rótulo'}
-                value={field.value}
-                masked={field.kind === 'password' || field.kind === 'hidden'}
-              />
+              <FieldRow key={index} field={field} index={index} />
             ))}
+            {payload.fields.length === 0 && (
+              <p className="px-5 py-3 text-sm text-faint">Esta versão não tinha campos.</p>
+            )}
           </div>
         )}
 

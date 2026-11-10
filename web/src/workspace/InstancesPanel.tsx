@@ -43,7 +43,7 @@ const ROLES: Record<
     label: 'Ponte do assistente',
     what: 'Traduz os pedidos de um assistente local. Não guarda chave nenhuma.',
     icon: Bot,
-    cost: 'O assistente perde a ponte até abrir outra — nada do cofre se perde.',
+    cost: 'O assistente perde a ponte até abrir outra. Nada do cofre se perde.',
   },
   command: {
     label: 'Comando com um segredo',
@@ -53,7 +53,7 @@ const ROLES: Record<
   },
   other: {
     label: 'Processo do Keyhold',
-    what: 'Um processo que esta versão não reconhece — provavelmente de uma build anterior.',
+    what: 'Um processo que esta versão não reconhece, provavelmente de uma build anterior.',
     icon: Square,
     cost: 'Ele é encerrado. O que estiver fazendo para no meio.',
   },
@@ -107,12 +107,15 @@ export function InstancesPanel() {
   }
 
   return (
-    <div className="space-y-3 p-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <p className="flex-1 text-sm text-muted-foreground">
-          Um cofre, um processo. Abrir o Keyhold com outro já rodando pergunta antes de encerrá-lo —
-          esta lista é para o que escapa disso, como um processo deixado por uma versão anterior.
-        </p>
+    <div className="overflow-hidden rounded-[14px] border bg-card">
+      <div className="flex flex-wrap items-center gap-3 border-b px-5 py-4">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-[15px] font-semibold">Processos do Keyhold nesta máquina</h3>
+          <p className="mt-0.5 text-[13px] text-muted-foreground">
+            Um cofre, um processo. Abrir o Keyhold com outro já rodando pergunta antes de encerrá-lo. Esta
+            lista é para o que escapa disso, como um processo deixado por uma versão anterior.
+          </p>
+        </div>
 
         {others.length > 1 && (
           <Button
@@ -126,12 +129,12 @@ export function InstancesPanel() {
         )}
       </div>
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="px-5 pt-3 text-sm text-destructive">{error}</p>}
 
       {processes === null ? (
         <p className="py-8 text-center text-sm text-muted-foreground">Procurando…</p>
       ) : (
-        <ul className="space-y-1">
+        <ul className="divide-y">
           {processes.map((one) => {
             const role = ROLES[one.role]
             const Icon = role.icon
@@ -140,8 +143,8 @@ export function InstancesPanel() {
               <li
                 key={one.pid}
                 className={cn(
-                  'flex items-start gap-3 rounded-lg border p-3',
-                  one.is_this_one && 'border-primary/40 bg-primary/5',
+                  'flex items-start gap-3 px-5 py-4',
+                  one.is_this_one && 'bg-primary-soft/40',
                 )}
               >
                 <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
@@ -159,8 +162,8 @@ export function InstancesPanel() {
                   <p className="text-sm text-muted-foreground">{role.what}</p>
 
                   <p className="text-xs text-muted-foreground tabular-nums">
-                    PID {one.pid} · há {howLong(one.running_for)}
-                    {one.is_this_one && ` · versão ${version}`}
+                    PID {one.pid}, há {howLong(one.running_for)}
+                    {one.is_this_one && `, versão ${version}`}
                   </p>
                 </div>
 
@@ -200,7 +203,7 @@ export function InstancesPanel() {
                       {confirming.others.map((one) => (
                         <li key={one.pid}>
                           <span className="text-foreground">{ROLES[one.role].label}</span> · PID{' '}
-                          {one.pid} — {ROLES[one.role].cost}
+                          {one.pid}: {ROLES[one.role].cost}
                         </li>
                       ))}
                     </ul>

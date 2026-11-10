@@ -196,26 +196,62 @@ export interface RecordHeader {
   rotation_due_at: string | null
   compromised_at: string | null
   archived: boolean
+  archived_at: string | null
   created_at: string
   updated_at: string
 }
 
+/** The fifteen kinds of field. See `fields.ts` for how each is drawn. */
+export type FieldKind =
+  | 'text'
+  | 'multiline'
+  | 'multiline_hidden'
+  | 'hidden'
+  | 'password'
+  | 'pin'
+  | 'totp'
+  | 'email'
+  | 'name'
+  | 'phone'
+  | 'url'
+  | 'address'
+  | 'date'
+  | 'security_question'
+  | 'card'
+
 export interface Field {
   label: string
-  kind: 'password' | 'text' | 'hidden' | 'url' | 'date'
+  kind: FieldKind
   value: string
+  /** The other parts of a composite field: `question`; `holder`, `expiry`, `code`, `pin`. */
+  extra?: Record<string, string>
+  /** Shown under the title in lists. */
+  list?: boolean
+  /** Copied by the record's main button. */
+  primary?: boolean
+}
+
+/** A lucide icon in one of the interface's colours, or a picture of the person's own. */
+export interface RecordIcon {
+  name: string
+  colour: string
+  image?: string
 }
 
 export interface Payload {
   title: string
-  username: string
-  url: string
   notes: string
   fields: Field[]
+  icon?: RecordIcon | null
 }
 
 /** A row in the list: named, and carrying nothing secret. */
-export type RecordPreview = RecordHeader & { title: string; username: string; url: string }
+export type RecordPreview = RecordHeader & {
+  title: string
+  subtitle: string
+  url: string
+  icon: RecordIcon | null
+}
 
 export interface AttachmentInfo {
   id: string
@@ -311,12 +347,15 @@ export const api = {
       `/api/vaults/${vaultId}/records?archived=${archived}`,
     ),
 
-  createRecord: (vaultId: string, kind: string, folderId: string | null, payload: Payload) =>
+  createRecord: (vaultId: string, folderId: string | null, payload: Payload) =>
     call<{ record: RecordHeader }>('POST', `/api/vaults/${vaultId}/records`, {
-      kind,
       folder_id: folderId,
       payload,
     }),
+
+  /** The code a 2FA field gives right now; the secret itself never needs to be shown. */
+  totpCode: (recordId: string, index: number) =>
+    call<{ code: string; remaining: number }>('GET', `/api/records/${recordId}/totp/${index}`),
 
   openRecord: (id: string) => call<{ record: OpenRecord }>('GET', `/api/records/${id}`),
 

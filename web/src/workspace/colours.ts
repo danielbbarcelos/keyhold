@@ -14,15 +14,17 @@ export interface Colour {
   label: string
   dot: string
   text: string
+  /** A soft square with the colour on it: a vault's initial, a folder's icon. */
+  tile: string
 }
 
 export const COLOURS: Colour[] = [
-  { value: 'default', label: 'Padrão', dot: 'bg-muted-foreground', text: 'text-muted-foreground' },
-  { value: 'blue', label: 'Azul', dot: 'bg-sky-500', text: 'text-sky-500' },
-  { value: 'green', label: 'Verde', dot: 'bg-emerald-500', text: 'text-emerald-500' },
-  { value: 'amber', label: 'Âmbar', dot: 'bg-amber-500', text: 'text-amber-500' },
-  { value: 'red', label: 'Vermelho', dot: 'bg-rose-500', text: 'text-rose-500' },
-  { value: 'violet', label: 'Violeta', dot: 'bg-violet-500', text: 'text-violet-500' },
+  { value: 'default', label: 'Padrão', dot: 'bg-stone', text: 'text-muted-foreground', tile: 'bg-stone-soft text-muted-foreground' },
+  { value: 'blue', label: 'Azul', dot: 'bg-sky', text: 'text-sky', tile: 'bg-sky-soft text-sky' },
+  { value: 'green', label: 'Verde', dot: 'bg-mint', text: 'text-mint', tile: 'bg-mint-soft text-mint' },
+  { value: 'amber', label: 'Âmbar', dot: 'bg-amber', text: 'text-amber', tile: 'bg-amber-soft text-amber' },
+  { value: 'red', label: 'Vermelho', dot: 'bg-rose', text: 'text-rose', tile: 'bg-rose-soft text-rose' },
+  { value: 'violet', label: 'Violeta', dot: 'bg-lilac', text: 'text-lilac', tile: 'bg-lilac-soft text-lilac' },
 ]
 
 /** Anything unknown — including the `brand` written by earlier versions — reads as the default. */

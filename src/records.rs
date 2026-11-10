@@ -243,6 +243,8 @@ pub struct RecordHeader {
     pub rotation_due_at: Option<String>,
     pub compromised_at: Option<String>,
     pub archived: bool,
+    /// When it went to the trash, so the interface can say when it will be gone.
+    pub archived_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -790,6 +792,7 @@ fn row_to_header(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecordHeader> {
         rotation_due_at: row.get(6)?,
         compromised_at: row.get(7)?,
         archived: row.get::<_, Option<String>>(8)?.is_some(),
+        archived_at: row.get(8)?,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
     })

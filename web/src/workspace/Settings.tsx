@@ -82,6 +82,8 @@ interface SettingsProps {
   vaults: VaultSummary[]
   onChanged: () => void
   onVaultsChanged: () => void
+  /** Tells the top bar which section is being read. */
+  onSection?: (label: string) => void
 }
 
 const SECTIONS: Array<{ id: string; label: string; icon: LucideIcon }> = [
@@ -102,12 +104,16 @@ const SECTIONS: Array<{ id: string; label: string; icon: LucideIcon }> = [
  * a page of settings reads as one document with dividers, not a stack of boxes.
  */
 const FLAT =
-  'divide-y [&_[data-slot=card]]:gap-3 [&_[data-slot=card]]:rounded-none [&_[data-slot=card]]:bg-transparent [&_[data-slot=card]]:py-8 [&_[data-slot=card]]:shadow-none [&_[data-slot=card]]:ring-0 ' +
-  '[&_[data-slot=card-header]]:px-0 [&_[data-slot=card-content]]:px-0 [&_[data-slot=card-footer]]:border-0 [&_[data-slot=card-footer]]:bg-transparent [&_[data-slot=card-footer]]:px-0 [&_[data-slot=card-footer]]:pt-2 ' +
-  '[&_[data-slot=card-title]]:text-xl [&_[data-slot=card-title]]:font-bold [&_[data-slot=card-title]]:tracking-tight [&_[data-slot=card-title]>svg]:hidden [&_[data-slot=card-description]]:max-w-2xl'
+  '[&_[data-slot=card]]:gap-4 [&_[data-slot=card]]:rounded-[14px] [&_[data-slot=card]]:border [&_[data-slot=card]]:bg-card [&_[data-slot=card]]:py-5 [&_[data-slot=card]]:shadow-none [&_[data-slot=card]]:ring-0 ' +
+  '[&_[data-slot=card-header]]:px-5 [&_[data-slot=card-content]]:px-5 [&_[data-slot=card-footer]]:border-0 [&_[data-slot=card-footer]]:bg-transparent [&_[data-slot=card-footer]]:px-5 [&_[data-slot=card-footer]]:pt-1 ' +
+  '[&_[data-slot=card-title]]:text-[15px] [&_[data-slot=card-title]]:font-semibold [&_[data-slot=card-title]>svg]:hidden [&_[data-slot=card-description]]:max-w-2xl [&_[data-slot=card-description]]:text-[13px]'
 
-export function Settings({ status, vaults, onChanged, onVaultsChanged }: SettingsProps) {
+export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection }: SettingsProps) {
   const [active, setActive] = useState(SECTIONS[0].id)
+
+  useEffect(() => {
+    onSection?.(SECTIONS.find((one) => one.id === active)?.label ?? '')
+  }, [active, onSection])
   const page = useRef<HTMLDivElement>(null)
 
   // Light up the section being read. The one nearest the top of the page wins.
@@ -150,8 +156,8 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged }: Setting
   }
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[15rem_minmax(0,1fr)]">
-      <nav aria-label="Seções dos ajustes" className="space-y-0.5 border-r px-3 py-5">
+    <div className="grid min-h-0 flex-1 grid-cols-[232px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6 max-xl:grid-cols-[200px_minmax(0,1fr)]">
+      <nav aria-label="Seções dos ajustes" className="h-fit space-y-0.5 rounded-[14px] border bg-card p-2.5">
         {SECTIONS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -159,25 +165,24 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged }: Setting
             aria-current={active === id}
             onClick={() => {
               setActive(id)
-              document.getElementById(`ajuste-${id}`)?.scrollIntoView({ block: 'start' })
+              document.getElementById(`ajuste-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
             }}
             className={cn(
-              'flex h-9 w-full items-center gap-3 rounded-lg px-3 text-left text-sm whitespace-nowrap transition-colors',
-              active === id
-                ? 'bg-sidebar-accent font-semibold text-sidebar-accent-foreground'
-                : 'hover:bg-hover',
+              'relative flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm whitespace-nowrap text-muted-foreground transition-colors hover:bg-hover hover:text-foreground',
+              active === id &&
+                'bg-raised text-foreground ring-1 ring-border before:absolute before:top-2 before:bottom-2 before:-left-2.5 before:w-[3px] before:rounded-r before:bg-primary',
             )}
           >
-            <Icon className={cn('size-[18px]', active !== id && 'text-muted-foreground')} />
+            <Icon className="size-4" />
             {label}
           </button>
         ))}
       </nav>
 
       <div ref={page} className="min-h-0 overflow-y-auto">
-        <div className={cn('max-w-3xl px-10 pb-24', FLAT)}>
+        <div className={cn('space-y-5 pb-24', FLAT)}>
           {SECTIONS.map(({ id }) => (
-            <section key={id} id={`ajuste-${id}`} className="scroll-mt-2">
+            <section key={id} id={`ajuste-${id}`} className="scroll-mt-0">
               {sections[id]}
             </section>
           ))}
@@ -188,15 +193,15 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged }: Setting
 }
 
 const THEMES: Array<{ value: Theme; label: string; rail: string; side: string; page: string; ink: string }> = [
-  { value: 'grafite', label: 'Grafite', rail: '#121316', side: '#17181b', page: '#1b1d21', ink: '#d6d7d9' },
-  { value: 'claro', label: 'Claro', rail: '#e9eaed', side: '#f5f6f7', page: '#ffffff', ink: '#1e1f22' },
+  { value: 'grafite', label: 'Grafite', rail: '#18191c', side: '#1e1f23', page: '#24252a', ink: '#e6e6e9' },
+  { value: 'claro', label: 'Claro', rail: '#ebebee', side: '#f3f3f5', page: '#ffffff', ink: '#1f2024' },
 ]
 
 const ACCENTS: Array<{ value: Accent; label: string; colour: string }> = [
-  { value: 'ambar', label: 'Âmbar', colour: '#f0b429' },
-  { value: 'oceano', label: 'Oceano', colour: '#3b8fe0' },
-  { value: 'floresta', label: 'Floresta', colour: '#2e9e6a' },
-  { value: 'coral', label: 'Coral', colour: '#e8604e' },
+  { value: 'ambar', label: 'Âmbar', colour: '#e8b04b' },
+  { value: 'oceano', label: 'Oceano', colour: '#86aee0' },
+  { value: 'floresta', label: 'Floresta', colour: '#62be97' },
+  { value: 'coral', label: 'Coral', colour: '#e2788b' },
 ]
 
 /**
@@ -843,7 +848,7 @@ function DesktopKnock() {
         Avisar na área de trabalho
         <span className="mt-1 block text-sm text-muted-foreground">
           {state === 'granted'
-            ? 'Um pedido aparece como notificação do sistema, com o processo e o campo — nunca com o valor.'
+            ? 'Um pedido aparece como notificação do sistema, com o processo e o campo, nunca com o valor.'
             : state === 'denied'
               ? 'O navegador está bloqueando as notificações deste endereço. Libere nas permissões do site para voltar a receber.'
               : 'Um pedido expira em 90 segundos. Sem isto, ele só aparece se esta janela estiver à vista.'}
@@ -952,7 +957,7 @@ function StandingGrants({ onChanged }: { onChanged: () => void }) {
 
 function untilWhen(grant: AgentGrant): string {
   if (grant.scope.kind === 'always') {
-    return 'Sem prazo — só acaba quando você revogar'
+    return 'Sem prazo, só acaba quando você revogar'
   }
 
   if (grant.scope.kind === 'while-running') {

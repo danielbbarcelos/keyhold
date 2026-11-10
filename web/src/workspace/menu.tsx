@@ -1,4 +1,5 @@
-import { MoreHorizontal } from 'lucide-react'
+import { Check, MoreHorizontal } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -42,9 +43,16 @@ export interface SubEntry {
 }
 
 export type MenuEntry =
-  | { kind: 'item'; label: string; destructive?: boolean; onSelect: () => void }
+  | {
+      kind: 'item'
+      label: string
+      icon?: LucideIcon
+      checked?: boolean
+      destructive?: boolean
+      onSelect: () => void
+    }
   | { kind: 'separator' }
-  | { kind: 'sub'; label: string; items: SubEntry[] }
+  | { kind: 'sub'; label: string; icon?: LucideIcon; items: SubEntry[] }
 
 function Swatch({ colour }: { colour?: string }) {
   if (!colour) {
@@ -62,7 +70,10 @@ function asDropdown(entry: MenuEntry, at: number) {
   if (entry.kind === 'sub') {
     return (
       <DropdownMenuSub key={at}>
-        <DropdownMenuSubTrigger>{entry.label}</DropdownMenuSubTrigger>
+        <DropdownMenuSubTrigger>
+          {entry.icon && <entry.icon />}
+          {entry.label}
+        </DropdownMenuSubTrigger>
         <DropdownMenuSubContent>
           {entry.items.map((item, index) => (
             <DropdownMenuItem key={index} onSelect={item.onSelect}>
@@ -81,7 +92,9 @@ function asDropdown(entry: MenuEntry, at: number) {
       variant={entry.destructive ? 'destructive' : 'default'}
       onSelect={entry.onSelect}
     >
+      {entry.icon && <entry.icon />}
       {entry.label}
+      {entry.checked && <Check className="ml-auto" />}
     </DropdownMenuItem>
   )
 }
@@ -94,7 +107,10 @@ function asContext(entry: MenuEntry, at: number) {
   if (entry.kind === 'sub') {
     return (
       <ContextMenuSub key={at}>
-        <ContextMenuSubTrigger>{entry.label}</ContextMenuSubTrigger>
+        <ContextMenuSubTrigger>
+          {entry.icon && <entry.icon />}
+          {entry.label}
+        </ContextMenuSubTrigger>
         <ContextMenuSubContent>
           {entry.items.map((item, index) => (
             <ContextMenuItem key={index} onSelect={item.onSelect}>
@@ -113,22 +129,36 @@ function asContext(entry: MenuEntry, at: number) {
       variant={entry.destructive ? 'destructive' : 'default'}
       onSelect={entry.onSelect}
     >
+      {entry.icon && <entry.icon />}
       {entry.label}
+      {entry.checked && <Check className="ml-auto" />}
     </ContextMenuItem>
   )
 }
 
 /** The `⋯` button, for finding out that a row has actions at all. */
-export function MenuButton({ entries, label }: { entries: MenuEntry[]; label: string }) {
+export function MenuButton({
+  entries,
+  label,
+  size = 'icon-xs',
+  variant = 'ghost',
+  align = 'start',
+}: {
+  entries: MenuEntry[]
+  label: string
+  size?: 'icon-xs' | 'icon' | 'icon-lg'
+  variant?: 'ghost' | 'outline'
+  align?: 'start' | 'end'
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-xs" aria-label={label}>
+        <Button variant={variant} size={size} aria-label={label}>
           <MoreHorizontal />
         </Button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="start" className="w-52">
+      <DropdownMenuContent align={align} className="w-60">
         {entries.map(asDropdown)}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -151,7 +181,7 @@ export function RowMenu({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent className="w-52">{entries.map(asContext)}</ContextMenuContent>
+      <ContextMenuContent className="w-60">{entries.map(asContext)}</ContextMenuContent>
     </ContextMenu>
   )
 }

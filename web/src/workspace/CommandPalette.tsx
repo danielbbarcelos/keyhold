@@ -7,57 +7,57 @@ import {
   CommandList,
 } from '@/components/ui/command'
 
-import type { RecordPreview } from '../api'
-import { kindIcon } from './kinds'
+import type { RecordPreview, VaultSummary } from '../api'
+import { RecordTile } from './icons'
 
 /**
- * Ctrl+P: go to a record by name.
+ * Ctrl+P: go to a record by name, in any vault.
  *
- * It searches the titles the list already has — which, since the list opens each record's name, is
- * every record in the open vault. Field values are deliberately not searched: matching on a secret
- * would mean an interface that tells you a password by accepting a guess at it.
+ * It searches what the lists already show (title, the line under it, the address), never field
+ * values: matching on a secret would mean an interface that tells you a password by accepting a
+ * guess at it.
  *
  * The `<Command>` inside `<CommandDialog>` is not redundant: this version of the dialog places its
  * children straight into the dialog's content, so the list and the input would otherwise render
- * outside the context that holds their shared state — which fails at runtime rather than visibly.
+ * outside the context that holds their shared state.
  */
 interface CommandPaletteProps {
   records: RecordPreview[]
+  vaults: VaultSummary[]
   open: boolean
   onOpenChange: (open: boolean) => void
-  onPick: (id: string) => void
+  onPick: (record: RecordPreview) => void
 }
 
-export function CommandPalette({ records, open, onOpenChange, onPick }: CommandPaletteProps) {
+export function CommandPalette({ records, vaults, open, onOpenChange, onPick }: CommandPaletteProps) {
+  const vaultName = (id: string) => vaults.find((vault) => vault.id === id)?.name ?? ''
+
   return (
     <CommandDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Ir para um registro"
-      description="Busca pelo título e pelo usuário dos registros deste cofre."
+      title="Buscar em todos os registros"
+      description="Busca pelo título, pela linha de identificação e pelo endereço."
     >
       <Command>
-        <CommandInput placeholder="Ir para um registro…" />
+        <CommandInput placeholder="Buscar em todos os registros…" />
         <CommandList>
           <CommandEmpty>Nada encontrado.</CommandEmpty>
 
-          {records.map((record) => {
-            const Icon = kindIcon(record.kind)
-
-            return (
-              <CommandItem
-                key={record.id}
-                value={`${record.title} ${record.username}`}
-                onSelect={() => onPick(record.id)}
-              >
-                <Icon />
-                <span>{record.title}</span>
-                {record.username && (
-                  <span className="ml-auto text-xs text-muted-foreground">{record.username}</span>
-                )}
-              </CommandItem>
-            )
-          })}
+          {records.map((record) => (
+            <CommandItem
+              key={record.id}
+              value={`${record.title} ${record.subtitle} ${record.url} ${vaultName(record.vault_id)} ${record.id}`}
+              onSelect={() => onPick(record)}
+            >
+              <RecordTile icon={record.icon} kind={record.kind} size="xs" />
+              <span className="min-w-0 flex-1 truncate">
+                {record.title}
+                {record.subtitle && <span className="ml-2 text-xs text-muted-foreground">{record.subtitle}</span>}
+              </span>
+              <span className="ml-auto text-xs text-faint">{vaultName(record.vault_id)}</span>
+            </CommandItem>
+          ))}
         </CommandList>
       </Command>
     </CommandDialog>

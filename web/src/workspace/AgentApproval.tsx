@@ -104,7 +104,7 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
         withdraw()
         knocked.current = next.id
         showing.current = knock({
-          title: 'Keyhold — um assistente está pedindo um segredo',
+          title: 'Keyhold: um assistente está pedindo um segredo',
           body: `${next.peer.parent ?? next.peer.process} quer ${next.field} de ${next.record_title}. Abra o Keyhold para decidir.`,
           tag: `keyhold-agent-${next.id}`,
         })

@@ -130,7 +130,7 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
 
                   setPassphrase('')
 
-                  return 'Arquivo salvo. Guarde a senha dele junto — ela não está em lugar nenhum.'
+                  return 'Arquivo salvo. Guarde a senha dele junto, ela não está em lugar nenhum.'
                 })
               }
             >
