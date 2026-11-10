@@ -126,11 +126,8 @@ pub fn router(state: Arc<AppState>) -> Router {
 /// page has no way to learn one — but "they would have needed the token anyway" is the argument
 /// that stops being true the first time something is added that does not.
 async fn only_this_machine(request: Request<Body>, next: Next) -> Response {
-    let host = request
-        .headers()
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default();
+    let host = host_of(request.headers(), request.uri());
+    let host = host.as_str();
 
     // Port and all, or nothing: the name is what is checked, and an address is allowed to carry the
     // port it was reached on. Anything with credentials, a path, or another name is not.
@@ -145,6 +142,20 @@ async fn only_this_machine(request: Request<Body>, next: Next) -> Response {
         Json(json!({ "error": "this vault answers to 127.0.0.1 and nothing else" })),
     )
         .into_response()
+}
+
+/// The name a request was addressed to.
+///
+/// HTTP/1.1 carries it in `Host`. HTTP/2 — what a browser negotiates over HTTPS — carries it in the
+/// `:authority` pseudo-header, which arrives as the URI's authority and not as a header at all.
+/// Reading only `Host` turned every HTTPS request into "no name", refused.
+fn host_of(headers: &HeaderMap, uri: &Uri) -> String {
+    headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+        .or_else(|| uri.authority().map(|authority| authority.as_str().to_string()))
+        .unwrap_or_default()
 }
 
 static OWN_NAMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
@@ -167,13 +178,13 @@ fn is_own_name(name: &str) -> bool {
 /// makes the running keyhold hand its own URL to the desktop, and the browser receives it from
 /// there. A request from another site is refused by its `Origin`; the worst a local process that
 /// forges one can do is open a tab, and only once every few seconds.
-async fn open_window(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+async fn open_window(State(state): State<Arc<AppState>>, uri: Uri, headers: HeaderMap) -> Response {
     static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-    let host = headers.get(header::HOST).and_then(|value| value.to_str().ok()).unwrap_or_default();
+    let host = host_of(&headers, &uri);
     let origin = headers.get(header::ORIGIN).and_then(|value| value.to_str().ok()).unwrap_or_default();
 
-    if origin != format!("http://{host}") {
+    if origin != format!("http://{host}") && origin != format!("https://{host}") {
         return (StatusCode::FORBIDDEN, Json(json!({ "error": "só a própria página do Keyhold pode pedir isso" })))
             .into_response();
     }
@@ -1135,5 +1146,26 @@ async fn serve_asset(uri: Uri) -> Response {
              rebuild",
         )
             .into_response(),
+    }
+}
+
+#[cfg(test)]
+mod host_tests {
+    use super::*;
+
+    #[test]
+    fn the_name_comes_from_host_or_from_the_http2_authority() {
+        let mut headers = HeaderMap::new();
+        let uri: Uri = "https://keyhold.local:7717/health".parse().unwrap();
+
+        // HTTP/2: no Host header, the name is in the URI.
+        assert_eq!(host_of(&headers, &uri), "keyhold.local:7717");
+
+        // HTTP/1.1: Host wins.
+        headers.insert(header::HOST, HeaderValue::from_static("127.0.0.1:7717"));
+        assert_eq!(host_of(&headers, &"/health".parse().unwrap()), "127.0.0.1:7717");
+
+        // Neither: nothing, which the check refuses.
+        assert_eq!(host_of(&HeaderMap::new(), &"/health".parse().unwrap()), "");
     }
 }

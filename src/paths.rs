@@ -50,6 +50,13 @@ pub fn config_dir() -> PathBuf {
     xdg("XDG_CONFIG_HOME", ".config")
 }
 
+/// The certificate `sudo keyhold set-host` made with mkcert, and its key. Present means HTTPS.
+pub fn tls_files() -> (PathBuf, PathBuf) {
+    let dir = config_dir().join("tls");
+
+    (dir.join("cert.pem"), dir.join("key.pem"))
+}
+
 pub fn vault_file() -> PathBuf {
     data_dir().join("vault.db")
 }

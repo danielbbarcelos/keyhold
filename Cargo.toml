@@ -13,6 +13,10 @@ homepage = "https://github.com/danielbbarcelos/keyhold"
 
 [dependencies]
 axum = "0.7"
+# HTTPS when `set-host` made a certificate (mkcert). ring rather than aws-lc: no C toolchain beyond
+# what the rest already needs.
+axum-server = { version = "0.7", default-features = false, features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "io-util", "time", "process"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

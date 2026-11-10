@@ -148,6 +148,168 @@ pub fn replace_file(path: &Path, contents: &str) -> Result<()> {
     Ok(())
 }
 
+/// Where the person who ran `sudo` lives: their name, ids and home. `None` outside sudo.
+#[cfg(unix)]
+pub struct Invoker {
+    pub name: String,
+    pub uid: u32,
+    pub gid: u32,
+    pub home: std::path::PathBuf,
+}
+
+#[cfg(unix)]
+pub fn invoker() -> Option<Invoker> {
+    use std::ffi::{CStr, CString};
+
+    let name = std::env::var("SUDO_USER").ok().filter(|name| !name.is_empty() && name != "root")?;
+    let c_name = CString::new(name.clone()).ok()?;
+
+    // SAFETY: getpwnam returns a pointer into static storage, read here before anything else can
+    // call it again; this runs once, in a short-lived command, on one thread.
+    let entry = unsafe { libc::getpwnam(c_name.as_ptr()) };
+
+    if entry.is_null() {
+        return None;
+    }
+
+    let (uid, gid, home) = unsafe {
+        let entry = &*entry;
+        (entry.pw_uid, entry.pw_gid, CStr::from_ptr(entry.pw_dir).to_string_lossy().into_owned())
+    };
+
+    Some(Invoker { name, uid, gid, home: home.into() })
+}
+
+/// What came of trying to make a certificate.
+pub enum Certificate {
+    Made { cert: std::path::PathBuf },
+    NoMkcert,
+    NoInvoker,
+}
+
+/// Make a certificate for `name` (and localhost, 127.0.0.1, ::1) with mkcert, **as the person who
+/// ran sudo**.
+///
+/// It has to be them and not root: the CA their browsers trust is the one in their own home. Run as
+/// root, mkcert would mint a second CA nobody's browser knows, and the page would still be "not
+/// secure". The files land in their `~/.config/keyhold/tls`, owned by them, the key `0600`.
+#[cfg(unix)]
+pub fn make_certificate(name: &str) -> Result<Certificate> {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+    use std::process::Command;
+
+    let Some(who) = invoker() else {
+        return Ok(Certificate::NoInvoker);
+    };
+
+    let mkcert = ["/usr/bin/mkcert", "/usr/local/bin/mkcert", "/opt/homebrew/bin/mkcert"]
+        .into_iter()
+        .map(std::path::PathBuf::from)
+        .find(|path| path.exists());
+
+    let Some(mkcert) = mkcert else {
+        return Ok(Certificate::NoMkcert);
+    };
+
+    // ~/.config/keyhold/tls, created as needed and handed to them: a directory root made in their
+    // home and left owned by root would be one they cannot write to later.
+    let config = who.home.join(".config");
+    let keyhold = config.join("keyhold");
+    let dir = keyhold.join("tls");
+
+    for (path, private) in [(&config, false), (&keyhold, true), (&dir, true)] {
+        if !path.exists() {
+            fs::create_dir(path).with_context(|| format!("não consegui criar {}", path.display()))?;
+            chown(path, who.uid, who.gid)?;
+        }
+
+        if private {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+        }
+    }
+
+    let as_them = |command: &mut Command| {
+        command
+            .uid(who.uid)
+            .gid(who.gid)
+            .env_clear()
+            .env("HOME", &who.home)
+            .env("USER", &who.name)
+            .env("PATH", "/usr/local/bin:/usr/bin:/bin");
+    };
+
+    // The CA first, if they never made one. mkcert itself asks sudo for the system store; the
+    // browsers' stores live in their home and need nothing.
+    let caroot = who.home.join(".local/share/mkcert/rootCA.pem");
+
+    if !caroot.exists() {
+        let mut install = Command::new(&mkcert);
+        as_them(&mut install);
+
+        let status = install.arg("-install").status().context("não consegui rodar o mkcert")?;
+
+        if !status.success() {
+            bail!("o mkcert não conseguiu instalar a autoridade local (mkcert -install)");
+        }
+    }
+
+    let cert = dir.join("cert.pem");
+    let key = dir.join("key.pem");
+
+    let mut make = Command::new(&mkcert);
+    as_them(&mut make);
+
+    let output = make
+        .arg("-cert-file")
+        .arg(&cert)
+        .arg("-key-file")
+        .arg(&key)
+        .args([name, "localhost", "127.0.0.1", "::1"])
+        .output()
+        .context("não consegui rodar o mkcert")?;
+
+    if !output.status.success() {
+        bail!("o mkcert falhou: {}", String::from_utf8_lossy(&output.stderr).trim());
+    }
+
+    fs::set_permissions(&key, fs::Permissions::from_mode(0o600))?;
+
+    Ok(Certificate::Made { cert })
+}
+
+/// Take the certificate away with the name. Missing files are not an error.
+#[cfg(unix)]
+pub fn remove_certificate() -> Result<()> {
+    if let Some(who) = invoker() {
+        let dir = who.home.join(".config/keyhold/tls");
+
+        for file in ["cert.pem", "key.pem"] {
+            match fs::remove_file(dir.join(file)) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn chown(path: &Path, uid: u32, gid: u32) -> Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())?;
+
+    // SAFETY: a valid NUL-terminated path and plain integers.
+    if unsafe { libc::chown(c_path.as_ptr(), uid, gid) } != 0 {
+        bail!("não consegui passar {} para o seu usuário", path.display());
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -115,8 +115,17 @@ sudo keyhold set-host --remove   # stop
 ### A name instead of 127.0.0.1
 
 `sudo keyhold set-host [name]` writes one line to `/etc/hosts`, `127.0.0.1  keyhold.local  # keyhold`,
-and Keyhold answers to that name from its next start: `http://keyhold.local:7717`. The line is the
+and Keyhold answers to that name from its next start: `https://keyhold.local:7717`. The line is the
 only place the name lives; remove it (or run `set-host --remove`) and the name stops working.
+
+**It comes with HTTPS, through [mkcert](https://github.com/FiloSottile/mkcert).** A name other than
+`127.0.0.1` is not a secure context over plain HTTP, and browsers then refuse the clipboard and
+notifications Keyhold depends on. So `set-host` runs mkcert **as the user who called sudo** (the CA
+their browsers trust lives in their home; one made as root would not be trusted), installing that
+CA first if it was never installed, and leaves the certificate in `~/.config/keyhold/tls`, the key
+readable only by them. Keyhold serves HTTPS whenever that certificate is there. Without mkcert, the
+name is still set over HTTP, and `set-host` says how to get HTTPS
+(`sudo apt install mkcert libnss3-tools`). `--remove` takes the certificate away too.
 
 Only names that can never exist on the internet are accepted: `.local`, `.localhost`, `.internal`,
 `.test` and `.home.arpa`. Keyhold refuses requests addressed to any other name, which is what stops

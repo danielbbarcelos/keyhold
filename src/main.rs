@@ -214,7 +214,12 @@ async fn serve(cli: Cli) -> Result<()> {
     let host = names.first().cloned().unwrap_or_else(|| "127.0.0.1".to_string());
     http::allow_names(names);
 
-    let url = format!("http://{host}:{}/#token={}", bound.port(), token.expose());
+    // HTTPS when `set-host` left a certificate: a name other than 127.0.0.1 is not a secure context
+    // over plain HTTP, and the browser then refuses the clipboard and notifications this page needs.
+    let tls = load_tls().await;
+    let scheme = if tls.is_some() { "https" } else { "http" };
+
+    let url = format!("{scheme}://{host}:{}/#token={}", bound.port(), token.expose());
 
     println!();
     println!("  Keyhold {}", env!("CARGO_PKG_VERSION"));
@@ -278,9 +283,27 @@ async fn serve(cli: Cli) -> Result<()> {
         }
     }
 
-    axum::serve(listener, http::router(state))
-        .with_graceful_shutdown(shutdown())
-        .await?;
+    match tls {
+        Some(config) => {
+            let handle = axum_server::Handle::new();
+            let stopping = handle.clone();
+
+            tokio::spawn(async move {
+                shutdown().await;
+                stopping.graceful_shutdown(Some(std::time::Duration::from_secs(2)));
+            });
+
+            axum_server::from_tcp_rustls(listener.into_std()?, config)
+                .handle(handle)
+                .serve(http::router(state).into_make_service())
+                .await?;
+        }
+        None => {
+            axum::serve(listener, http::router(state))
+                .with_graceful_shutdown(shutdown())
+                .await?;
+        }
+    }
 
     // Explicit, and the last thing that happens: the machine is only released once nothing is being
     // served on it. Reading as `drop(held)` also keeps a future edit from moving the claim into a
@@ -333,6 +356,26 @@ async fn shutdown() {
 }
 
 
+/// The certificate `set-host` made, if there is one and it loads. A broken one is said out loud and
+/// skipped: an unreadable certificate must not stand between somebody and their vault.
+async fn load_tls() -> Option<axum_server::tls_rustls::RustlsConfig> {
+    let (cert, key) = paths::tls_files();
+
+    if !cert.exists() || !key.exists() {
+        return None;
+    }
+
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    match axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert, &key).await {
+        Ok(config) => Some(config),
+        Err(error) => {
+            println!("  could not load the certificate in {}: {error}. Serving plain HTTP.", cert.display());
+            None
+        }
+    }
+}
+
 /// `sudo keyhold set-host`: write or remove keyhold's line in /etc/hosts.
 fn set_host(name: Option<String>, remove: bool) -> Result<()> {
     let name = name.unwrap_or_else(|| hosts::DEFAULT_NAME.to_string());
@@ -355,8 +398,9 @@ fn set_host(name: Option<String>, remove: bool) -> Result<()> {
 
     if remove {
         hosts::replace_file(path, &hosts::without(&current))?;
+        hosts::remove_certificate()?;
         println!();
-        println!("  Pronto: o nome do Keyhold saiu do /etc/hosts. Reinicie o Keyhold para valer.");
+        println!("  Pronto: o nome e o certificado do Keyhold saíram. Reinicie o Keyhold para valer.");
         println!();
 
         return Ok(());
@@ -365,10 +409,32 @@ fn set_host(name: Option<String>, remove: bool) -> Result<()> {
     hosts::replace_file(path, &hosts::with_name(&current, &name))?;
 
     println!();
-    println!("  Pronto: {name} aponta para 127.0.0.1 no /etc/hosts.");
+    println!("  {name} aponta para 127.0.0.1 no /etc/hosts.");
+
+    let scheme = match hosts::make_certificate(&name)? {
+        hosts::Certificate::Made { cert } => {
+            println!("  Certificado do mkcert em {}.", cert.display());
+            "https"
+        }
+        hosts::Certificate::NoMkcert => {
+            println!();
+            println!("  Sem mkcert, o Keyhold fica em HTTP por esse nome, e o navegador não deixa");
+            println!("  copiar senhas nem mostrar notificações fora de 127.0.0.1. Para ter HTTPS:");
+            println!();
+            println!("      sudo apt install mkcert libnss3-tools");
+            println!("      sudo keyhold set-host {name}");
+            "http"
+        }
+        hosts::Certificate::NoInvoker => {
+            println!("  Sem saber quem chamou o sudo, não gerei certificado: rode com sudo, não como root.");
+            "http"
+        }
+    };
+
+    println!();
     println!("  Reinicie o Keyhold para ele passar a atender por esse nome:");
     println!();
-    println!("      http://{name}:{DEFAULT_PORT}");
+    println!("      {scheme}://{name}:{DEFAULT_PORT}");
     println!();
 
     Ok(())
