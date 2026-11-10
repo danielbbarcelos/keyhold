@@ -102,6 +102,7 @@ pub fn router(state: Arc<AppState>) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .route("/open-window", post(open_window))
         .nest("/api", api)
         .fallback(serve_asset)
         .layer(middleware::from_fn(security_headers))
@@ -135,7 +136,7 @@ async fn only_this_machine(request: Request<Body>, next: Next) -> Response {
     // port it was reached on. Anything with credentials, a path, or another name is not.
     let name = host.rsplit_once(':').map(|(name, _)| name).unwrap_or(host);
 
-    if matches!(name, "127.0.0.1" | "localhost" | "[::1]" | "::1") {
+    if matches!(name, "127.0.0.1" | "localhost" | "[::1]" | "::1") || is_own_name(name) {
         return next.run(request).await;
     }
 
@@ -144,6 +145,54 @@ async fn only_this_machine(request: Request<Body>, next: Next) -> Response {
         Json(json!({ "error": "this vault answers to 127.0.0.1 and nothing else" })),
     )
         .into_response()
+}
+
+static OWN_NAMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// The names `sudo keyhold set-host` gave this machine, read from `/etc/hosts` once at start.
+///
+/// Only those, and only names that cannot exist on the internet (see `hosts`), so this widens the
+/// check above by exactly the name somebody chose on purpose.
+pub fn allow_names(names: Vec<String>) {
+    let _ = OWN_NAMES.set(names);
+}
+
+fn is_own_name(name: &str) -> bool {
+    OWN_NAMES.get().map(|names| names.iter().any(|own| own == name)).unwrap_or(false)
+}
+
+/// "Abrir o Keyhold", from a page that has no token: a bookmark, or a tab opened by hand.
+///
+/// The token never comes back in the answer. Like a second start choosing "Abrir e continuar", this
+/// makes the running keyhold hand its own URL to the desktop, and the browser receives it from
+/// there. A request from another site is refused by its `Origin`; the worst a local process that
+/// forges one can do is open a tab, and only once every few seconds.
+async fn open_window(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    let host = headers.get(header::HOST).and_then(|value| value.to_str().ok()).unwrap_or_default();
+    let origin = headers.get(header::ORIGIN).and_then(|value| value.to_str().ok()).unwrap_or_default();
+
+    if origin != format!("http://{host}") {
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": "só a própria página do Keyhold pode pedir isso" })))
+            .into_response();
+    }
+
+    let now = identity::now_seconds();
+
+    if now.saturating_sub(LAST.swap(now, std::sync::atomic::Ordering::SeqCst)) < 3 {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": "acabei de abrir; confira as abas" })))
+            .into_response();
+    }
+
+    match state.agent.door() {
+        Some(door) => {
+            crate::instance::open_browser(door);
+            Json(json!({ "opened": true })).into_response()
+        }
+        None => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": "não sei abrir o Keyhold daqui" })))
+            .into_response(),
+    }
 }
 
 /// A failure the interface can show without the server having explained too much.

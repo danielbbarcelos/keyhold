@@ -7,7 +7,10 @@ import { Workspace } from './workspace/Workspace'
 import { hasToken } from './session'
 import { applyAppearance } from './theme'
 import { useStatus } from './useStatus'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { Loader2 } from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
 
 /**
  * Which screen keyhold is on, decided by one question asked of the binary.
@@ -33,12 +36,7 @@ export function App() {
 
   function screen() {
     if (!hasToken()) {
-      return (
-        <Notice title="Esta janela não tem a credencial da sessão">
-          Abra o Keyhold pelo terminal ou pelo atalho. A credencial vive na URL, vale só enquanto o
-          programa estiver aberto, e deixa de valer se outra instância assumir o cofre.
-        </Notice>
-      )
+      return <OpenFromBookmark />
     }
 
     if (offline) {
@@ -77,5 +75,56 @@ function Notice({ title, children }: { title: string; children: React.ReactNode 
         <CardContent />
       </Card>
     </main>
+  )
+}
+
+/**
+ * A tab without the session token: a bookmark, or the address typed by hand.
+ *
+ * The token is never handed to this page. The button asks the running Keyhold to open its own
+ * address, token included, in the browser — the same thing "Abrir e continuar" does from a second
+ * start — and this tab is left behind, to be closed.
+ */
+function OpenFromBookmark() {
+  const [state, setState] = useState<'idle' | 'busy' | 'opened' | 'failed'>('idle')
+  const [message, setMessage] = useState('')
+
+  async function open() {
+    setState('busy')
+
+    try {
+      const response = await fetch('/open-window', { method: 'POST', credentials: 'omit' })
+      const answer = await response.json().catch(() => ({}))
+
+      if (response.ok) {
+        setState('opened')
+      } else {
+        setState('failed')
+        setMessage(answer.error ?? '')
+      }
+    } catch {
+      setState('failed')
+      setMessage('O Keyhold não está rodando. Abra pelo atalho ou pelo terminal.')
+    }
+  }
+
+  return (
+    <Notice title={state === 'opened' ? 'Abri o Keyhold numa aba nova' : 'Abrir o Keyhold'}>
+      {state === 'opened' ? (
+        'Pode fechar esta aba. A credencial da sessão vai só para a aba nova, nunca para um endereço salvo.'
+      ) : (
+        <span className="flex flex-col items-start gap-4">
+          <span>
+            Esta aba não tem a credencial da sessão, que muda toda vez que o Keyhold abre. O botão
+            pede ao Keyhold para abrir a janela dele com ela.
+          </span>
+          <Button onClick={() => void open()} disabled={state === 'busy'}>
+            {state === 'busy' && <Loader2 className="animate-spin" />}
+            Abrir o Keyhold
+          </Button>
+          {state === 'failed' && message && <span className="text-destructive">{message}</span>}
+        </span>
+      )}
+    </Notice>
   )
 }

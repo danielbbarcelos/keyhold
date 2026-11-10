@@ -7,7 +7,7 @@
 //! What this binary does when run with no arguments: opens the vault file, picks a free loopback
 //! port, generates a session token, serves the interface, and points a browser at it.
 
-use keyhold::{db, http, instance, paths, session};
+use keyhold::{db, hosts, http, instance, paths, session};
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -23,7 +23,7 @@ use session::SessionToken;
 #[derive(Parser)]
 #[command(name = "keyhold", version, about = "A strictly local password vault.")]
 struct Cli {
-    /// Port to bind. Defaults to whatever the operating system has free.
+    /// Port to bind. Defaults to 7717, or whatever is free if 7717 is taken.
     #[arg(long)]
     port: Option<u16>,
 
@@ -73,7 +73,27 @@ enum Cmd {
         #[arg(last = true, required = true)]
         command: Vec<String>,
     },
+
+    /// Give this machine's Keyhold a name, in /etc/hosts. Needs sudo.
+    ///
+    ///     sudo keyhold set-host                  # keyhold.local
+    ///     sudo keyhold set-host cofre.local
+    ///     sudo keyhold set-host --remove
+    ///
+    /// Only names that never exist on the internet: .local, .localhost, .internal, .test,
+    /// .home.arpa. Restart Keyhold afterwards; it reads the name when it starts.
+    #[command(verbatim_doc_comment)]
+    SetHost {
+        /// The name. Defaults to keyhold.local.
+        name: Option<String>,
+        /// Take the name out of /etc/hosts instead.
+        #[arg(long, conflicts_with = "name")]
+        remove: bool,
+    },
 }
+
+/// The port a Keyhold started without `--port` tries first, so a bookmark keeps working.
+const DEFAULT_PORT: u16 = 7717;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -93,6 +113,7 @@ async fn main() -> Result<()> {
             // The command's own exit code, so this composes in a shell like anything else.
             std::process::exit(code);
         }
+        Some(Cmd::SetHost { name, remove }) => set_host(name, remove),
         None => serve(cli).await,
     }
 }
@@ -165,18 +186,35 @@ async fn serve(cli: Cli) -> Result<()> {
     let agent_wanted = keyhold::settings::agent_surface(&store);
     let token = SessionToken::generate();
 
-    // Port 0 asks the OS for a free one. Binding to `127.0.0.1` rather than `0.0.0.0` is not a
-    // default worth trusting to configuration: there is no setting that makes keyhold listen on a
-    // network interface, because there is no version of this product that should.
-    let requested = SocketAddr::from((Ipv4Addr::LOCALHOST, cli.port.unwrap_or(0)));
-    let listener = tokio::net::TcpListener::bind(requested)
-        .await
-        .with_context(|| format!("could not bind {requested}"))?;
+    // A fixed port by default, so a bookmark or a browser's saved login keeps working run after run.
+    // Asked for explicitly, a port is that port or an error; by default, a taken 7717 falls back to
+    // whatever is free rather than refusing to open the vault. Binding to `127.0.0.1` rather than
+    // `0.0.0.0` is not a default worth trusting to configuration: there is no setting that makes
+    // keyhold listen on a network interface, because there is no version of this product that should.
+    let requested = SocketAddr::from((Ipv4Addr::LOCALHOST, cli.port.unwrap_or(DEFAULT_PORT)));
+    let listener = match tokio::net::TcpListener::bind(requested).await {
+        Ok(listener) => listener,
+        Err(_) if cli.port.is_none() => {
+            println!();
+            println!("  port {DEFAULT_PORT} is taken; using a free one. Bookmarks to :{DEFAULT_PORT} will not reach this run.");
+
+            tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+                .await
+                .context("could not bind any port on 127.0.0.1")?
+        }
+        Err(error) => return Err(error).with_context(|| format!("could not bind {requested}")),
+    };
     let bound = listener.local_addr()?;
 
     held.note_port(bound.port());
 
-    let url = format!("http://127.0.0.1:{}/#token={}", bound.port(), token.expose());
+    // The name `sudo keyhold set-host` wrote, if any. Read once: a name added later counts from the
+    // next start, which is what `set-host` tells the person.
+    let names = hosts::names_on_this_machine();
+    let host = names.first().cloned().unwrap_or_else(|| "127.0.0.1".to_string());
+    http::allow_names(names);
+
+    let url = format!("http://{host}:{}/#token={}", bound.port(), token.expose());
 
     println!();
     println!("  Keyhold {}", env!("CARGO_PKG_VERSION"));
@@ -294,3 +332,44 @@ async fn shutdown() {
     }
 }
 
+
+/// `sudo keyhold set-host`: write or remove keyhold's line in /etc/hosts.
+fn set_host(name: Option<String>, remove: bool) -> Result<()> {
+    let name = name.unwrap_or_else(|| hosts::DEFAULT_NAME.to_string());
+
+    if !remove {
+        hosts::check_name(&name)?;
+    }
+
+    #[cfg(unix)]
+    if unsafe { libc::geteuid() } != 0 {
+        let again = if remove { "--remove".to_string() } else { name.clone() };
+
+        anyhow::bail!(
+            "mexer no /etc/hosts precisa de sudo. Rode de novo assim:\n\n    sudo keyhold set-host {again}\n"
+        );
+    }
+
+    let path = std::path::Path::new(hosts::HOSTS_FILE);
+    let current = std::fs::read_to_string(path).context("não consegui ler o /etc/hosts")?;
+
+    if remove {
+        hosts::replace_file(path, &hosts::without(&current))?;
+        println!();
+        println!("  Pronto: o nome do Keyhold saiu do /etc/hosts. Reinicie o Keyhold para valer.");
+        println!();
+
+        return Ok(());
+    }
+
+    hosts::replace_file(path, &hosts::with_name(&current, &name))?;
+
+    println!();
+    println!("  Pronto: {name} aponta para 127.0.0.1 no /etc/hosts.");
+    println!("  Reinicie o Keyhold para ele passar a atender por esse nome:");
+    println!();
+    println!("      http://{name}:{DEFAULT_PORT}");
+    println!();
+
+    Ok(())
+}

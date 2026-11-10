@@ -22,6 +22,7 @@ pub mod encoding;
 pub mod generator;
 pub mod grants;
 pub mod health;
+pub mod hosts;
 pub mod http;
 pub mod identity;
 pub mod instance;

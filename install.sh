@@ -6,6 +6,10 @@
 #  on your PATH, and adds a desktop shortcut that opens Keyhold in your
 #  browser.
 #
+#  Options:
+#      --with=set-host[=NAME]  Also give Keyhold a name in /etc/hosts
+#                              (keyhold.local by default). Asks for sudo.
+#
 #  Environment:
 #      SKIP_BUILD    "1" to skip the frontend build (web/dist must exist).
 #      SKIP_DESKTOP  "1" to skip the desktop shortcut.
@@ -23,6 +27,19 @@ APP_CATEGORIES="System;Security;"
 APP_KEYWORDS="password;vault;secrets;keyhold;"
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+SET_HOST=""
+for arg in "$@"; do
+  case "$arg" in
+    --with=set-host) SET_HOST="keyhold.local" ;;
+    --with=set-host=*) SET_HOST="${arg#--with=set-host=}" ;;
+    -h|--help)
+      sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) printf "unknown option: %s (try --help)\n" "$arg" >&2; exit 2 ;;
+  esac
+done
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 
 if [ -t 1 ]; then
@@ -220,6 +237,20 @@ check_path() {
   esac
 }
 
+# Only with --with=set-host. The name goes into /etc/hosts, which is root's,
+# so this one step runs under sudo — and says so before the password prompt.
+set_host() {
+  [ -z "$SET_HOST" ] && return 0
+
+  info "giving Keyhold the name $SET_HOST in /etc/hosts (sudo asks for your password)"
+
+  if sudo "$BIN_DIR/$APP_BIN" set-host "$SET_HOST"; then
+    ok "http://$SET_HOST:7717 reaches Keyhold from its next start"
+  else
+    warn "the name was not set; run later: sudo $APP_BIN set-host $SET_HOST"
+  fi
+}
+
 farewell() {
   printf "\n  %sDone.%s Run %s%s%s, or open %s%s%s from your launcher.\n" \
     "$BOLD" "$RESET" "$CYAN" "$APP_BIN" "$RESET" "$BOLD" "$APP_DISPLAY_NAME" "$RESET"
@@ -232,4 +263,5 @@ build_frontend
 build_binary
 install_desktop_shortcut
 check_path
+set_host
 farewell

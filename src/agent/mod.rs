@@ -88,6 +88,11 @@ pub struct AgentState {
 }
 
 impl AgentState {
+    /// Where the interface lives, token included. `None` until the binary sets it, and in tests.
+    pub fn door(&self) -> Option<&str> {
+        self.door.get().map(String::as_str)
+    }
+
     /// Tell the agent surface where the interface lives, so it can open it when it has to ask.
     pub fn set_door(&self, url: String) {
         let _ = self.door.set(url);
