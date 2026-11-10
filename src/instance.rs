@@ -330,6 +330,67 @@ fn same_build(pid: i32) -> bool {
     }
 }
 
+/// Ask, on the desktop, whether to bring the interface forward. `true` means "open it".
+///
+/// The same dialog a second start puts up, for the same reason: it lands on top of whatever has
+/// focus, which a browser tab never does. The child is killed when this future is dropped, so the
+/// caller takes the question back by dropping it.
+///
+/// Without zenity or kdialog it falls back to a notification, which cannot answer — and so the
+/// answer is no, and the interface stays where it is.
+pub async fn ask_to_open(text: &str) -> bool {
+    const OPEN: &str = "Abrir o Keyhold";
+
+    let zenity = tokio::process::Command::new("zenity")
+        .args(["--question", "--title", "Keyhold", "--no-markup"])
+        .arg("--text")
+        .arg(text)
+        .args(["--ok-label", OPEN, "--cancel-label", "Agora não"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .status()
+        .await;
+
+    if let Ok(status) = zenity {
+        return status.success();
+    }
+
+    let kdialog = tokio::process::Command::new("kdialog")
+        .args(["--title", "Keyhold", "--yesno"])
+        .arg(text)
+        .args(["--yes-label", OPEN, "--no-label", "Agora não"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .status()
+        .await;
+
+    if let Ok(status) = kdialog {
+        return status.success();
+    }
+
+    announce(text);
+
+    false
+}
+
+/// Hand the URL to the desktop.
+///
+/// The token is in the fragment, which is why this is safe to pass as an argument: the fragment
+/// never reaches a server, and `xdg-open` is not a server. It is still visible in this process's
+/// own `/proc/self/cmdline` for as long as the helper runs, which is the reason the token is
+/// worthless the moment keyhold exits.
+pub fn open_browser(url: &str) {
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+
+    let _ = Command::new(opener)
+        .arg(url)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
 /// Say something where the desktop can show it.
 ///
 /// The browser tab is the thing people miss: a window that opens behind the one they are looking at

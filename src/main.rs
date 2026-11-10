@@ -10,7 +10,6 @@
 use keyhold::{db, http, instance, paths, session};
 
 use std::net::{Ipv4Addr, SocketAddr};
-use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -193,7 +192,7 @@ async fn serve(cli: Cli) -> Result<()> {
     println!();
 
     if !cli.no_browser {
-        open_browser(&url);
+        instance::open_browser(&url);
 
         // Only after a takeover, and only because of how one ends: somebody dismissed a dialog, and
         // the tab that replaces the one they had lands in a browser window that may well be behind
@@ -212,7 +211,7 @@ async fn serve(cli: Cli) -> Result<()> {
 
         tokio::spawn(async move {
             while signals.recv().await.is_some() {
-                open_browser(&url);
+                instance::open_browser(&url);
                 instance::announce("O cofre já estava aberto. A janela está no seu navegador.");
             }
         });
@@ -225,6 +224,9 @@ async fn serve(cli: Cli) -> Result<()> {
         lock: Lock::new(policy),
         failures: std::sync::Mutex::new(0),
     });
+
+    // So a question from an agent can bring this window back when nobody has it in front of them.
+    state.agent.set_door(url.clone());
 
     // Reopen the agent socket if it was left on.
     //
@@ -292,18 +294,3 @@ async fn shutdown() {
     }
 }
 
-/// Hand the URL to the desktop.
-///
-/// The token is in the fragment, which is why this is safe to pass as an argument: the fragment
-/// never reaches a server, and `xdg-open` is not a server. It is still visible in this process's
-/// own `/proc/self/cmdline` for as long as the helper runs, which is the reason the token is
-/// worthless the moment keyhold exits.
-fn open_browser(url: &str) {
-    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-
-    let _ = Command::new(opener)
-        .arg(url)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
-}

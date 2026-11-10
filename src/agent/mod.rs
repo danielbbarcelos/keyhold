@@ -35,7 +35,8 @@
 pub mod protocol;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -77,9 +78,32 @@ pub struct PendingRequest {
 pub struct AgentState {
     pending: Mutex<Vec<PendingRequest>>,
     answers: Mutex<HashMap<String, bool>>,
+    /// The interface's own URL, token included, so a desktop question can put the window back.
+    /// Set once by the binary; absent in tests, where nothing should open a browser.
+    door: OnceLock<String>,
+    /// When the interface last polled while somebody was actually looking at it, in seconds.
+    looked_at: AtomicU64,
+    /// One desktop question at a time. A burst of requests is one knock; the interface lists them all.
+    asking: AtomicBool,
 }
 
 impl AgentState {
+    /// Tell the agent surface where the interface lives, so it can open it when it has to ask.
+    pub fn set_door(&self, url: String) {
+        let _ = self.door.set(url);
+    }
+
+    /// The interface polled with its window focused and visible.
+    pub fn looked(&self) {
+        self.looked_at.store(now_seconds(), Ordering::Relaxed);
+    }
+
+    /// Whether somebody is looking at the interface right now. The interface polls every second,
+    /// so three seconds of silence means the tab is in the background, minimised, or closed.
+    fn somebody_looking(&self) -> bool {
+        now_seconds().saturating_sub(self.looked_at.load(Ordering::Relaxed)) <= 3
+    }
+
     pub fn waiting(&self) -> Vec<PendingRequest> {
         self.pending.lock().unwrap().clone()
     }
@@ -545,6 +569,10 @@ async fn approved(
         asked_at: now_seconds(),
     });
 
+    // The window the dialog lives in may be closed, behind another one, or on another workspace.
+    // The desktop question goes away with this function: answered, refused or expired.
+    let _knock = DesktopKnock::start(state.clone(), id.clone());
+
     // Poll rather than push: the answer comes from an HTTP request on another task, and a channel
     // between them would have to be cleaned up on every path this can end on — including the one
     // where nobody ever answers.
@@ -568,6 +596,87 @@ async fn approved(
     note_agent(state, peer, audit::action::SECRET_REVEALED, record_id, field, false);
 
     Err(Response::refused("ninguém respondeu ao pedido a tempo"))
+}
+
+/// The question, asked on the desktop as well, for as long as it is open.
+///
+/// A browser notification only reaches the desktop while the tab exists and was allowed to notify,
+/// and a tab in the background is throttled anyway. The process asking is this one, which is
+/// always running while an agent can ask anything, so it asks the way a second start does: a
+/// native dialog on top of whatever has focus. It answers nothing by itself. "Abrir o Keyhold"
+/// only brings the interface forward, where the decision is made with the record and the window
+/// in front of you; a yes from a dialog that cannot show either would be a yes to less.
+///
+/// Dropping it takes the dialog back, so a question that was settled in the interface, or that
+/// expired, does not stay on screen asking to be answered.
+struct DesktopKnock(Option<tokio::task::JoinHandle<()>>);
+
+impl DesktopKnock {
+    fn start(state: Arc<AppState>, id: String) -> Self {
+        let Some(door) = state.agent.door.get().cloned() else {
+            return Self(None);
+        };
+
+        let task = tokio::spawn(async move {
+            // A focused interface polls within a second and shows the dialog itself. Give it that
+            // second before deciding nobody is looking.
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+            let still_waiting = state.agent.waiting().into_iter().find(|one| one.id == id);
+            let Some(request) = still_waiting else { return };
+
+            if state.agent.somebody_looking() {
+                return;
+            }
+
+            if state.agent.asking.swap(true, Ordering::SeqCst) {
+                return;
+            }
+
+            let _release = Release(&state.agent.asking);
+
+            if crate::instance::ask_to_open(&knock_text(&request)).await {
+                crate::instance::open_browser(&door);
+            }
+        });
+
+        Self(Some(task))
+    }
+}
+
+impl Drop for DesktopKnock {
+    fn drop(&mut self) {
+        if let Some(task) = self.0.take() {
+            // Aborting drops the dialog's child process, which is spawned to die with it.
+            task.abort();
+        }
+    }
+}
+
+/// Clears the "already asking" flag however the knock ends, including by being aborted.
+struct Release<'a>(&'a AtomicBool);
+
+impl Drop for Release<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+/// What the desktop is told. The record's title and the field's label, never a value — the same
+/// two things the dialog in the interface names before anybody decides anything.
+fn knock_text(request: &PendingRequest) -> String {
+    let who = request.peer.parent.as_deref().unwrap_or(&request.peer.process);
+    let what = if request.intent == "run" {
+        format!("usar {} de \"{}\" num comando", request.field, request.record_title)
+    } else {
+        format!("ler {} de \"{}\"", request.field, request.record_title)
+    };
+
+    format!(
+        "{who} (PID {}) quer {what}.\n\nO pedido expira em {APPROVAL_TIMEOUT_SECONDS} segundos. \
+         Abra o Keyhold para permitir ou negar.",
+        request.peer.parent_pid.unwrap_or(request.peer.pid)
+    )
 }
 
 /// Run a command with the secret in the child's environment.

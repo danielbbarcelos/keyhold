@@ -392,8 +392,13 @@ export const api = {
   setAgentSurface: (on: boolean) =>
     call<{ listening: boolean }>('POST', '/api/agent', { on }),
 
-  agentRequests: () =>
-    call<{ requests: AgentRequest[]; active_grants: number }>('GET', '/api/agent/requests'),
+  /** `looking` tells the server somebody has the window in front of them, so it need not also ask
+   *  on the desktop. */
+  agentRequests: (looking = false) =>
+    call<{ requests: AgentRequest[]; active_grants: number }>(
+      'GET',
+      looking ? '/api/agent/requests?looking=true' : '/api/agent/requests',
+    ),
 
   answerAgentRequest: (id: string, allowed: boolean, window: GrantWindow = { kind: 'once' }) =>
     call<{ answered: boolean }>('POST', `/api/agent/requests/${id}`, { allowed, window }),

@@ -552,7 +552,22 @@ async fn set_agent_surface(
 /// Polled by the interface. A request that nobody answers times out on the daemon's side, so a
 /// closed window cannot leave an agent hanging — or, worse, leave a question that gets answered by
 /// whoever opens the window next.
-async fn agent_requests(State(state): State<Arc<AppState>>) -> Answer {
+#[derive(Deserialize)]
+struct Polled {
+    /// The interface says whether somebody has it in front of them. When nobody does, a question
+    /// is also asked on the desktop — see `agent::DesktopKnock`.
+    #[serde(default)]
+    looking: bool,
+}
+
+async fn agent_requests(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(polled): axum::extract::Query<Polled>,
+) -> Answer {
+    if polled.looking {
+        state.agent.looked();
+    }
+
     if state.lock.with_key(|_| ()).is_none() {
         return Ok(Json(json!({ "requests": [] })));
     }

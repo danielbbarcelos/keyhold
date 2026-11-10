@@ -85,7 +85,8 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
       let next: AgentRequest | null = null
 
       try {
-        const answer = await api.agentRequests()
+        const looking = document.visibilityState === 'visible' && document.hasFocus()
+        const answer = await api.agentRequests(looking)
         next = answer.requests[0] ?? null
       } catch {
         next = null
