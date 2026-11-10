@@ -95,6 +95,7 @@ export function RecordEdit({
           <Textarea
             value={draft.payload.notes}
             placeholder="Qualquer coisa que ajude a lembrar depois"
+              spellCheck={false}
             onChange={(event) => setPayload({ notes: event.target.value })}
           />
         </div>

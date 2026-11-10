@@ -188,7 +188,7 @@ pub fn examine(store: &Store, master: &SecretKey, vault_id: &str) -> Result<Vaul
             }
 
             let title = record.payload.title.to_lowercase();
-            let username = record.payload.subtitle().to_lowercase();
+            let username = record.payload.username().to_lowercase();
             let lower = secret.to_lowercase();
 
             if (!title.is_empty() && lower.contains(&title))

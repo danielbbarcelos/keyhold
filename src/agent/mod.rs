@@ -506,7 +506,7 @@ fn value_of(state: &Arc<AppState>, record_id: &str, field: &str) -> Option<Strin
             let record = records::open(&store, key, record_id).ok()?;
 
             if field == "username" {
-                return Some(record.payload.subtitle()).filter(|s| !s.is_empty());
+                return Some(record.payload.username()).filter(|s| !s.is_empty());
             }
 
             let one = record.payload.fields.iter().find(|one| one.label.eq_ignore_ascii_case(field))?;

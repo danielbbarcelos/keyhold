@@ -167,14 +167,18 @@ impl Payload {
         if !username.trim().is_empty() {
             let kind = if username.contains('@') { "email" } else { "text" };
             let label = if kind == "email" { "E-mail" } else { "Usuário" };
-            self.fields.insert(0, Field::new(label, kind, &username));
+            let mut field = Field::new(label, kind, &username);
+            // Marked for the list explicitly: it is what the list showed before, and only a field
+            // somebody marked (or an e-mail or a name) may stand under the title.
+            field.list = true;
+            self.fields.insert(0, field);
         }
 
         self
     }
 
-    /// What a list shows under the title: the field marked for it, or the first e-mail, name or
-    /// text. Never a secret, whatever the marks say.
+    /// What a list shows under the title: the field marked for it, or the first e-mail or name.
+    /// Never a secret, whatever the marks say.
     pub fn subtitle(&self) -> String {
         let shown = |f: &&Field| !is_secret_kind(&f.kind) && !f.value.trim().is_empty();
 
@@ -183,12 +187,25 @@ impl Payload {
             .filter(shown)
             .find(|f| f.list)
             .or_else(|| {
+                // Not a plain text field: imported columns and things like a port or a key id
+                // land there, and the list line reaches every agent's search without a prompt.
                 self.fields
                     .iter()
                     .filter(shown)
-                    .find(|f| matches!(f.kind.as_str(), "email" | "name" | "text"))
+                    .find(|f| matches!(f.kind.as_str(), "email" | "name"))
             })
             .map(|f| f.value.lines().next().unwrap_or_default().to_string())
+            .unwrap_or_default()
+    }
+
+    /// Who the record logs in as: the first e-mail or name, or the username folded from an older
+    /// record. What `username` means to the agent and to the health check; never just any text.
+    pub fn username(&self) -> String {
+        self.fields
+            .iter()
+            .filter(|f| !f.value.trim().is_empty())
+            .find(|f| matches!(f.kind.as_str(), "email" | "name") || (f.kind == "text" && f.list && f.label == "Usuário"))
+            .map(|f| f.value.clone())
             .unwrap_or_default()
     }
 
@@ -203,13 +220,14 @@ impl Payload {
 
     /// The secret the record's main button copies.
     pub fn primary_secret(&self) -> Option<&Field> {
-        let secret = |f: &&Field| is_secret_kind(&f.kind) && !f.value.is_empty();
+        // Never a 2FA field: its value is the seed that makes codes, not a code.
+        let secret = |f: &&Field| is_secret_kind(&f.kind) && !f.value.is_empty() && f.kind != "totp";
 
         self.fields
             .iter()
             .filter(secret)
             .find(|f| f.primary)
-            .or_else(|| self.fields.iter().filter(secret).find(|f| f.kind != "totp"))
+            .or_else(|| self.fields.iter().find(|f| secret(f)))
     }
 
     /// Refuse what the interface should never have sent.
@@ -1402,5 +1420,41 @@ mod tests {
 
         let blank = Payload { title: "  ".into(), ..Payload::default() };
         assert!(create(&store, &master, &vault, None, "login", &blank).is_err());
+    }
+
+    #[test]
+    fn a_plain_text_field_never_stands_under_the_title_unless_marked() {
+        let mut payload = Payload {
+            title: "Servidor".into(),
+            fields: vec![Field::new("Porta", "text", "2222"), Field::new("Chave", "hidden", "x")],
+            ..Payload::default()
+        };
+
+        assert_eq!(payload.subtitle(), "", "an unmarked text field reached the list");
+        assert_eq!(payload.username(), "", "a port became the username");
+
+        payload.fields[0].list = true;
+        assert_eq!(payload.subtitle(), "2222");
+
+        payload.fields[1].list = true;
+        payload.fields[0].list = false;
+        assert_eq!(payload.subtitle(), "", "a secret was marked for the list and shown");
+    }
+
+    #[test]
+    fn an_older_username_keeps_its_place_in_the_list_and_for_the_agent() {
+        let payload = Payload { title: "x".into(), username: "deploy".into(), ..Payload::default() }.normalise();
+
+        assert_eq!(payload.subtitle(), "deploy");
+        assert_eq!(payload.username(), "deploy");
+    }
+
+    #[test]
+    fn a_2fa_seed_is_never_the_main_secret() {
+        let mut seed = Field::new("2FA", "totp", "JBSWY3DPEHPK3PXP");
+        seed.primary = true;
+        let payload = Payload { title: "x".into(), fields: vec![seed], ..Payload::default() };
+
+        assert!(payload.primary_secret().is_none());
     }
 }

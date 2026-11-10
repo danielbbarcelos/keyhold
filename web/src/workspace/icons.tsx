@@ -196,7 +196,7 @@ export function RecordTile({
 }) {
   const shown = iconOf(icon, kind)
 
-  if (shown.image) {
+  if (shown.image?.startsWith('data:image/')) {
     return (
       <img
         src={shown.image}

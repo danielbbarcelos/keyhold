@@ -125,11 +125,13 @@ export function RecordView({
         {primary ? (
           <Button
             onClick={() => {
-              void api.reportAccess(record.id, 'copy', primary.label).catch(() => {})
-              void copyForSeconds(primary.value, CLIPBOARD_SECONDS, () => setCopied(0)).then(() => {
-                setCopied(CLIPBOARD_SECONDS)
-                toast(`${primary.label} copiado`, 'A área de transferência é limpa em 30 segundos.')
-              })
+              void copyForSeconds(primary.value, CLIPBOARD_SECONDS, () => setCopied(0))
+                .then(() => {
+                  void api.reportAccess(record.id, 'copy', primary.label).catch(() => {})
+                  setCopied(CLIPBOARD_SECONDS)
+                  toast(`${primary.label} copiado`, 'A área de transferência é limpa em 30 segundos.')
+                })
+                .catch(() => toast('Não consegui copiar', 'O navegador não liberou a área de transferência nesta página.', 'error'))
             }}
           >
             <Copy />
@@ -174,7 +176,7 @@ export function RecordView({
                 })),
               ],
             },
-            { kind: 'item', label: 'Mover para outro cofre', icon: Vault, onSelect: onMoveToVault },
+            ...(permanent ? [] : [{ kind: 'item' as const, label: 'Mover para outro cofre', icon: Vault, onSelect: onMoveToVault }]),
             {
               kind: 'item',
               label: record.compromised_at ? 'Não está mais comprometido' : 'Marcar como comprometido',
@@ -208,7 +210,7 @@ export function RecordView({
           <div>
             {payload.fields.map((field, index) => (
               <FieldRow
-                key={`${record.version}-${index}`}
+                key={`${record.id}-${record.version}-${index}`}
                 field={field}
                 index={index}
                 recordId={record.id}

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   CopyPlus,
   Eye,
@@ -22,7 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils'
 
 import { api, type Field, type FieldKind } from '../../api'
-import { CARD_PARTS, FIELD_TYPES, fieldType, hasParts, newField, primaryField, subtitleField } from '../fields'
+import { CARD_PARTS, FIELD_TYPES, fieldType, hasParts, isSecret, newField, primaryField, subtitleField } from '../fields'
 import { MenuButton } from '../menu'
 import { toastError } from '../toast'
 
@@ -45,6 +45,16 @@ export function FieldEditor({
 }) {
   const [dragging, setDragging] = useState<number | null>(null)
   const [over, setOver] = useState<number | null>(null)
+  // A stable key per field, moved along with it. Keyed by position, a field's "revealed" state
+  // stayed in place when a field was removed or dragged, and showed the next secret in clear.
+  const keys = useRef<string[]>([])
+  if (keys.current.length !== fields.length) {
+    keys.current = fields.map((_, at) => keys.current[at] ?? newKey())
+  }
+  const change = (next: Field[], nextKeys: string[]) => {
+    keys.current = nextKeys
+    onChange(next)
+  }
   const listed = subtitleField(fields)
   const primary = primaryField(fields)
 
@@ -58,16 +68,19 @@ export function FieldEditor({
   const move = (from: number, to: number) => {
     if (from === to) return
     const next = [...fields]
+    const nextKeys = [...keys.current]
     const [moved] = next.splice(from, 1)
+    const [movedKey] = nextKeys.splice(from, 1)
     next.splice(to, 0, moved)
-    onChange(next)
+    nextKeys.splice(to, 0, movedKey)
+    change(next, nextKeys)
   }
 
   return (
     <div className={cn(framed && 'overflow-visible rounded-xl border bg-raised')}>
       {fields.map((field, index) => (
         <div
-          key={index}
+          key={keys.current[index]}
           onDragOver={(event) => {
             if (dragging === null) return
             event.preventDefault()
@@ -104,7 +117,7 @@ export function FieldEditor({
 
           <TypeButton
             kind={field.kind}
-            onPick={(kind) => update(index, { kind, ...(hasParts(kind) ? { extra: field.extra ?? {} } : {}) })}
+            onPick={(kind) => update(index, retype(field, kind))}
           />
 
           <div className="relative">
@@ -130,31 +143,35 @@ export function FieldEditor({
               label={`Ações do campo ${field.label}`}
               align="end"
               entries={[
-                {
-                  kind: 'item',
-                  label: 'Mostrar na lista',
-                  icon: List,
-                  checked: !!field.list,
-                  onSelect: () => mark(index, 'list'),
-                },
-                {
-                  kind: 'item',
-                  label: 'Ação principal',
-                  icon: Star,
-                  checked: !!field.primary,
-                  onSelect: () => mark(index, 'primary'),
-                },
+                ...(!isSecret(field)
+                  ? [
+                      {
+                        kind: 'item' as const,
+                        label: 'Mostrar na lista',
+                        icon: List,
+                        checked: !!field.list,
+                        onSelect: () => mark(index, 'list'),
+                      },
+                    ]
+                  : []),
+                ...(isSecret(field) && field.kind !== 'totp'
+                  ? [
+                      {
+                        kind: 'item' as const,
+                        label: 'Ação principal',
+                        icon: Star,
+                        checked: !!field.primary,
+                        onSelect: () => mark(index, 'primary'),
+                      },
+                    ]
+                  : []),
                 {
                   kind: 'sub',
                   label: 'Trocar o tipo',
                   icon: Replace,
                   items: FIELD_TYPES.map((type) => ({
                     label: type.label,
-                    onSelect: () =>
-                      update(index, {
-                        kind: type.kind,
-                        ...(hasParts(type.kind) ? { extra: field.extra ?? {} } : {}),
-                      }),
+                    onSelect: () => update(index, retype(field, type.kind)),
                   })),
                 },
                 {
@@ -162,7 +179,10 @@ export function FieldEditor({
                   label: 'Duplicar',
                   icon: CopyPlus,
                   onSelect: () =>
-                    onChange([...fields.slice(0, index + 1), { ...field, list: false, primary: false }, ...fields.slice(index + 1)]),
+                    change(
+                      [...fields.slice(0, index + 1), { ...field, list: false, primary: false }, ...fields.slice(index + 1)],
+                      [...keys.current.slice(0, index + 1), newKey(), ...keys.current.slice(index + 1)],
+                    ),
                 },
                 { kind: 'separator' },
                 {
@@ -170,7 +190,11 @@ export function FieldEditor({
                   label: 'Remover o campo',
                   icon: Trash2,
                   destructive: true,
-                  onSelect: () => onChange(fields.filter((_, at) => at !== index)),
+                  onSelect: () =>
+                    change(
+                      fields.filter((_, at) => at !== index),
+                      keys.current.filter((_, at) => at !== index),
+                    ),
                 },
               ]}
             />
@@ -182,13 +206,34 @@ export function FieldEditor({
         <div className="flex flex-col items-center gap-2 px-4 py-6 text-center text-[13px] text-muted-foreground">
           <ListPlus className="size-5 text-faint" />
           <span>Nenhum campo ainda. Escolha um modelo acima ou adicione os campos que precisar.</span>
-          <AddField onAdd={(kind) => onChange([...fields, newField(kind)])} button />
+          <AddField onAdd={(kind) => change([...fields, newField(kind)], [...keys.current, newKey()])} button />
         </div>
       ) : (
-        <AddField onAdd={(kind) => onChange([...fields, newField(kind)])} />
+        <AddField onAdd={(kind) => change([...fields, newField(kind)], [...keys.current, newKey()])} />
       )}
     </div>
   )
+}
+
+/**
+ * A field changing kind. Parts that only a card or a security question has are dropped when the
+ * new kind has none, so a card's code does not stay stored, unseen, in a text field; and a field
+ * that stops being secret loses its marks rather than surfacing in a list.
+ */
+function retype(field: Field, kind: FieldKind): Partial<Field> {
+  const next: Partial<Field> = { kind, extra: hasParts(kind) ? (field.extra ?? {}) : undefined }
+
+  if (isSecret({ kind })) next.list = false
+  else next.primary = false
+
+  return next
+}
+
+let counter = 0
+function newKey(): string {
+  counter += 1
+
+  return `campo-${counter}`
 }
 
 function Mark({ children, primary }: { children: React.ReactNode; primary?: boolean }) {
@@ -258,13 +303,32 @@ function ValueEditor({ field, onChange }: { field: Field; onChange: (change: Par
   }
 
   if (type.multiline) {
-    const hidden = type.secret && !showing
+    // A hidden multi-line value is not drawn at all until asked for: `-webkit-text-security` does
+    // not exist in every browser, and a textarea it does not cover shows the secret in full.
+    if (type.secret && !showing) {
+      return (
+        <button
+          type="button"
+          onClick={() => setShowing(true)}
+          className="flex min-h-20 w-full items-start justify-between rounded-[9px] border bg-field px-3 py-2 text-left text-sm text-muted-foreground"
+        >
+          <span className="tracking-[0.2em]">{field.value ? '••••••••••••' : <span className="tracking-normal text-faint">Vazio</span>}</span>
+          <span className="flex items-center gap-1 text-xs">
+            <Eye className="size-3.5" />
+            Mostrar para editar
+          </span>
+        </button>
+      )
+    }
 
     return (
       <div className="relative">
         <Textarea
           aria-label="Valor"
-          className={cn('min-h-20 pr-10', field.kind === 'multiline_hidden' && 'font-mono text-[13px]', hidden && '[-webkit-text-security:disc]')}
+          spellCheck={!type.secret}
+          autoCorrect={type.secret ? 'off' : undefined}
+          autoCapitalize={type.secret ? 'off' : undefined}
+          className={cn('min-h-20 pr-10', field.kind === 'multiline_hidden' && 'font-mono text-[13px]')}
           value={field.value}
           placeholder={type.placeholder}
           onChange={(event) => onChange({ value: event.target.value })}
@@ -274,10 +338,10 @@ function ValueEditor({ field, onChange }: { field: Field; onChange: (change: Par
             variant="ghost"
             size="icon-sm"
             className="absolute top-1.5 right-1.5"
-            aria-label={showing ? 'Esconder' : 'Mostrar'}
-            onClick={() => setShowing(!showing)}
+            aria-label="Esconder"
+            onClick={() => setShowing(false)}
           >
-            {showing ? <EyeOff /> : <Eye />}
+            <EyeOff />
           </Button>
         )}
       </div>
@@ -333,6 +397,9 @@ function SecretInput({
         aria-label={placeholder ?? 'Valor'}
         type={showing ? 'text' : 'password'}
         autoComplete="new-password"
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
         className={cn(generate ? 'pr-[68px]' : 'pr-10', mono && showing && 'font-mono text-[13px]')}
         value={value}
         placeholder={placeholder}

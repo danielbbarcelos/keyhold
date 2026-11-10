@@ -102,20 +102,22 @@ export const CARD_PARTS: Array<{ key: string; label: string; secret: boolean; pl
 ]
 
 /**
- * What goes under the title in a list: the field marked for it, or the first e-mail, name or text.
+ * What goes under the title in a list: the field marked for it, or the first e-mail or name.
  * The same rule as the binary's `Payload::subtitle`, so the editor can show it before saving.
  */
 export function subtitleField(fields: Field[]): Field | undefined {
   const shown = fields.filter((f) => !isSecret(f) && f.value.trim() !== '')
 
-  return shown.find((f) => f.list) ?? shown.find((f) => ['email', 'name', 'text'].includes(f.kind))
+  return shown.find((f) => f.list) ?? shown.find((f) => ['email', 'name'].includes(f.kind))
 }
 
 /** The field the main button copies: the one marked, or the first secret that is not a 2FA code. */
 export function primaryField(fields: Field[]): Field | undefined {
-  const secrets = fields.filter((f) => isSecret(f) && f.value !== '')
+  // Never a 2FA field: its value is the seed that makes codes, which is exactly what the
+  // interface promises never to hand out.
+  const secrets = fields.filter((f) => isSecret(f) && f.value !== '' && f.kind !== 'totp')
 
-  return secrets.find((f) => f.primary) ?? secrets.find((f) => f.kind !== 'totp')
+  return secrets.find((f) => f.primary) ?? secrets[0]
 }
 
 /**

@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 
 import { api, type RecordPreview } from '../api'
 import { RecordTile } from './icons'
+import { toastError } from './toast'
 import { when } from './vault/paths'
 
 /**
@@ -99,7 +100,12 @@ export function TrashPanel({ title, records, retentionDays, onChanged, vaultId }
                 </td>
                 <td className="px-5 py-2.5">
                   <span className="flex items-center justify-end gap-1">
-                    <Button variant="outline" size="sm" onClick={() => void api.archiveRecord(record.id, false).then(onChanged)}>
+                    <Button variant="outline" size="sm" onClick={() =>
+                        void api
+                          .archiveRecord(record.id, false)
+                          .then(onChanged)
+                          .catch((cause) => toastError(cause, 'Não restaurei'))
+                      }>
                       <RotateCcw />
                       Restaurar
                     </Button>

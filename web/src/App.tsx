@@ -4,6 +4,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { Setup } from './screens/Setup'
 import { Unlock } from './screens/Unlock'
 import { Workspace } from './workspace/Workspace'
+import { clearNow } from './clipboard'
 import { hasToken } from './session'
 import { applyAppearance } from './theme'
 import { useStatus } from './useStatus'
@@ -25,6 +26,13 @@ export function App() {
 
   const theme = status?.appearance.theme
   const accent = status?.appearance.accent
+
+  // Locking takes the clipboard back. Here rather than in the workspace: the workspace is already
+  // gone by the time the status says the vault is locked.
+  const unlocked = status?.lock.unlocked
+  useEffect(() => {
+    if (unlocked === false) clearNow()
+  }, [unlocked])
 
   useEffect(() => {
     if (theme && accent) {

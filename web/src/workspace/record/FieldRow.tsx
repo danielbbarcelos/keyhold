@@ -28,9 +28,11 @@ interface FieldRowProps {
   /** Absent for an old version being previewed: nothing to record a read against. */
   recordId?: string
   badge?: 'list' | 'primary'
+  /** False for an old version: reads still reach the trail, but no live 2FA code is fetched. */
+  live?: boolean
 }
 
-export function FieldRow({ field, index, recordId, badge }: FieldRowProps) {
+export function FieldRow({ field, index, recordId, badge, live = true }: FieldRowProps) {
   const type = fieldType(field.kind)
   const Icon = type.icon
 
@@ -51,17 +53,17 @@ export function FieldRow({ field, index, recordId, badge }: FieldRowProps) {
         )}
       </span>
 
-      <Value field={field} index={index} recordId={recordId} />
+      <Value field={field} index={index} recordId={recordId} live={live} />
     </div>
   )
 }
 
-function Value({ field, index, recordId }: { field: Field; index: number; recordId?: string }) {
+function Value({ field, index, recordId, live }: { field: Field; index: number; recordId?: string; live: boolean }) {
   const label = field.label || fieldType(field.kind).label
 
   switch (field.kind) {
     case 'totp':
-      return <Totp recordId={recordId} index={index} label={label} />
+      return <Totp recordId={live ? recordId : undefined} trail={recordId} index={index} label={label} />
 
     case 'security_question':
       return (
@@ -168,7 +170,7 @@ function Secret({
               : 'tracking-[0.2em] text-muted-foreground select-none',
           )}
         >
-          {showing ? value || '—' : '•'.repeat(Math.min(Math.max(value.length, 8), 14))}
+          {showing ? value || '—' : '•'.repeat(12)}
         </span>
       </span>
       <Ops>
@@ -218,7 +220,7 @@ function Card({ field, recordId, label }: { field: Field; recordId?: string; lab
         </span>
       </span>
       <Ops>
-        {number && (
+        {(number || field.extra?.code || field.extra?.pin) && (
           <IconButton label={showing ? `Esconder (some em ${remaining}s)` : 'Revelar por 20 segundos'} onClick={toggle}>
             {showing ? <EyeOff /> : <Eye />}
           </IconButton>
@@ -231,7 +233,7 @@ function Card({ field, recordId, label }: { field: Field; recordId?: string; lab
 }
 
 /** A 2FA field: the code of the moment, from the binary, with a ring that empties as it ages. */
-function Totp({ recordId, index, label }: { recordId?: string; index: number; label: string }) {
+function Totp({ recordId, trail, index, label }: { recordId?: string; trail?: string; index: number; label: string }) {
   const [code, setCode] = useState<{ code: string; remaining: number } | null>(null)
   const [failed, setFailed] = useState('')
 
@@ -260,6 +262,8 @@ function Totp({ recordId, index, label }: { recordId?: string; index: number; la
     }
 
     void fetchCode()
+    // The code is on screen without a click, so showing it counts as a reveal for the trail.
+    void api.reportAccess(recordId, 'reveal', label).catch(() => {})
 
     return () => {
       alive = false
@@ -310,7 +314,7 @@ function Totp({ recordId, index, label }: { recordId?: string; index: number; la
         </span>
         {code && <span className="text-xs text-faint">{code.remaining} s</span>}
       </span>
-      <Ops>{code && <CopyButton value={code.code} label={label} recordId={recordId} seconds={code.remaining} />}</Ops>
+      <Ops>{code && <CopyButton value={code.code} label={label} recordId={recordId ?? trail} />}</Ops>
     </>
   )
 }
@@ -385,14 +389,15 @@ export function CopyButton({
     <IconButton
       label={copied > 0 ? `A área de transferência é limpa em ${copied}s` : `Copiar, e limpar depois de ${seconds}s`}
       onClick={() => {
-        if (recordId && report) {
-          void api.reportAccess(recordId, 'copy', label).catch(() => {})
-        }
-
-        void copyForSeconds(value, seconds, () => setCopied(0)).then(() => {
-          setCopied(seconds)
-          toast(`${label} copiado`, `A área de transferência é limpa em ${seconds} segundos.`)
-        })
+        void copyForSeconds(value, seconds, () => setCopied(0))
+          .then(() => {
+            // Reported once the copy happened: a trail that records copies that failed is a trail
+            // nobody can trust.
+            if (recordId && report) void api.reportAccess(recordId, 'copy', label).catch(() => {})
+            setCopied(seconds)
+            toast(`${label} copiado`, `A área de transferência é limpa em ${seconds} segundos.`)
+          })
+          .catch(() => toast('Não consegui copiar', 'O navegador não liberou a área de transferência nesta página.', 'error'))
       }}
     >
       {copied > 0 ? <Check className="text-primary" /> : <Copy />}

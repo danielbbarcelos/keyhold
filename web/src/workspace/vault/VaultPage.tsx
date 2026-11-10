@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CopyPlus,
   FolderInput,
@@ -37,6 +37,7 @@ import {
 } from '../../api'
 import { COLOURS } from '../colours'
 import { emptyPayload } from '../fields'
+import { DiscardDialog } from '../DiscardDialog'
 import { DeleteFolderDialog, MoveFolderDialog, RenameFolderDialog } from '../FolderDialogs'
 import type { MenuEntry } from '../menu'
 import { MoveToVaultDialog } from '../MoveToVaultDialog'
@@ -67,6 +68,7 @@ export function VaultPage({
   onSearch,
   onSeen,
   onAccounts,
+  onDirty,
 }: {
   status: Status
   vault: VaultSummary
@@ -80,6 +82,8 @@ export function VaultPage({
   onSeen: (record: RecordPreview) => void
   /** Ajustes, at Contas AWS: where an expired AWS session is renewed. */
   onAccounts: () => void
+  /** Tells the workspace a record is being edited with changes, so it asks before leaving. */
+  onDirty: (dirty: boolean) => void
 }) {
   const [folders, setFolders] = useState<FolderNode[]>([])
   const [records, setRecords] = useState<RecordPreview[]>([])
@@ -97,6 +101,22 @@ export function VaultPage({
   const [saving, setSaving] = useState(false)
   const [unavailable, setUnavailable] = useState<{ message: string; code?: string } | null>(null)
   const aws = vault.kind === 'aws'
+  const [origin, setOrigin] = useState('')
+  const [leaving, setLeaving] = useState<(() => void) | null>(null)
+  const dirty = editing !== null && JSON.stringify(editing) !== origin
+  const editingRef = useRef(false)
+  editingRef.current = editing !== null
+
+  useEffect(() => onDirty(dirty), [dirty, onDirty])
+
+  /** Run `go` now, or after "Descartar" when there are unsaved changes. */
+  const guard = (go: () => void) => (dirty ? setLeaving(() => go) : go())
+  const select = (next: Selection) => guard(() => onSelect(next))
+
+  const startEditing = (draft: EditDraft) => {
+    setOrigin(JSON.stringify(draft))
+    setEditing(draft)
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -125,7 +145,10 @@ export function VaultPage({
         .then((report) => setAttention(new Set([...flagged, ...report.health.findings.map((one) => one.record_id)])))
         .catch(() => {})
     } catch (cause) {
-      if (cause instanceof ApiError && cause.aws) {
+      if (cause instanceof ApiError && cause.aws && editingRef.current) {
+        // Never swap an open editor for an error page: the draft would have no way back.
+        toastError(cause, 'O cofre na AWS não respondeu')
+      } else if (cause instanceof ApiError && cause.aws) {
         setUnavailable({ message: cause.message, code: cause.aws })
       } else {
         toastError(cause, 'Não consegui ler o cofre')
@@ -194,31 +217,62 @@ export function VaultPage({
     await refresh()
   }
 
+  /**
+   * Save what changed, and only that: the payload when it changed (a new version), then the
+   * folder, then the rotation date. In AWS a folder change renames the parameter, so the steps
+   * after it use the new id. A failure after the payload is written says so rather than
+   * "não salvei".
+   */
   async function save() {
     if (!open || !editing) return
     setSaving(true)
 
+    const before = JSON.parse(origin) as EditDraft
+    const payloadChanged = JSON.stringify(editing.payload) !== JSON.stringify(before.payload)
+    let id = open.id
+    let wrote = false
+
     try {
-      await api.saveRecord(open.id, editing.payload, aws ? open.version : undefined)
+      if (payloadChanged) {
+        await api.saveRecord(id, editing.payload, aws ? open.version : undefined)
+        wrote = true
+      }
       if (editing.folderId !== open.folder_id) {
-        const moved = await api.moveRecord(open.id, editing.folderId)
-        // In AWS the name is the path, so moving gives the record a new id.
-        if (moved.id && moved.id !== open.id) {
-          setEditing(null)
-          await refresh()
-          onSelect({ kind: 'record', id: moved.id })
-          toast('Registro salvo', editing.payload.title)
-          return
-        }
+        const moved = await api.moveRecord(id, editing.folderId)
+        if (moved.id) id = moved.id
+        wrote = true
       }
       if ((editing.rotation ?? null) !== (open.rotation_due_at?.slice(0, 10) ?? null)) {
-        await api.setRotationDue(open.id, editing.rotation)
+        await api.setRotationDue(id, editing.rotation)
       }
+
       setEditing(null)
-      await reloadOpen()
-      toast('Registro salvo', `${editing.payload.title}, versão ${open.version + 1}.`)
+      if (id !== open.id) {
+        await refresh()
+        onSelect({ kind: 'record', id })
+      } else {
+        await reloadOpen()
+      }
+      toast('Registro salvo', editing.payload.title)
     } catch (cause) {
-      toastError(cause, 'Não salvei')
+      if (cause instanceof ApiError && cause.aws === 'conflict') {
+        // Somebody else saved in the meantime. Keep the draft, load their version underneath it,
+        // and say plainly that saving again will replace what they wrote.
+        try {
+          const fresh = await api.openRecord(open.id)
+          setOpen(fresh.record)
+        } catch {
+          /* the toast below still explains */
+        }
+        toastError(cause, 'Outra pessoa salvou antes. Salvar de novo substitui a versão dela.')
+      } else if (wrote) {
+        toastError(cause, 'Salvei em parte: o conteúdo foi gravado, o resto não')
+        setEditing(null)
+        if (id !== open.id) onSelect({ kind: 'record', id })
+        else void reloadOpen()
+      } else {
+        toastError(cause, 'Não salvei')
+      }
     } finally {
       setSaving(false)
     }
@@ -337,7 +391,9 @@ export function VaultPage({
         })),
       ],
     },
-    { kind: 'item', label: 'Mover para outro cofre', icon: Vault, onSelect: () => setMovingToVault({ id: record.id, title: record.title }) },
+    ...(aws
+      ? []
+      : [{ kind: 'item' as const, label: 'Mover para outro cofre', icon: Vault, onSelect: () => setMovingToVault({ id: record.id, title: record.title }) }]),
     { kind: 'separator' },
     {
       kind: 'item',
@@ -364,7 +420,7 @@ export function VaultPage({
               <Lock className="size-3.5" />
               Selado antes de tocar o disco
             </span>
-            <Button variant="outline" onClick={() => setEditing(null)}>
+            <Button variant="outline" onClick={() => guard(() => setEditing(null))}>
               Cancelar
             </Button>
             <Button disabled={saving || !editing.payload.title.trim()} onClick={() => void save()}>
@@ -379,18 +435,18 @@ export function VaultPage({
         )
       }
     >
-      <VaultSwitcher vaults={vaults} current={vault} onPick={onVault} onNew={onNewVault} onManage={onManageVaults} />
+      <VaultSwitcher vaults={vaults} current={vault} onPick={(id) => guard(() => onVault(id))} onNew={onNewVault} onManage={onManageVaults} />
       {chain.map((folder, index) => (
         <Crumb
           key={folder.id}
           last={index === chain.length - 1 && !openId}
-          onClick={() => onSelect({ kind: 'folder', id: folder.id })}
+          onClick={() => select({ kind: 'folder', id: folder.id })}
         >
           {folder.name}
         </Crumb>
       ))}
       {open && openId && (
-        <Crumb last={!editing} onClick={() => setEditing(null)}>
+        <Crumb last={!editing} onClick={() => guard(() => setEditing(null))}>
           {open.payload.title}
         </Crumb>
       )}
@@ -457,10 +513,11 @@ export function VaultPage({
 
       return (
         <RecordView
+          key={open.id}
           record={open}
           folders={folders}
           onEdit={() =>
-            setEditing({
+            startEditing({
               payload: structuredClone(open.payload),
               folderId: open.folder_id,
               rotation: open.rotation_due_at?.slice(0, 10) ?? null,
@@ -510,15 +567,26 @@ export function VaultPage({
           showTrash={!aws}
           onMode={setMode}
           onFilter={setFilter}
-          onRecord={(id) => onSelect({ kind: 'record', id })}
-          onFolder={(id) => onSelect({ kind: 'folder', id })}
-          onTrash={() => onSelect({ kind: 'trash' })}
+          onRecord={(id) => select({ kind: 'record', id })}
+          onFolder={(id) => select({ kind: 'folder', id })}
+          onTrash={() => select({ kind: 'trash' })}
           onDrop={(id, folderId) => void moveTo(id, folderId)}
           folderEntries={folderEntries}
           recordEntries={recordEntries}
         />
         <div className="min-h-0 min-w-0">{main()}</div>
       </div>
+
+      <DiscardDialog
+        open={leaving !== null}
+        onKeep={() => setLeaving(null)}
+        onDiscard={() => {
+          const go = leaving
+          setLeaving(null)
+          setEditing(null)
+          go?.()
+        }}
+      />
 
       {creating && (
         <NewRecordDialog

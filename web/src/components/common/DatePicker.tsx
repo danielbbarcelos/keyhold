@@ -71,7 +71,8 @@ export function DatePicker({
     if (typed.trim() === '') onChange('')
     else if (match) {
       const date = new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]))
-      if (!Number.isNaN(date.getTime())) onChange(toIso(date))
+      // 31/02 would roll into March without a word; a date that is not the one typed is refused.
+      if (date.getDate() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1) onChange(toIso(date))
     }
     setTyped(null)
   }

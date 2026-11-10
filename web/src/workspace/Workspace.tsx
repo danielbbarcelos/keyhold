@@ -5,6 +5,7 @@ import { clearNow } from '../clipboard'
 import { AgentApproval } from './AgentApproval'
 import { AuditPanel } from './AuditPanel'
 import { CommandPalette } from './CommandPalette'
+import { DiscardDialog } from './DiscardDialog'
 import { Home, type Seen } from './Home'
 import { InstancesPanel } from './InstancesPanel'
 import { NewVaultDialog } from './NewVaultDialog'
@@ -37,6 +38,20 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [askingVault, setAskingVault] = useState(false)
   const [section, setSection] = useState('')
+  const [dirty, setDirty] = useState(false)
+  const [leaving, setLeaving] = useState<(() => void) | null>(null)
+
+  /** Leaving the vault page with an unsaved edit asks first. */
+  const guard = (go: () => void) => (dirty ? setLeaving(() => go) : go())
+
+  // Closing the tab or reloading with an unsaved edit gets the browser's own question.
+  useEffect(() => {
+    if (!dirty) return
+    const ask = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener('beforeunload', ask)
+
+    return () => window.removeEventListener('beforeunload', ask)
+  }, [dirty])
 
   const refresh = useCallback(async () => {
     try {
@@ -126,10 +141,11 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
           onSelect={setSelection}
           onVault={(id) => openVault(id)}
           onNewVault={() => setAskingVault(true)}
-          onManageVaults={() => setPlace('settings')}
+          onManageVaults={() => guard(() => setPlace('settings'))}
           onSearch={search}
           onSeen={onSeen}
-          onAccounts={() => setPlace('settings')}
+          onAccounts={() => guard(() => setPlace('settings'))}
+          onDirty={setDirty}
         />
       )
     }
@@ -206,7 +222,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       <Rail
         place={place === 'vault' && !vault ? 'home' : place}
         status={status}
-        onGo={(next) => setPlace(next)}
+        onGo={(next) => guard(() => setPlace(next))}
         onLock={lock}
         onChanged={onChanged}
       />
@@ -244,7 +260,18 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
         onOpenChange={setPaletteOpen}
         onPick={(record) => {
           setPaletteOpen(false)
-          openRecord(record)
+          guard(() => openRecord(record))
+        }}
+      />
+
+      <DiscardDialog
+        open={leaving !== null}
+        onKeep={() => setLeaving(null)}
+        onDiscard={() => {
+          const go = leaving
+          setLeaving(null)
+          setDirty(false)
+          go?.()
         }}
       />
 

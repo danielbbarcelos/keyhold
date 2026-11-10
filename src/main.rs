@@ -91,6 +91,10 @@ enum Cmd {
         /// Take the name out of /etc/hosts instead.
         #[arg(long, conflicts_with = "name")]
         remove: bool,
+        /// Install mkcert's local authority without asking, when it is missing. It is trusted by
+        /// this machine's browsers for every site, so by default Keyhold asks first.
+        #[arg(long)]
+        install_ca: bool,
     },
 }
 
@@ -115,7 +119,7 @@ async fn main() -> Result<()> {
             // The command's own exit code, so this composes in a shell like anything else.
             std::process::exit(code);
         }
-        Some(Cmd::SetHost { name, remove }) => set_host(name, remove),
+        Some(Cmd::SetHost { name, remove, install_ca }) => set_host(name, remove, install_ca),
         None => serve(cli).await,
     }
 }
@@ -380,7 +384,29 @@ async fn load_tls() -> Option<axum_server::tls_rustls::RustlsConfig> {
 }
 
 /// `sudo keyhold set-host`: write or remove keyhold's line in /etc/hosts.
-fn set_host(name: Option<String>, remove: bool) -> Result<()> {
+/// Ask on the terminal whether to install mkcert's authority. No terminal means no.
+fn ask_to_install_authority() -> bool {
+    use std::io::{BufRead, IsTerminal, Write};
+
+    if !std::io::stdin().is_terminal() {
+        return false;
+    }
+
+    println!();
+    println!("  Para HTTPS, o mkcert precisa instalar uma autoridade local. Ela passa a ser aceita");
+    println!("  pelos navegadores desta máquina para qualquer site, e a chave dela fica na sua home");
+    println!("  (~/.local/share/mkcert). Quem copiar esse arquivo consegue se passar por qualquer site");
+    println!("  aqui. Se você já usa mkcert, nada muda.");
+    print!("  Instalar? [s/N] ");
+    let _ = std::io::stdout().flush();
+
+    let mut answer = String::new();
+    let _ = std::io::stdin().lock().read_line(&mut answer);
+
+    matches!(answer.trim().to_lowercase().as_str(), "s" | "sim" | "y" | "yes")
+}
+
+fn set_host(name: Option<String>, remove: bool, install_ca: bool) -> Result<()> {
     let name = name.unwrap_or_else(|| hosts::DEFAULT_NAME.to_string());
 
     if !remove {
@@ -407,9 +433,13 @@ fn set_host(name: Option<String>, remove: bool) -> Result<()> {
 
     if remove {
         hosts::replace_file(path, &hosts::without(&current))?;
-        hosts::remove_certificate()?;
+        let removed = hosts::remove_certificate()?;
         println!();
-        println!("  Pronto: o nome e o certificado do Keyhold saíram. Reinicie o Keyhold para valer.");
+        if removed {
+            println!("  Pronto: o nome e o certificado do Keyhold saíram. Reinicie o Keyhold para valer.");
+        } else {
+            println!("  O nome saiu do /etc/hosts. O certificado fica: rode com sudo (não como root) para apagá-lo.");
+        }
         println!();
 
         return Ok(());
@@ -420,7 +450,25 @@ fn set_host(name: Option<String>, remove: bool) -> Result<()> {
     println!();
     println!("  {name} aponta para 127.0.0.1 no /etc/hosts.");
 
-    let scheme = match hosts::make_certificate(&name)? {
+    let mut made = hosts::make_certificate(&name, install_ca)?;
+
+    if matches!(made, hosts::Certificate::NeedsAuthority) && ask_to_install_authority() {
+        made = hosts::make_certificate(&name, true)?;
+    }
+
+    // A certificate left from an earlier name would be served for this one and fail in the
+    // browser; when no new one was made, the old one goes.
+    if !matches!(made, hosts::Certificate::Made { .. }) {
+        let _ = hosts::remove_certificate();
+    }
+
+    let scheme = match made {
+        hosts::Certificate::NeedsAuthority => {
+            println!();
+            println!("  Sem a autoridade local do mkcert, o Keyhold fica em HTTP por esse nome. Para ter");
+            println!("  HTTPS, rode de novo e responda que sim, ou passe --install-ca.");
+            "http"
+        }
         hosts::Certificate::Made { cert } => {
             println!("  Certificado do mkcert em {}.", cert.display());
             "https"

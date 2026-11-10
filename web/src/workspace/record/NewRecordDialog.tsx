@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import type { Payload } from '../../api'
 import { fieldsOf, TEMPLATES } from '../fields'
 import { IconPicker } from '../IconPicker'
+import { DiscardDialog } from '../DiscardDialog'
 import { FieldEditor } from './FieldEditor'
 
 /**
@@ -50,6 +51,12 @@ export function NewRecordDialog({
   const [payload, setPayload] = useState<Payload>(initial)
   const [template, setTemplate] = useState<string>(cloning ? '' : 'branco')
   const [busy, setBusy] = useState(false)
+  const [asking, setAsking] = useState(false)
+  const filled =
+    payload.title.trim() !== '' ||
+    payload.notes.trim() !== '' ||
+    payload.fields.some((field) => field.value !== '' || Object.values(field.extra ?? {}).some(Boolean))
+  const close = () => (filled ? setAsking(true) : onCancel())
 
   function pick(id: string) {
     const chosen = TEMPLATES.find((one) => one.id === id)
@@ -64,12 +71,14 @@ export function NewRecordDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+    <Dialog open onOpenChange={(open) => !open && close()}>
       <DialogContent className="max-h-[calc(100vh-48px)] gap-0 overflow-hidden p-0 sm:max-w-[640px]">
         <DialogHeader className="border-b px-6 pt-5 pb-4">
           <DialogTitle className="text-lg">{cloning ? 'Clonar registro' : 'Novo registro'}</DialogTitle>
           <DialogDescription>
-            Só o título e um campo de identificação aparecem na lista. O resto fica selado.
+            {cloning
+              ? 'Uma cópia com os mesmos campos. Os anexos não vão junto.'
+              : 'Só o título e um campo de identificação aparecem na lista. O resto fica selado.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -117,6 +126,7 @@ export function NewRecordDialog({
               className="min-h-[72px]"
               value={payload.notes}
               placeholder="Qualquer coisa que ajude a lembrar depois"
+              spellCheck={false}
               onChange={(event) => setPayload({ ...payload, notes: event.target.value })}
             />
           </label>
@@ -127,7 +137,7 @@ export function NewRecordDialog({
             <Folder className="size-3.5 shrink-0" />
             {where}
           </span>
-          <Button variant="outline" onClick={onCancel}>
+          <Button variant="outline" onClick={close}>
             Cancelar
           </Button>
           <Button
@@ -146,6 +156,7 @@ export function NewRecordDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <DiscardDialog open={asking} what="este registro novo" onKeep={() => setAsking(false)} onDiscard={onCancel} />
     </Dialog>
   )
 }

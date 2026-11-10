@@ -417,7 +417,7 @@ fn account(ssm: &mut Ssm) {
     ]);
     ssm.seed(
         "/app/prod/api",
-        r#"{"keyhold":1,"fields":[{"label":"Usuário","kind":"text","value":"deploy"},{"label":"Senha","kind":"password","value":"s3nha"}],"icon":null}"#,
+        r#"{"keyhold":1,"fields":[{"label":"Usuário","kind":"text","value":"deploy","list":true},{"label":"Senha","kind":"password","value":"s3nha"}],"icon":null}"#,
         Some("API"),
         "alias/prod",
         &[("keyhold:formato", "json"), ("keyhold:trocar-ate", "2026-12-01")],

@@ -245,7 +245,7 @@ set_host() {
   info "giving Keyhold the name $SET_HOST in /etc/hosts (sudo asks for your password)"
 
   if sudo "$BIN_DIR/$APP_BIN" set-host "$SET_HOST"; then
-    ok "http://$SET_HOST:7717 reaches Keyhold from its next start"
+    ok "$SET_HOST reaches Keyhold from its next start (the address is printed above)"
   else
     warn "the name was not set; run later: sudo $BIN_DIR/$APP_BIN set-host $SET_HOST"
   fi

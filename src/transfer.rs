@@ -232,13 +232,15 @@ pub fn from_csv(text: &str) -> Result<Vec<ExportedRecord>> {
 
     let title = column(&["name", "title", "nome", "título", "titulo", "account"])
         .ok_or_else(|| anyhow!("o CSV não tem uma coluna de nome (name, title, nome)"))?;
-    let username = column(&["username", "user", "login", "usuário", "usuario", "email"]);
-    let password = column(&["password", "senha", "pass"]);
-    let url = column(&["url", "uri", "website", "site", "endereço", "endereco"]);
+    // Bitwarden prefixes its login columns with `login_`.
+    let username = column(&["username", "user", "login", "login_username", "usuário", "usuario", "email"]);
+    let password = column(&["password", "senha", "pass", "login_password"]);
+    let url = column(&["url", "uri", "login_uri", "website", "site", "endereço", "endereco"]);
+    let totp = column(&["totp", "otpauth", "otp", "login_totp", "2fa"]);
     let notes = column(&["notes", "note", "notas", "observações", "comentário"]);
     let folder = column(&["folder", "group", "grouping", "pasta", "categoria"]);
 
-    let known: Vec<usize> = [Some(title), username, password, url, notes, folder]
+    let known: Vec<usize> = [Some(title), username, password, url, notes, folder, totp]
         .into_iter()
         .flatten()
         .collect();
@@ -262,14 +264,20 @@ pub fn from_csv(text: &str) -> Result<Vec<ExportedRecord>> {
             fields.push(Field::new("Senha", "password", &secret));
         }
 
+        if let Some(seed) = totp.map(|at| cell(Some(at))).filter(|v| !v.trim().is_empty()) {
+            fields.push(Field::new("Código 2FA", "totp", &seed));
+        }
+
         // Whatever the file had that this does not understand, kept under its own column name.
         for (index, value) in row.iter().enumerate() {
             if known.contains(&index) || value.trim().is_empty() {
                 continue;
             }
 
+            // Kept hidden: a column this does not understand may well be a secret (an API key, a
+            // recovery code), and a visible text field would surface it in lists and searches.
             let label = header.get(index).cloned().unwrap_or_else(|| format!("Coluna {index}"));
-            fields.push(Field::new(&label, "text", value));
+            fields.push(Field::new(&label, "hidden", value));
         }
 
         found.push(ExportedRecord {

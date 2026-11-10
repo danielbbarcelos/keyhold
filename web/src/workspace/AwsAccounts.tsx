@@ -312,6 +312,10 @@ function NewLoginDialog({
                 .startAwsLogin(url, region, label.trim())
                 .then((answer) => {
                   if (answer.device) onStarted({ login: answer.login, device: answer.device })
+                  else {
+                    toast('Login SSO conectado', answer.login.label || answer.login.start_url)
+                    onCancel()
+                  }
                 })
                 .catch((cause) => toastError(cause, 'O SSO não respondeu'))
                 .finally(() => setBusy(false))
@@ -340,6 +344,10 @@ function DeviceDialog({
 }) {
   const [state, setState] = useState<'waiting' | 'denied' | 'expired'>('waiting')
   const interval = useRef(Math.max(device.interval, 2))
+  // The parent re-renders every second (the lock clock); keeping the callback in a ref stops each
+  // render from cancelling the next poll before it runs.
+  const done = useRef(onDone)
+  done.current = onDone
 
   useEffect(() => {
     let alive = true
@@ -349,7 +357,7 @@ function DeviceDialog({
       try {
         const answer = await api.pollAwsLogin(login.id)
         if (!alive) return
-        if (answer.state === 'done') return onDone()
+        if (answer.state === 'done') return done.current()
         if (answer.state === 'denied' || answer.state === 'expired') return setState(answer.state)
         if (answer.state === 'slow_down') interval.current += 5
         timer = window.setTimeout(poll, interval.current * 1000)
@@ -364,7 +372,7 @@ function DeviceDialog({
       alive = false
       window.clearTimeout(timer)
     }
-  }, [login.id, onDone])
+  }, [login.id])
 
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
@@ -378,7 +386,10 @@ function DeviceDialog({
         </DialogHeader>
         <div className="grid place-items-center gap-3 rounded-xl border bg-raised py-5">
           <span className="font-mono text-2xl tracking-[0.2em]">{device.user_code}</span>
-          <Button onClick={() => window.open(device.verification_uri_complete, '_blank', 'noopener,noreferrer')}>
+          <Button
+            disabled={!device.verification_uri_complete.startsWith(['https', '//'].join(':'))}
+            onClick={() => window.open(device.verification_uri_complete, '_blank', 'noopener,noreferrer')}
+          >
             <ExternalLink />
             Abrir a página da AWS
           </Button>

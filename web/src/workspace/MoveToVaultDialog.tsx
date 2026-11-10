@@ -47,7 +47,8 @@ export function MoveToVaultDialog({
   onDone: () => void
   onCancel: () => void
 }) {
-  const elsewhere = vaults.filter((vault) => vault.id !== fromVaultId && !vault.archived)
+  // AWS vaults are not offered: moving between the local file and an AWS account is not done yet.
+  const elsewhere = vaults.filter((vault) => vault.id !== fromVaultId && !vault.archived && vault.kind !== 'aws')
 
   const [vaultId, setVaultId] = useState(elsewhere[0]?.id ?? '')
   const [folders, setFolders] = useState<FolderNode[]>([])
