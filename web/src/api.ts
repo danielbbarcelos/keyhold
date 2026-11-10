@@ -35,7 +35,16 @@ export interface Status {
   lock: LockState
   retention_days: number
   log_reads: boolean
+  appearance: Appearance
   attemptsLeft: number
+}
+
+export type Theme = 'grafite' | 'claro' | 'sistema'
+export type Accent = 'ambar' | 'oceano' | 'floresta' | 'coral'
+
+export interface Appearance {
+  theme: Theme
+  accent: Accent
 }
 
 export interface AgentRequest {
@@ -245,6 +254,9 @@ export const api = {
 
   visibility: (visible: boolean) =>
     call<{ lock: LockState }>('POST', '/api/visibility', { visible }),
+
+  setAppearance: (appearance: Appearance) =>
+    call<{ appearance: Appearance }>('PUT', '/api/settings/appearance', appearance),
 
   setLockPolicy: (policy: LockPolicy) =>
     call<{ lock: LockState }>('PUT', '/api/settings/lock', policy),

@@ -8,6 +8,10 @@
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Geist Variable', sans-serif;
+    --text-sm: 0.9375rem;
+    --text-sm--line-height: 1.375rem;
+    --text-xs: 0.8125rem;
+    --text-xs--line-height: 1.125rem;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -16,6 +20,12 @@
     --color-sidebar-primary: var(--sidebar-primary);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar: var(--sidebar);
+    --color-sidebar-muted: var(--sidebar-muted);
+    --color-sidebar-hover: var(--sidebar-hover);
+    --color-rail: var(--rail);
+    --color-surface: var(--surface);
+    --color-hover: var(--hover);
+    --color-link: var(--link);
     --color-chart-5: var(--chart-5);
     --color-chart-4: var(--chart-4);
     --color-chart-3: var(--chart-3);
@@ -49,84 +59,103 @@
 }
 
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    /*
+     * Claro. Two themes and four accents, picked in Ajustes > Aparência and kept by the binary, not
+     * the browser (`settings::appearance`). The neutrals carry the screen; the accent is spent on the
+     * one button that matters, the selected row and the focus ring, and nowhere else.
+     */
+    --background: #ffffff;
+    --foreground: #1e1f22;
+    --card: #ffffff;
+    --card-foreground: #1e1f22;
+    --popover: #ffffff;
+    --popover-foreground: #1e1f22;
+    --primary: #f0b429;
+    --primary-foreground: #1b1a16;
+    --secondary: #f5f6f7;
+    --secondary-foreground: #1e1f22;
+    --muted: #f5f6f7;
+    --muted-foreground: #5f6368;
+    --accent: #f1f2f4;
+    --accent-foreground: #1e1f22;
+    --destructive: #d1334f;
+    --border: #e4e5e8;
+    --input: #c4c7cc;
+    --ring: #c98a00;
+    --link: #1f66c9;
+    --chart-1: #f0b429;
+    --chart-2: #3b8fe0;
+    --chart-3: #3fb984;
+    --chart-4: #f06b5a;
+    --chart-5: #9f6bd8;
+    --radius: 0.5rem;
+    --rail: #e9eaed;
+    --sidebar: #f5f6f7;
+    --sidebar-foreground: #1e1f22;
+    --sidebar-muted: #55585e;
+    --sidebar-primary: #f0b429;
+    --sidebar-primary-foreground: #1b1a16;
+    --sidebar-accent: #fcefc9;
+    --sidebar-accent-foreground: #7a5100;
+    --sidebar-hover: rgb(0 0 0 / 4.5%);
+    --sidebar-border: #e4e5e8;
+    --sidebar-ring: #c98a00;
+    --surface: #fafafb;
+    --hover: #f3f4f6;
 }
 
 .dark {
-    /*
-     * Softened from the preset's defaults, which sit at near-black on near-white: pleasant in a
-     * screenshot and tiring in a window somebody keeps open beside their work. Three changes, all
-     * of them about contrast rather than colour:
-     *
-     *  - the background lifts off pure black, and the foreground comes down off pure white, which
-     *    is what actually reduces glare;
-     *  - the surfaces above it (card, popover) stay a step lighter so panels still read as panels,
-     *    while the sidebar goes a step darker so the rail reads as behind rather than beside;
-     *  - a trace of chroma on a cool hue, so the greys look deliberate instead of dead.
-     */
-    --background: oklch(0.205 0.005 265);
-    --foreground: oklch(0.918 0.004 265);
-    --card: oklch(0.246 0.006 265);
-    --card-foreground: oklch(0.918 0.004 265);
-    --popover: oklch(0.252 0.006 265);
-    --popover-foreground: oklch(0.918 0.004 265);
-    --primary: oklch(0.858 0.004 265);
-    --primary-foreground: oklch(0.225 0.006 265);
-    --secondary: oklch(0.292 0.006 265);
-    --secondary-foreground: oklch(0.918 0.004 265);
-    --muted: oklch(0.278 0.006 265);
-    --muted-foreground: oklch(0.702 0.008 265);
-    --accent: oklch(0.315 0.008 265);
-    --accent-foreground: oklch(0.945 0.004 265);
-    --destructive: oklch(0.684 0.164 22.216);
-    --border: oklch(1 0 0 / 11%);
-    --input: oklch(1 0 0 / 14%);
-    --ring: oklch(0.58 0.01 265);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.186 0.005 265);
-    --sidebar-foreground: oklch(0.918 0.004 265);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.292 0.006 265);
-    --sidebar-accent-foreground: oklch(0.945 0.004 265);
-    --sidebar-border: oklch(1 0 0 / 11%);
-    --sidebar-ring: oklch(0.58 0.01 265);
+    /* Grafite: the default. Off pure black and off pure white, which is what actually cuts glare. */
+    --background: #1b1d21;
+    --foreground: #d6d7d9;
+    --card: #22252a;
+    --card-foreground: #d6d7d9;
+    --popover: #24272c;
+    --popover-foreground: #d6d7d9;
+    --primary: #f0b429;
+    --primary-foreground: #1b1a16;
+    --secondary: #2b2e33;
+    --secondary-foreground: #e8e8e8;
+    --muted: #2b2e33;
+    --muted-foreground: #a3a6ab;
+    --accent: #2b2e33;
+    --accent-foreground: #f5f5f5;
+    --destructive: #f0506e;
+    --border: #33363b;
+    --input: #4a4d53;
+    --ring: #f0b429;
+    --link: #7db4f5;
+    --rail: #121316;
+    --sidebar: #17181b;
+    --sidebar-foreground: #f2f2f3;
+    --sidebar-muted: rgb(242 242 243 / 68%);
+    --sidebar-primary: #f0b429;
+    --sidebar-primary-foreground: #1b1a16;
+    --sidebar-accent: rgb(240 180 41 / 14%);
+    --sidebar-accent-foreground: #f5c452;
+    --sidebar-hover: rgb(255 255 255 / 5%);
+    --sidebar-border: rgb(255 255 255 / 7%);
+    --sidebar-ring: #f0b429;
+    --surface: #22252a;
+    --hover: #272a2f;
 }
+
+/* Accents. Âmbar is the logo's colour and the default; the others swap the same four tokens. */
+[data-accent='oceano'] {
+    --primary: #3b8fe0; --primary-foreground: #ffffff; --ring: #2f74c0; --sidebar-primary: #3b8fe0;
+    --sidebar-primary-foreground: #ffffff; --sidebar-accent: #e1eefc; --sidebar-accent-foreground: #1f5fb0;
+}
+[data-accent='floresta'] {
+    --primary: #2e9e6a; --primary-foreground: #ffffff; --ring: #237f55; --sidebar-primary: #2e9e6a;
+    --sidebar-primary-foreground: #ffffff; --sidebar-accent: #dcf3e8; --sidebar-accent-foreground: #1e7a50;
+}
+[data-accent='coral'] {
+    --primary: #e8604e; --primary-foreground: #ffffff; --ring: #c94a39; --sidebar-primary: #e8604e;
+    --sidebar-primary-foreground: #ffffff; --sidebar-accent: #fde6e2; --sidebar-accent-foreground: #b2402f;
+}
+.dark[data-accent='oceano'] { --ring: #3b8fe0; --sidebar-accent: rgb(59 143 224 / 16%); --sidebar-accent-foreground: #8cc2ff; }
+.dark[data-accent='floresta'] { --ring: #3fb984; --sidebar-accent: rgb(63 185 132 / 15%); --sidebar-accent-foreground: #6fd3a6; }
+.dark[data-accent='coral'] { --ring: #f06b5a; --sidebar-accent: rgb(240 107 90 / 15%); --sidebar-accent-foreground: #ff9a8c; }
 
 @layer base {
   * {
@@ -162,4 +191,24 @@
   [data-disabled] {
     cursor: not-allowed;
   }
+}
+
+/*
+ * Scrolling is always the thin bar, never the platform's. Radix ScrollArea covers the panes that use
+ * it; this covers everything else that scrolls (dialog bodies, textareas, the settings page).
+ */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent;
+  }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track, *::-webkit-scrollbar-corner { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--foreground) 22%, transparent);
+    border: 2px solid transparent;
+    border-radius: 8px;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--foreground) 38%, transparent); }
 }

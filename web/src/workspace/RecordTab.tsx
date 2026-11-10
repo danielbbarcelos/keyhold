@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import {
+  Check,
   Copy,
+  CopyPlus,
+  EllipsisVertical,
   ExternalLink,
+  FolderInput,
   History,
   PanelRightClose,
   PanelRightOpen,
@@ -22,7 +26,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
@@ -39,12 +49,13 @@ import {
 
 import { api, ApiError, type FolderNode, type OpenRecord, type VersionEntry } from '../api'
 import { Input } from '@/components/ui/input'
+import { copyForSeconds } from '../clipboard'
 
 import { Attachments } from './Attachments'
 import { RecordEditor } from './RecordEditor'
 import { SecretLine } from './SecretLine'
 import { VersionDialog } from './VersionDialog'
-import { kindOf } from './kinds'
+import { kindOf, kindTone } from './kinds'
 
 /**
  * One open record: what it holds, and what is true about it.
@@ -58,12 +69,24 @@ interface RecordTabProps {
   folders: FolderNode[]
   onReload: (id: string) => Promise<void>
   onClone: (id: string) => void
+  onMoveToVault: () => void
   onClosed: (id: string) => void
 }
 
-export function RecordTab({ record, folders, onReload, onClone, onClosed }: RecordTabProps) {
+/** Below this width the details panel would squeeze the record itself, so it starts closed. */
+const WIDE_ENOUGH = '(min-width: 1280px)'
+
+export function RecordTab({
+  record,
+  folders,
+  onReload,
+  onClone,
+  onMoveToVault,
+  onClosed,
+}: RecordTabProps) {
   const [editing, setEditing] = useState(false)
-  const [propertiesOpen, setPropertiesOpen] = useState(true)
+  const [propertiesOpen, setPropertiesOpen] = useState(() => window.matchMedia(WIDE_ENOUGH).matches)
+  const [copied, setCopied] = useState(0)
   const [draft, setDraft] = useState(record.payload)
   const [versions, setVersions] = useState<VersionEntry[]>([])
   const [viewing, setViewing] = useState<number | null>(null)
@@ -79,6 +102,26 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
       .catch(() => setVersions([]))
   }, [record.id, record.version, record.payload])
 
+  // Follow the window: narrowing it closes the panel, widening it opens it again.
+  useEffect(() => {
+    const query = window.matchMedia(WIDE_ENOUGH)
+    const follow = () => setPropertiesOpen(query.matches)
+
+    query.addEventListener('change', follow)
+
+    return () => query.removeEventListener('change', follow)
+  }, [])
+
+  useEffect(() => {
+    if (copied <= 0) {
+      return
+    }
+
+    const tick = window.setInterval(() => setCopied((left) => Math.max(0, left - 1)), 1000)
+
+    return () => window.clearInterval(tick)
+  }, [copied])
+
   async function run(action: () => Promise<unknown>) {
     try {
       await action()
@@ -92,6 +135,19 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
   if (editing) {
     return (
       <RecordEditor
+        heading={
+          <header className="flex items-center gap-4">
+            <span className={cn('grid size-12 shrink-0 place-items-center rounded-xl', kindTone(record.kind))}>
+              <KindIconOf kind={record.kind} />
+            </span>
+            <div className="min-w-0">
+              <h2 className="truncate text-[1.375rem] leading-7 font-bold tracking-tight">
+                Editar {record.payload.title}
+              </h2>
+              <p className="text-sm text-muted-foreground">{kindOf(record.kind).label}</p>
+            </div>
+          </header>
+        }
         kind={record.kind}
         payload={draft}
         onChange={setDraft}
@@ -106,6 +162,10 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
   }
 
   const link = safeHref(record.payload.url)
+  // The value behind the main button: the first password, or failing that the first hidden field.
+  const secret =
+    record.payload.fields.find((field) => field.kind === 'password' && field.value) ??
+    record.payload.fields.find((field) => field.kind === 'hidden' && field.value)
   const kind = kindOf(record.kind)
   const KindIcon = kind.icon
 
@@ -115,62 +175,151 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
         'grid h-full min-h-0',
         // The panel is a drawer, not a margin: open it is wide enough to read a folder name and a
         // date without wrapping, and closed it takes no room at all.
-        propertiesOpen ? 'grid-cols-[minmax(0,1fr)_22rem]' : 'grid-cols-[minmax(0,1fr)_0]',
+        propertiesOpen ? 'grid-cols-[minmax(0,1fr)_21rem]' : 'grid-cols-[minmax(0,1fr)_0]',
       )}
     >
       <ScrollArea className="h-full min-w-0">
-        <div className="space-y-4 p-6">
-          <header className="space-y-1">
-            <h2 className="flex min-w-0 items-center gap-2 text-lg font-medium">
-              <KindIcon className="size-4 shrink-0 text-muted-foreground" />
-              <span className="truncate">{record.payload.title}</span>
-              {record.favourite && <Star className="size-4 shrink-0 fill-current text-primary" />}
+        <div className="max-w-3xl px-8 pt-7 pb-10">
+          <header className="flex items-start gap-4">
+            <span className={cn('grid size-12 shrink-0 place-items-center rounded-xl', kindTone(record.kind))}>
+              <KindIcon className="size-6" />
+            </span>
 
-              <span className="flex-1" />
+            <div className="min-w-0 flex-1">
+              <h2 className="flex min-w-0 items-center gap-2 text-[1.375rem] leading-7 font-bold tracking-tight">
+                <span className="truncate">{record.payload.title}</span>
+                {record.favourite && <Star className="size-4 shrink-0 fill-current text-primary" />}
+              </h2>
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={propertiesOpen ? 'Esconder propriedades' : 'Mostrar propriedades'}
-                    aria-expanded={propertiesOpen}
-                    onClick={() => setPropertiesOpen(!propertiesOpen)}
-                  >
-                    {propertiesOpen ? <PanelRightClose /> : <PanelRightOpen />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {propertiesOpen ? 'Esconder propriedades' : 'Mostrar propriedades'}
-                </TooltipContent>
-              </Tooltip>
-            </h2>
+              {link ? (
+                <a
+                  href={link}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="mt-1 inline-flex max-w-full items-center gap-1.5 text-sm text-link hover:underline"
+                >
+                  <span className="truncate">{record.payload.url}</span>
+                  <ExternalLink className="size-3.5 shrink-0" />
+                </a>
+              ) : (
+                record.payload.url && (
+                  <p className="mt-1 truncate text-sm text-muted-foreground">{record.payload.url}</p>
+                )
+              )}
+            </div>
 
-            {link ? (
-              <a
-                href={link}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-              >
-                {record.payload.url}
-                <ExternalLink className="size-3" />
-              </a>
-            ) : (
-              record.payload.url && (
-                <p className="text-sm text-muted-foreground">{record.payload.url}</p>
-              )
-            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={propertiesOpen ? 'Esconder detalhes' : 'Mostrar detalhes'}
+                  aria-expanded={propertiesOpen}
+                  onClick={() => setPropertiesOpen(!propertiesOpen)}
+                >
+                  {propertiesOpen ? <PanelRightClose /> : <PanelRightOpen />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{propertiesOpen ? 'Esconder detalhes' : 'Mostrar detalhes'}</TooltipContent>
+            </Tooltip>
           </header>
 
           {record.compromised_at && (
-            <Badge variant="destructive" className="gap-1">
+            <Badge variant="destructive" className="mt-4 gap-1">
               <ShieldAlert className="size-3" />
               Comprometido desde {record.compromised_at.slice(0, 10)}
             </Badge>
           )}
 
-          <div className="rounded-lg border px-4">
+          {/*
+            * One action in colour: copying the password is what a vault is opened for, nine times in
+            * ten. Editing and favouriting sit beside it; everything rarer, and everything that
+            * removes, goes behind the menu, away from a hurried click.
+            */}
+          <div className="mt-5 mb-6 flex flex-wrap items-center gap-2">
+            {secret ? (
+              <Button
+                onClick={() => {
+                  void api.reportAccess(record.id, 'copy', secret.label).catch(() => {})
+                  void copyForSeconds(secret.value, CLIPBOARD_SECONDS, () => setCopied(0)).then(() =>
+                    setCopied(CLIPBOARD_SECONDS),
+                  )
+                }}
+              >
+                {copied > 0 ? <Check /> : <Copy />}
+                {copied > 0 ? `Copiado, limpa em ${copied}s` : `Copiar ${secret.label.toLowerCase()}`}
+              </Button>
+            ) : (
+              <Button onClick={() => setEditing(true)}>
+                <Pencil />
+                Editar
+              </Button>
+            )}
+
+            {secret && (
+              <Button variant="outline" onClick={() => setEditing(true)}>
+                <Pencil />
+                Editar
+              </Button>
+            )}
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="size-9"
+                  aria-label={record.favourite ? 'Tirar dos favoritos' : 'Favoritar'}
+                  aria-pressed={record.favourite}
+                  onClick={() => void run(() => api.favouriteRecord(record.id, !record.favourite))}
+                >
+                  <Star className={record.favourite ? 'fill-current text-primary' : undefined} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{record.favourite ? 'Tirar dos favoritos' : 'Favoritar'}</TooltipContent>
+            </Tooltip>
+
+            <span className="flex-1" />
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" className="size-9" aria-label="Mais ações">
+                  <EllipsisVertical />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuItem onSelect={() => onClone(record.id)}>
+                  <CopyPlus />
+                  Clonar
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={onMoveToVault}>
+                  <FolderInput />
+                  Mover para outro cofre
+                </DropdownMenuItem>
+                {versions.length > 0 && (
+                  <DropdownMenuItem onSelect={() => setViewing(versions[0].version)}>
+                    <History />
+                    Versões anteriores
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  onSelect={() =>
+                    void run(() => api.setCompromised(record.id, record.compromised_at === null))
+                  }
+                >
+                  <ShieldAlert />
+                  {record.compromised_at ? 'Não está mais comprometido' : 'Marcar como comprometido'}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onSelect={() => setConfirmingDelete(true)}>
+                  <Trash2 />
+                  Mandar para a lixeira
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border bg-surface">
             {record.payload.username && (
               <SecretLine label="Usuário" value={record.payload.username} masked={false} />
             )}
@@ -186,54 +335,20 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
             ))}
 
             {record.payload.username === '' && record.payload.fields.length === 0 && (
-              <p className="py-3 text-sm text-muted-foreground">Este registro não tem campos.</p>
+              <p className="px-4 py-3 text-sm text-muted-foreground">Este registro não tem campos.</p>
             )}
           </div>
 
           {record.payload.notes && (
-            <p className="rounded-lg border bg-muted/30 p-4 text-sm whitespace-pre-wrap">
-              {record.payload.notes}
-            </p>
+            <>
+              <h3 className="mt-7 mb-2 text-sm font-bold">Notas</h3>
+              <p className="rounded-xl border bg-surface px-4 py-3.5 text-sm whitespace-pre-wrap">
+                {record.payload.notes}
+              </p>
+            </>
           )}
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" onClick={() => setEditing(true)}>
-              <Pencil />
-              Editar
-            </Button>
-
-            <Button size="sm" variant="outline" onClick={() => onClone(record.id)}>
-              <Copy />
-              Clonar
-            </Button>
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void run(() => api.favouriteRecord(record.id, !record.favourite))}
-            >
-              <Star />
-              {record.favourite ? 'Tirar dos favoritos' : 'Favoritar'}
-            </Button>
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                void run(() => api.setCompromised(record.id, record.compromised_at === null))
-              }
-            >
-              <ShieldAlert />
-              {record.compromised_at ? 'Não está mais comprometido' : 'Marcar comprometido'}
-            </Button>
-
-            <Button size="sm" variant="destructive" onClick={() => setConfirmingDelete(true)}>
-              <Trash2 />
-              Excluir
-            </Button>
-          </div>
+          {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
         </div>
       </ScrollArea>
 
@@ -243,19 +358,17 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
         * partway down the page. Closed, it is a zero-width column that still draws its edge.
         */}
       <ScrollArea className={cn('h-full min-w-0 border-l', !propertiesOpen && 'overflow-hidden')}>
-        <aside className={cn('space-y-4 p-4', !propertiesOpen && 'invisible')}>
-          <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Propriedades
-          </h3>
+        <aside className={cn('space-y-5 px-5 py-6', !propertiesOpen && 'invisible')}>
+          <h3 className="text-sm font-bold">Detalhes</h3>
 
-          <dl className="space-y-3 text-sm">
-            <div className="space-y-1">
-              <dt className="text-muted-foreground">Tipo</dt>
+          <dl className="space-y-4 text-sm">
+            <div>
+              <dt className="mb-1.5 text-xs font-semibold text-muted-foreground">Tipo</dt>
               <dd>{kind.label}</dd>
             </div>
 
-            <div className="space-y-1">
-              <dt className="text-muted-foreground">Pasta</dt>
+            <div>
+              <dt className="mb-1.5 text-xs font-semibold text-muted-foreground">Pasta</dt>
               <dd>
                 <Select
                   value={record.folder_id ?? 'root'}
@@ -278,14 +391,11 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
               </dd>
             </div>
 
-            <div className="space-y-1">
-              <dt className="text-muted-foreground">Versão</dt>
-              <dd>{record.version}</dd>
-            </div>
-
-            <div className="space-y-1">
-              <dt className="text-muted-foreground">Alterado</dt>
-              <dd>{record.updated_at.replace('T', ' ').replace('Z', '')}</dd>
+            <div>
+              <dt className="mb-1.5 text-xs font-semibold text-muted-foreground">Versão</dt>
+              <dd>
+                {record.version}, alterado em {record.updated_at.slice(0, 16).replace('T', ' às ')}
+              </dd>
             </div>
 
             {/*
@@ -293,12 +403,11 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
               * it passes. Not a policy and not a reminder that fires — just the answer to "when did
               * I decide this one should change?", kept next to the record it is about.
               */}
-            <div className="space-y-1">
-              <dt className="text-muted-foreground">Trocar até</dt>
+            <div>
+              <dt className="mb-1.5 text-xs font-semibold text-muted-foreground">Trocar até</dt>
               <dd className="flex items-center gap-1">
                 <Input
                   type="date"
-                  className="h-8"
                   value={record.rotation_due_at?.slice(0, 10) ?? ''}
                   onChange={(event) =>
                     void run(() =>
@@ -323,16 +432,12 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
             </div>
           </dl>
 
-          <Separator />
-
           <Attachments recordId={record.id} />
 
           {versions.length > 0 && (
             <>
-              <Separator />
-
-              <h3 className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                <History className="size-3" />
+              <h3 className="flex items-center gap-1.5 pt-2 text-sm font-bold">
+                <History className="size-4 text-muted-foreground" />
                 Histórico
               </h3>
 
@@ -341,11 +446,11 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
                   <li key={entry.version}>
                     <button
                       type="button"
-                      className="flex w-full items-center justify-between gap-2 rounded-md px-1 py-0.5 text-left text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
                       onClick={() => setViewing(entry.version)}
                     >
                       <span>
-                        v{entry.version} · {entry.created_at.slice(0, 10)}
+                        Versão {entry.version}, {entry.created_at.slice(0, 10)}
                       </span>
                       <span className="text-xs">ver</span>
                     </button>
@@ -360,7 +465,7 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
       <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir “{record.payload.title}”?</AlertDialogTitle>
+            <AlertDialogTitle>Mandar “{record.payload.title}” para a lixeira?</AlertDialogTitle>
             <AlertDialogDescription>
               Vai para a lixeira, e de lá dá para restaurar enquanto o prazo não vencer.
             </AlertDialogDescription>
@@ -369,12 +474,13 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
+              variant="destructive"
               onClick={() => {
                 setConfirmingDelete(false)
                 void api.archiveRecord(record.id, true).then(() => onClosed(record.id))
               }}
             >
-              Excluir
+              Mandar para a lixeira
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -394,6 +500,14 @@ export function RecordTab({ record, folders, onReload, onClone, onClosed }: Reco
       )}
     </div>
   )
+}
+
+const CLIPBOARD_SECONDS = 30
+
+function KindIconOf({ kind }: { kind: string }) {
+  const Icon = kindOf(kind).icon
+
+  return <Icon className="size-6" />
 }
 
 /**

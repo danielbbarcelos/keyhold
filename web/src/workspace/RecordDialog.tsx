@@ -5,7 +5,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ScrollArea } from '@/components/ui/scroll-area'
 
 import type { Payload } from '../api'
 import { RecordEditor } from './RecordEditor'
@@ -46,17 +45,17 @@ export function RecordDialog({
 }: RecordDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onCancel()}>
-      <DialogContent className="max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-2xl">
-        <DialogHeader className="border-b px-6 py-4">
+      <DialogContent className="flex h-[min(85vh,52rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[40rem]">
+        <DialogHeader className="px-6 pt-6 pb-4">
           <DialogTitle>{cloning ? 'Clonar registro' : 'Novo registro'}</DialogTitle>
           <DialogDescription>
             {cloning
-              ? 'Uma cópia idêntica, para você ajustar antes de salvar. Ela nasce na mesma pasta do original — anexos não vêm junto.'
-              : 'O conteúdo é selado antes de tocar o disco. Só o título e o usuário voltam na lista.'}
+              ? 'Uma cópia idêntica, para você ajustar antes de salvar. Ela nasce na mesma pasta do original, sem os anexos.'
+              : 'Só o título e o usuário aparecem na lista. O resto fica selado.'}
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[calc(85vh-6rem)]">
+        <div className="min-h-0 flex-1">
           <RecordEditor
             kind={kind}
             payload={payload}
@@ -64,10 +63,11 @@ export function RecordDialog({
             onChange={onChange}
             onSave={onSave}
             onCancel={onCancel}
+            saveLabel={cloning ? 'Criar a cópia' : 'Criar registro'}
             busy={busy}
             error={error}
           />
-        </ScrollArea>
+        </div>
       </DialogContent>
     </Dialog>
   )

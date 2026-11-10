@@ -78,26 +78,29 @@ export function SecretLine({ label, value, masked = true, recordId }: SecretLine
   }, [copied])
 
   return (
-    <div className="group relative grid grid-cols-[10rem_1fr_auto] items-center gap-3 border-b py-2.5 last:border-b-0">
-      <span className="truncate text-sm text-muted-foreground">{label}</span>
-
-      <span
-        className={
-          showing
-            ? 'truncate text-sm'
-            : 'truncate text-sm tracking-[0.2em] text-muted-foreground select-none'
-        }
-      >
-        {showing ? value || '—' : '•'.repeat(Math.min(value.length || 8, 20))}
+    <div className="group relative flex items-center gap-3 border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-hover">
+      {/* Label over value, and the value gets the whole width: an address or a token is read in
+          full or not at all, and a grid that halves the row cut them to "dev@…". */}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-semibold text-muted-foreground">{label}</span>
+        <span
+          className={
+            showing
+              ? 'mt-0.5 block text-sm break-all'
+              : 'mt-0.5 block text-sm tracking-[0.2em] text-muted-foreground select-none'
+          }
+        >
+          {showing ? value || '—' : '•'.repeat(Math.min(value.length || 8, 20))}
+        </span>
       </span>
 
-      <span className="flex items-center gap-1 opacity-60 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <span className="flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
         {masked && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon-sm"
+                size="icon"
                 aria-label={showing ? 'Esconder' : 'Revelar'}
                 onClick={() => {
                   if (!showing && masked && recordId) {
@@ -122,7 +125,7 @@ export function SecretLine({ label, value, masked = true, recordId }: SecretLine
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
-              size="icon-sm"
+              size="icon"
               aria-label="Copiar"
               onClick={() => {
                 if (recordId) {

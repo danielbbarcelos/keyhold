@@ -1,17 +1,23 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  ArrowLeftRight,
   Bell,
   BellOff,
   Bot,
+  Check,
   KeyRound,
   Loader2,
   Lock,
+  Palette,
   RefreshCw,
   ScrollText,
   ShieldCheck,
+  Timer,
   Trash2,
+  Vault,
   Wand2,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,6 +32,14 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { cn } from '@/lib/utils'
 
 import { PasswordInput } from '@/components/common/PasswordInput'
 
@@ -43,8 +57,11 @@ import {
 import {
   api,
   ApiError,
+  type Accent,
   type AgentGrant,
+  type Appearance,
   type LockPolicy,
+  type Theme,
   type Status,
   type VaultSummary,
 } from '../api'
@@ -67,19 +84,254 @@ interface SettingsProps {
   onVaultsChanged: () => void
 }
 
+const SECTIONS: Array<{ id: string; label: string; icon: LucideIcon }> = [
+  { id: 'aparencia', label: 'Aparência', icon: Palette },
+  { id: 'tranca', label: 'Tranca automática', icon: Timer },
+  { id: 'segundo-fator', label: 'Segundo fator', icon: ShieldCheck },
+  { id: 'senha', label: 'Senha-mestra', icon: KeyRound },
+  { id: 'cofres', label: 'Cofres', icon: Vault },
+  { id: 'chaves', label: 'Trocar a chave', icon: RefreshCw },
+  { id: 'lixeira', label: 'Lixeira', icon: Trash2 },
+  { id: 'trilha', label: 'Trilha', icon: ScrollText },
+  { id: 'exportar', label: 'Exportar e importar', icon: ArrowLeftRight },
+  { id: 'agentes', label: 'Agentes', icon: Bot },
+]
+
+/**
+ * The sections are cards in their own files, and they are flattened here rather than one by one:
+ * a page of settings reads as one document with dividers, not a stack of boxes.
+ */
+const FLAT =
+  'divide-y [&_[data-slot=card]]:gap-3 [&_[data-slot=card]]:rounded-none [&_[data-slot=card]]:bg-transparent [&_[data-slot=card]]:py-8 [&_[data-slot=card]]:shadow-none [&_[data-slot=card]]:ring-0 ' +
+  '[&_[data-slot=card-header]]:px-0 [&_[data-slot=card-content]]:px-0 [&_[data-slot=card-footer]]:border-0 [&_[data-slot=card-footer]]:bg-transparent [&_[data-slot=card-footer]]:px-0 [&_[data-slot=card-footer]]:pt-2 ' +
+  '[&_[data-slot=card-title]]:text-xl [&_[data-slot=card-title]]:font-bold [&_[data-slot=card-title]]:tracking-tight [&_[data-slot=card-title]>svg]:hidden [&_[data-slot=card-description]]:max-w-2xl'
+
 export function Settings({ status, vaults, onChanged, onVaultsChanged }: SettingsProps) {
+  const [active, setActive] = useState(SECTIONS[0].id)
+  const page = useRef<HTMLDivElement>(null)
+
+  // Light up the section being read. The one nearest the top of the page wins.
+  useEffect(() => {
+    const root = page.current
+
+    if (!root) {
+      return
+    }
+
+    const watcher = new IntersectionObserver(
+      (entries) => {
+        const top = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
+
+        if (top) {
+          setActive(top.target.id.replace('ajuste-', ''))
+        }
+      },
+      { root, rootMargin: '0px 0px -70% 0px' },
+    )
+
+    root.querySelectorAll('section[id^="ajuste-"]').forEach((section) => watcher.observe(section))
+
+    return () => watcher.disconnect()
+  }, [])
+
+  const sections: Record<string, React.ReactNode> = {
+    aparencia: <AppearanceSettings appearance={status.appearance} onChanged={onChanged} />,
+    tranca: <AutoLock policy={status.lock.policy} onChanged={onChanged} />,
+    'segundo-fator': <SecondFactor status={status} onChanged={onChanged} />,
+    senha: <MasterPassword status={status} onChanged={onChanged} />,
+    cofres: <VaultsPanel vaults={vaults} onChanged={onVaultsChanged} />,
+    chaves: <Rotation vaults={vaults} onChanged={onVaultsChanged} />,
+    lixeira: <Retention days={status.retention_days} onChanged={onChanged} />,
+    trilha: <TrailSettings on={status.log_reads} onChanged={onChanged} />,
+    exportar: <TransferPanel vaults={vaults} onChanged={onVaultsChanged} />,
+    agentes: <AgentAccess vaults={vaults} onChanged={onVaultsChanged} />,
+  }
+
   return (
-    <div className="mx-auto grid max-w-2xl gap-4 p-6">
-      <AutoLock policy={status.lock.policy} onChanged={onChanged} />
-      <SecondFactor status={status} onChanged={onChanged} />
-      <MasterPassword status={status} onChanged={onChanged} />
-      <VaultsPanel vaults={vaults} onChanged={onVaultsChanged} />
-      <Rotation vaults={vaults} onChanged={onVaultsChanged} />
-      <Retention days={status.retention_days} onChanged={onChanged} />
-      <TrailSettings on={status.log_reads} onChanged={onChanged} />
-      <TransferPanel vaults={vaults} onChanged={onVaultsChanged} />
-      <AgentAccess vaults={vaults} onChanged={onVaultsChanged} />
+    <div className="grid min-h-0 flex-1 grid-cols-[15rem_minmax(0,1fr)]">
+      <nav aria-label="Seções dos ajustes" className="space-y-0.5 border-r px-3 py-5">
+        {SECTIONS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            aria-current={active === id}
+            onClick={() => {
+              setActive(id)
+              document.getElementById(`ajuste-${id}`)?.scrollIntoView({ block: 'start' })
+            }}
+            className={cn(
+              'flex h-9 w-full items-center gap-3 rounded-lg px-3 text-left text-sm whitespace-nowrap transition-colors',
+              active === id
+                ? 'bg-sidebar-accent font-semibold text-sidebar-accent-foreground'
+                : 'hover:bg-hover',
+            )}
+          >
+            <Icon className={cn('size-[18px]', active !== id && 'text-muted-foreground')} />
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      <div ref={page} className="min-h-0 overflow-y-auto">
+        <div className={cn('max-w-3xl px-10 pb-24', FLAT)}>
+          {SECTIONS.map(({ id }) => (
+            <section key={id} id={`ajuste-${id}`} className="scroll-mt-2">
+              {sections[id]}
+            </section>
+          ))}
+        </div>
+      </div>
     </div>
+  )
+}
+
+const THEMES: Array<{ value: Theme; label: string; rail: string; side: string; page: string; ink: string }> = [
+  { value: 'grafite', label: 'Grafite', rail: '#121316', side: '#17181b', page: '#1b1d21', ink: '#d6d7d9' },
+  { value: 'claro', label: 'Claro', rail: '#e9eaed', side: '#f5f6f7', page: '#ffffff', ink: '#1e1f22' },
+]
+
+const ACCENTS: Array<{ value: Accent; label: string; colour: string }> = [
+  { value: 'ambar', label: 'Âmbar', colour: '#f0b429' },
+  { value: 'oceano', label: 'Oceano', colour: '#3b8fe0' },
+  { value: 'floresta', label: 'Floresta', colour: '#2e9e6a' },
+  { value: 'coral', label: 'Coral', colour: '#e8604e' },
+]
+
+/**
+ * Theme and accent. Saved by the binary, so the unlock screen opens in the same colours, and applied
+ * the moment it is picked rather than after a round trip.
+ */
+function AppearanceSettings({
+  appearance,
+  onChanged,
+}: {
+  appearance: Appearance
+  onChanged: () => void
+}) {
+  async function save(patch: Partial<Appearance>) {
+    await api.setAppearance({ ...appearance, ...patch })
+    onChanged()
+  }
+
+  return (
+    <Card className="py-6">
+      <CardHeader className="px-6">
+        <CardTitle>Aparência</CardTitle>
+        <CardDescription>Vale para este Keyhold. Nada disso fica no conteúdo dos cofres.</CardDescription>
+      </CardHeader>
+
+      <CardContent className="space-y-7 px-6">
+        <div className="space-y-2.5">
+          <h3 className="text-sm font-bold">Tema</h3>
+          <div className="flex flex-wrap gap-3">
+            {THEMES.map((theme) => (
+              <ThemeCard
+                key={theme.value}
+                label={theme.label}
+                chosen={appearance.theme === theme.value}
+                onPick={() => void save({ theme: theme.value })}
+              >
+                <Preview {...theme} />
+              </ThemeCard>
+            ))}
+            <ThemeCard
+              label="Igual ao sistema"
+              chosen={appearance.theme === 'sistema'}
+              onPick={() => void save({ theme: 'sistema' })}
+            >
+              <span className="grid h-full grid-cols-2">
+                <span className="bg-[#1b1d21]" />
+                <span className="bg-white" />
+              </span>
+            </ThemeCard>
+          </div>
+        </div>
+
+        <div className="space-y-2.5">
+          <h3 className="text-sm font-bold">Cor de destaque</h3>
+          <p className="text-sm text-muted-foreground">
+            A cor do botão principal, do item selecionado e do foco.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            {ACCENTS.map((accent) => {
+              const chosen = appearance.accent === accent.value
+
+              return (
+                <button
+                  key={accent.value}
+                  type="button"
+                  aria-pressed={chosen}
+                  onClick={() => void save({ accent: accent.value })}
+                  className={cn(
+                    'flex h-11 w-36 items-center gap-3 rounded-xl border px-3 text-sm font-semibold transition-colors hover:bg-hover',
+                    chosen && 'border-ring ring-1 ring-ring',
+                  )}
+                >
+                  <span
+                    className="grid size-5 place-items-center rounded-full text-white"
+                    style={{ background: accent.colour }}
+                  >
+                    {chosen && <Check className="size-3" strokeWidth={3} />}
+                  </span>
+                  {accent.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ThemeCard({
+  label,
+  chosen,
+  onPick,
+  children,
+}: {
+  label: string
+  chosen: boolean
+  onPick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={chosen}
+      onClick={onPick}
+      className={cn(
+        'w-44 overflow-hidden rounded-xl border text-left transition-colors hover:border-input',
+        chosen && 'border-ring ring-1 ring-ring',
+      )}
+    >
+      <span className="block h-20 border-b">{children}</span>
+      <span className="flex items-center gap-2 px-3 py-2.5 text-sm font-semibold">
+        <span
+          className={cn(
+            'size-4 shrink-0 rounded-full border-[1.5px] border-input',
+            chosen && 'border-[5px] border-ring',
+          )}
+        />
+        {label}
+      </span>
+    </button>
+  )
+}
+
+function Preview({ rail, side, page, ink }: { rail: string; side: string; page: string; ink: string }) {
+  return (
+    <span className="grid h-full grid-cols-[1.25rem_3rem_1fr]">
+      <span style={{ background: rail }} />
+      <span style={{ background: side }} />
+      <span className="flex flex-col gap-1.5 p-3" style={{ background: page }}>
+        <span className="h-1.5 w-3/5 rounded-full bg-primary" />
+        <span className="h-1.5 w-4/5 rounded-full opacity-25" style={{ background: ink }} />
+        <span className="h-1.5 w-2/5 rounded-full opacity-25" style={{ background: ink }} />
+      </span>
+    </span>
   )
 }
 
@@ -92,10 +344,10 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged }: Setting
  * into a re-unlock. The two clocks answer the same question, so they offer the same answers.
  */
 const CHOICES: Array<[string, number | null]> = [
-  ['1 min', 60],
-  ['5 min', 300],
-  ['15 min', 900],
-  ['1 h', 3600],
+  ['1 minuto', 60],
+  ['5 minutos', 300],
+  ['15 minutos', 900],
+  ['1 hora', 3600],
   ['Nunca', null],
 ]
 
@@ -119,14 +371,16 @@ function AutoLock({ policy, onChanged }: { policy: LockPolicy; onChanged: () => 
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="space-y-4 px-6">
+      <CardContent className="px-6">
         <Choices
-          label="Parado por"
+          label="Trancar depois de parado por"
+          hint="Sem nenhum clique ou tecla no Keyhold"
           current={policy.idle_seconds}
           onPick={(value) => void save({ idle_seconds: value })}
         />
         <Choices
-          label="Janela escondida por"
+          label="Trancar com a janela escondida por"
+          hint="Aba em segundo plano ou janela minimizada"
           current={policy.hidden_seconds}
           onPick={(value) => void save({ hidden_seconds: value })}
         />
@@ -143,10 +397,12 @@ function AutoLock({ policy, onChanged }: { policy: LockPolicy; onChanged: () => 
  */
 function Choices({
   label,
+  hint,
   current,
   onPick,
 }: {
   label: string
+  hint: string
   current: number | null
   onPick: (value: number | null) => void
 }) {
@@ -166,20 +422,26 @@ function Choices({
   })()
 
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map(([text, value]) => (
-          <Button
-            key={text}
-            size="sm"
-            variant={current === value ? 'default' : 'outline'}
-            onClick={() => onPick(value)}
-          >
-            {text}
-          </Button>
-        ))}
+    <div className="flex items-center justify-between gap-6 border-t py-3.5 first:border-t-0">
+      <div className="min-w-0">
+        <div className="text-sm font-semibold">{label}</div>
+        <div className="text-xs text-muted-foreground">{hint}</div>
       </div>
+      <Select
+        value={current === null ? 'never' : String(current)}
+        onValueChange={(value) => onPick(value === 'never' ? null : Number(value))}
+      >
+        <SelectTrigger className="w-48 shrink-0" aria-label={label}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map(([text, value]) => (
+            <SelectItem key={text} value={value === null ? 'never' : String(value)}>
+              {text}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   )
 }
@@ -189,7 +451,13 @@ function minutes(seconds: number): string {
     return `${seconds} s`
   }
 
-  return seconds % 3600 === 0 ? `${seconds / 3600} h` : `${Math.round(seconds / 60)} min`
+  if (seconds % 3600 === 0) {
+    return seconds === 3600 ? '1 hora' : `${seconds / 3600} horas`
+  }
+
+  const whole = Math.round(seconds / 60)
+
+  return whole === 1 ? '1 minuto' : `${whole} minutos`
 }
 
 function SecondFactor({ status, onChanged }: { status: Status; onChanged: () => void }) {

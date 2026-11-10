@@ -5,7 +5,9 @@ import { Setup } from './screens/Setup'
 import { Unlock } from './screens/Unlock'
 import { Workspace } from './workspace/Workspace'
 import { hasToken } from './session'
+import { applyAppearance } from './theme'
 import { useStatus } from './useStatus'
+import { useEffect } from 'react'
 
 /**
  * Which screen keyhold is on, decided by one question asked of the binary.
@@ -17,6 +19,15 @@ import { useStatus } from './useStatus'
  */
 export function App() {
   const { status, offline, refresh } = useStatus()
+
+  const theme = status?.appearance.theme
+  const accent = status?.appearance.accent
+
+  useEffect(() => {
+    if (theme && accent) {
+      applyAppearance({ theme, accent })
+    }
+  }, [theme, accent])
 
   return <TooltipProvider delayDuration={300}>{screen()}</TooltipProvider>
 

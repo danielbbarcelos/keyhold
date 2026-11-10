@@ -9,9 +9,8 @@ import './index.css'
 // interface makes depends on it, and there is no second place to look for it.
 adoptTokenFromLocation()
 
-// keyhold is dark, and only dark. A vault is a tool you keep open beside other work rather than
-// something you read, and a theme switch is one more decision to hand somebody who came here to
-// look up a password.
+// Grafite until the binary says otherwise: the default theme, and the one that avoids a white flash
+// before the first status arrives. `applyAppearance` takes over from there.
 document.documentElement.classList.add('dark')
 
 const root = document.getElementById('root')

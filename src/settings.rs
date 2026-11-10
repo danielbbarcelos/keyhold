@@ -113,6 +113,60 @@ pub fn set_log_reads(vault: &Store, on: bool) -> Result<bool> {
     Ok(on)
 }
 
+const APPEARANCE: &str = "appearance";
+
+/// How the interface looks: which theme and which accent colour.
+///
+/// Not secret and not about the vault's contents, which is why it sits here in a plain row. It is
+/// read before unlocking too, so the unlock screen opens in the same theme as everything else.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Appearance {
+    /// `grafite` (dark), `claro` (light) or `sistema` (follow the desktop).
+    pub theme: String,
+    /// `ambar`, `oceano`, `floresta` or `coral`.
+    pub accent: String,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self { theme: "grafite".into(), accent: "ambar".into() }
+    }
+}
+
+impl Appearance {
+    /// Anything unknown falls back to the default rather than failing: an old or hand-edited row
+    /// must never leave the interface without a theme.
+    pub fn sanitised(self) -> Self {
+        let fallback = Self::default();
+        let theme = match self.theme.as_str() {
+            "grafite" | "claro" | "sistema" => self.theme,
+            _ => fallback.theme,
+        };
+        let accent = match self.accent.as_str() {
+            "ambar" | "oceano" | "floresta" | "coral" => self.accent,
+            _ => fallback.accent,
+        };
+
+        Self { theme, accent }
+    }
+}
+
+pub fn appearance(vault: &Store) -> Appearance {
+    read(vault, APPEARANCE)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<Appearance>(&raw).ok())
+        .map(Appearance::sanitised)
+        .unwrap_or_default()
+}
+
+pub fn set_appearance(vault: &Store, appearance: Appearance) -> Result<Appearance> {
+    let sanitised = appearance.sanitised();
+    write(vault, APPEARANCE, &serde_json::to_string(&sanitised)?)?;
+
+    Ok(sanitised)
+}
+
 fn read(vault: &Store, key: &str) -> Result<Option<String>> {
     Ok(vault
         .conn()
@@ -217,6 +271,22 @@ mod tests {
         // A restart finds it the way it was left.
         let store = Store::open(&path).unwrap();
         assert!(agent_surface(&store));
+    }
+
+    #[test]
+    fn appearance_defaults_and_ignores_what_it_does_not_know() {
+        let (_dir, store) = scratch();
+
+        assert_eq!(appearance(&store), Appearance::default());
+
+        let saved = set_appearance(
+            &store,
+            Appearance { theme: "claro".into(), accent: "rosa-choque".into() },
+        )
+        .unwrap();
+
+        assert_eq!(saved, Appearance { theme: "claro".into(), accent: "ambar".into() });
+        assert_eq!(appearance(&store), saved);
     }
 
     #[test]

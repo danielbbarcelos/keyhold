@@ -77,6 +77,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/heartbeat", post(heartbeat))
         .route("/visibility", post(visibility))
         .route("/settings/lock", put(set_lock_policy))
+        .route("/settings/appearance", put(set_appearance))
         .route("/settings/retention", put(set_retention))
         .route("/settings/log-reads", put(set_log_reads))
         .route("/audit", get(read_audit))
@@ -186,6 +187,7 @@ async fn status(State(state): State<Arc<AppState>>) -> Answer {
         "lock": lock,
         "retention_days": settings::retention_days(&store),
         "log_reads": settings::log_reads(&store),
+        "appearance": settings::appearance(&store),
         "attemptsLeft": MAX_FAILURES.saturating_sub(*state.failures.lock().unwrap()),
     })))
 }
@@ -789,6 +791,19 @@ async fn set_retention(
     let saved = settings::set_retention_days(&store, body.days).map_err(bad_request)?;
 
     Ok(Json(json!({ "retention_days": saved })))
+}
+
+/// Theme and accent. Allowed while locked, like everything else on the unlock screen's side of the
+/// line: it carries nothing about the vault.
+async fn set_appearance(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<settings::Appearance>,
+) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    let saved = settings::set_appearance(&store, body).map_err(bad_request)?;
+
+    Ok(Json(json!({ "appearance": saved })))
 }
 
 async fn set_lock_policy(

@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
+  ChevronDown,
   Cpu,
   Folder,
-  FolderPlus,
+  Layers,
   Lock,
   Plus,
   Search,
   ScrollText,
   Settings2,
+  SquarePen,
   Star,
   Trash2,
   Vault,
   X,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 import {
   AlertDialog,
@@ -68,7 +71,7 @@ import { InstancesPanel } from './InstancesPanel'
 import { HealthPanel } from './HealthPanel'
 import { Settings } from './Settings'
 import { TrashPanel } from './TrashPanel'
-import { kindIcon } from './kinds'
+import { kindIcon, kindTone, subtitleOf } from './kinds'
 
 /**
  * The workspace: a rail of lenses, a tree, tabs, and a properties panel.
@@ -94,6 +97,10 @@ const LENSES: Array<{ id: Lens; label: string; icon: typeof Vault }> = [
   { id: 'instances', label: 'Instâncias', icon: Cpu },
   { id: 'settings', label: 'Ajustes', icon: Settings2 },
 ]
+
+/** A rail button: the lens it is on reads in the accent, the rest stay quiet. */
+const RAIL_BUTTON =
+  'size-10 rounded-[10px] text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-foreground aria-[current=true]:bg-sidebar-accent aria-[current=true]:text-sidebar-accent-foreground [&_svg:not([class*=size-])]:size-5'
 
 interface WorkspaceProps {
   status: Status
@@ -132,6 +139,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   // `what` is the phrase the dialog puts in its title, so one record and a selection read alike.
   const [movingToVault, setMovingToVault] = useState<{ ids: string[]; what: string } | null>(null)
   const [selected, setSelected] = useState<string[]>([])
+  const [foldersOpen, setFoldersOpen] = useState(true)
   const [dragging, setDragging] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null | undefined>(undefined)
   const [error, setError] = useState('')
@@ -434,11 +442,22 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   const across = vaultId === EVERY_VAULT
   const openVaults = vaults.filter((vault) => !vault.archived)
   const nameOfVault = (id: string) => vaults.find((vault) => vault.id === id)?.name ?? ''
+  const liveRecords = records.filter((record) => !record.archived)
+  const listTitle = across
+    ? 'Todos os cofres'
+    : lens === 'favourites'
+      ? 'Favoritos'
+      : (folders.find((folder) => folder.id === folderId)?.name ?? 'Todos os registros')
+
+  function startNewRecord() {
+    setCreating({ kind: 'login', payload: emptyPayload('login'), folderId })
+    setActiveTab(null)
+  }
 
   return (
-    <div className="grid h-screen grid-cols-[3.5rem_16rem_minmax(0,1fr)] overflow-hidden bg-background">
+    <div className="grid h-screen grid-cols-[4rem_16.5rem_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden bg-background">
       {/* ── the rail ─────────────────────────────────────────────────────────────────────────── */}
-      <nav className="flex flex-col items-center gap-1 border-r bg-sidebar py-3">
+      <nav className="flex flex-col items-center gap-1.5 bg-rail py-3">
         {/*
           * The logo goes home.
           *
@@ -451,7 +470,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
             <Button
               variant="ghost"
               size="icon"
-              className="mb-2"
+              className="mb-2 size-10 rounded-[10px] hover:bg-sidebar-hover"
               aria-label="Início"
               onClick={() => {
                 setLens('all')
@@ -462,7 +481,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                 setSelected([])
               }}
             >
-              <Logo className="size-7" />
+              <Logo className="size-9 rounded-[10px]" />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="right">Início</TooltipContent>
@@ -475,8 +494,9 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
             <Tooltip key={entry.id}>
               <TooltipTrigger asChild>
                 <Button
-                  variant={entry.id === lens ? 'secondary' : 'ghost'}
+                  variant="ghost"
                   size="icon"
+                  className={RAIL_BUTTON}
                   aria-label={entry.label}
                   aria-current={entry.id === lens}
                   onClick={() => {
@@ -499,6 +519,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
             <Button
               variant="ghost"
               size="icon"
+              className={RAIL_BUTTON}
               aria-label="Trancar agora"
               onClick={() => setLockAsked(true)}
             >
@@ -511,21 +532,19 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
 
       {/* ── the explorer ─────────────────────────────────────────────────────────────────────── */}
       {lens === 'settings' ? (
-        <div className="col-span-2 min-w-0">
+        <div className="col-span-2 flex min-h-0 min-w-0 flex-col">
           <Header status={status} onChanged={onChanged} title="Ajustes" />
-          <ScrollArea className="h-[calc(100vh-3.5rem)]">
-            <Settings
-              status={status}
-              vaults={vaults}
-              onChanged={onChanged}
-              onVaultsChanged={refreshVaults}
-            />
-          </ScrollArea>
+          <Settings
+            status={status}
+            vaults={vaults}
+            onChanged={onChanged}
+            onVaultsChanged={refreshVaults}
+          />
         </div>
       ) : (
         <>
-          <aside className="flex min-w-0 flex-col border-r bg-sidebar">
-            <div className="flex h-14 items-center gap-1.5 border-b px-3">
+          <aside className="flex min-w-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+            <div className="flex h-14 shrink-0 items-center gap-2 border-b border-sidebar-border pr-3 pl-2">
               <VaultPicker
                 vaults={vaults}
                 value={vaultId}
@@ -535,25 +554,29 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                   setTabs([])
                   setActiveTab(null)
                 }}
+                onNew={() => setAsking({ what: 'vault' })}
               />
 
+              {/* The most common thing done here gets the one coloured button in the sidebar. A new
+                  vault is rarer, and lives at the bottom of the vault picker. */}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Novo cofre"
-                    onClick={() => setAsking({ what: 'vault' })}
+                    size="icon"
+                    className="size-8 rounded-lg"
+                    aria-label="Novo registro"
+                    disabled={!vaultId || across}
+                    onClick={startNewRecord}
                   >
-                    <Plus />
+                    <SquarePen />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Novo cofre</TooltipContent>
+                <TooltipContent>Novo registro</TooltipContent>
               </Tooltip>
             </div>
 
-            <ScrollArea className="flex-1">
-              <div className="space-y-0.5 p-2">
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="space-y-px p-2 pt-3">
                 {across ? (
                   openVaults.map((vault) => (
                     <TreeRow
@@ -568,8 +591,13 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                 ) : (
                 <>
                 <TreeRow
-                  selected={folderId === null}
-                  onClick={() => setFolderId(null)}
+                  icon={Layers}
+                  count={liveRecords.length}
+                  selected={lens !== 'favourites' && folderId === null}
+                  onClick={() => {
+                    setLens('all')
+                    setFolderId(null)
+                  }}
                   dropping={dropTarget === null}
                   onDragOver={(event) => {
                     event.preventDefault()
@@ -590,13 +618,40 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                   Todos os registros
                 </TreeRow>
 
-                {folders.map((folder) => (
+                <TreeRow
+                  icon={Star}
+                  count={liveRecords.filter((record) => record.favourite).length}
+                  selected={lens === 'favourites'}
+                  onClick={() => {
+                    setLens('favourites')
+                    setFolderId(null)
+                  }}
+                >
+                  Favoritos
+                </TreeRow>
+
+                <button
+                  type="button"
+                  aria-expanded={foldersOpen}
+                  onClick={() => setFoldersOpen((open) => !open)}
+                  className="mt-3 flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-sm text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-foreground"
+                >
+                  <ChevronDown className={cn('size-3.5 transition-transform', !foldersOpen && '-rotate-90')} />
+                  Pastas
+                </button>
+
+                {foldersOpen &&
+                  folders.map((folder) => (
                   <TreeRow
                     key={folder.id}
                     depth={folder.depth}
+                    count={liveRecords.filter((record) => record.folder_id === folder.id).length}
                     selected={folder.id === folderId}
                     colour={folder.colour}
-                    onClick={() => setFolderId(folder.id)}
+                    onClick={() => {
+                      setLens('all')
+                      setFolderId(folder.id)
+                    }}
                     dropping={dropTarget === folder.id}
                     onDragOver={(event) => {
                       event.preventDefault()
@@ -629,23 +684,24 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                     {folder.name}
                   </TreeRow>
                 ))}
+
+                {foldersOpen && (
+                  <button
+                    type="button"
+                    disabled={!vaultId}
+                    onClick={() => setAsking({ what: 'folder', parentId: folderId })}
+                    className="flex h-[30px] w-full items-center gap-2.5 rounded-md pl-2 text-sm text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-foreground"
+                  >
+                    <span className="grid size-5 place-items-center rounded-md bg-sidebar-hover">
+                      <Plus className="size-3.5" />
+                    </span>
+                    Adicionar pasta
+                  </button>
+                )}
                 </>
                 )}
               </div>
             </ScrollArea>
-
-            <div className="border-t p-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                disabled={!vaultId || across}
-                onClick={() => setAsking({ what: 'folder', parentId: folderId })}
-              >
-                <FolderPlus />
-                Nova pasta
-              </Button>
-            </div>
           </aside>
 
           {/* ── the middle ─────────────────────────────────────────────────────────────────── */}
@@ -667,10 +723,10 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
               ) : (
               <>
               {!wholeLens && (
-              <div className="relative max-w-sm flex-1">
-                <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <div className="relative max-w-md flex-1">
+                <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  className="h-8 pl-8"
+                  className="h-9 bg-surface pl-9 dark:bg-surface"
                   placeholder="Buscar…   Ctrl+P"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
@@ -682,10 +738,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                 <Button
                   size="sm"
                   disabled={!vaultId || across}
-                  onClick={() => {
-                    setCreating({ kind: 'login', payload: emptyPayload('login'), folderId })
-                    setActiveTab(null)
-                  }}
+                  onClick={startNewRecord}
                 >
                   <Plus />
                   Novo registro
@@ -726,9 +779,15 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                 )}
               </ScrollArea>
             ) : (
-            <div className="grid min-h-0 flex-1 grid-cols-[17rem_minmax(0,1fr)]">
+            <div className="grid min-h-0 flex-1 grid-cols-[18rem_minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
               <ScrollArea className="border-r">
-                <ul className="space-y-0.5 p-2">
+                <div className="flex items-baseline justify-between gap-2 px-4 pt-4 pb-2">
+                  <h2 className="truncate text-lg font-bold tracking-tight">{listTitle}</h2>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {visible.length} {visible.length === 1 ? 'registro' : 'registros'}
+                  </span>
+                </div>
+                <ul className="space-y-0.5 px-2 pb-2">
                   {visible.map((record) => {
                     const Icon = kindIcon(record.kind)
                     const attention = needsAttention(record)
@@ -748,10 +807,8 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                             setDropTarget(undefined)
                           }}
                           className={cn(
-                            'group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
-                            record.id === activeTab
-                              ? 'bg-accent text-accent-foreground'
-                              : 'hover:bg-muted',
+                            'group flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm transition-colors',
+                            record.id === activeTab ? 'bg-accent text-accent-foreground' : 'hover:bg-hover',
                             dragging === record.id && 'opacity-50',
                           )}
                         >
@@ -760,19 +817,22 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                             * column of its own: a permanent column of checkboxes turns a list you
                             * read into a form you fill in.
                             */}
-                          <span className="relative size-4 shrink-0">
-                            <Icon
+                          <span className="relative grid size-9 shrink-0 place-items-center">
+                            <span
                               className={cn(
-                                'absolute inset-0 size-4 text-muted-foreground transition-opacity',
+                                'absolute inset-0 grid place-items-center rounded-lg transition-opacity',
+                                kindTone(record.kind),
                                 (picked || selected.length > 0) && 'opacity-0',
                                 'group-hover:opacity-0',
                               )}
-                            />
+                            >
+                              <Icon className="size-[18px]" />
+                            </span>
                             <Checkbox
                               checked={picked}
                               aria-label={`Selecionar ${record.title}`}
                               className={cn(
-                                'absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100',
+                                'relative size-4 opacity-0 transition-opacity group-hover:opacity-100',
                                 (picked || selected.length > 0) && 'opacity-100',
                               )}
                               onCheckedChange={(on) =>
@@ -788,9 +848,12 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                           <button
                             type="button"
                             onClick={() => void openRecord(record.id)}
-                            className="min-w-0 flex-1 truncate text-left"
+                            className="min-w-0 flex-1 text-left"
                           >
-                            {record.title}
+                            <span className="block truncate font-semibold">{record.title}</span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {subtitleOf(record)}
+                            </span>
                           </button>
 
                           {/* Which vault a row is from only matters when the list mixes them. */}
@@ -801,7 +864,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                           )}
 
                           {record.favourite && (
-                            <Star className="size-3 shrink-0 fill-current text-primary" />
+                            <Star className="size-3.5 shrink-0 fill-current text-primary" />
                           )}
                           {attention && (
                             <AlertTriangle
@@ -836,15 +899,15 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
 
               <div className="flex min-w-0 flex-col">
                 {tabs.length > 0 && (
-                  <div className="flex h-10 shrink-0 items-stretch gap-px overflow-x-auto border-b px-2">
+                  <div className="flex h-11 shrink-0 items-stretch gap-1 overflow-x-auto overflow-y-hidden border-b px-3">
                     {tabs.map((tab) => (
                       <div
                         key={tab.id}
                         className={cn(
-                          'flex items-center gap-1.5 rounded-t-md px-3 text-sm',
+                          '-mb-px flex items-center gap-1.5 border-b-2 px-3 text-sm',
                           tab.id === activeTab
-                            ? 'bg-muted text-foreground'
-                            : 'text-muted-foreground hover:bg-muted/50',
+                            ? 'border-primary font-semibold text-foreground'
+                            : 'border-transparent text-muted-foreground hover:text-foreground',
                         )}
                       >
                         <button
@@ -887,6 +950,10 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                         await refreshContents()
                       }}
                       onClone={(id) => void cloneRecord(id)}
+                      onMoveToVault={() => {
+                        const open = tabs.find((tab) => tab.id === activeTab)!
+                        setMovingToVault({ ids: [open.id], what: `“${open.payload.title}”` })
+                      }}
                       onClosed={(id) => {
                         setTabs((current) => current.filter((tab) => tab.id !== id))
                         setActiveTab(null)
@@ -1117,8 +1184,8 @@ function Header({
   children,
 }: WorkspaceProps & { title?: string; children?: React.ReactNode }) {
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
-      {title && <h1 className="text-sm font-medium">{title}</h1>}
+    <header className="flex h-14 shrink-0 items-center gap-2.5 border-b px-4">
+      {title && <h1 className="text-base font-semibold">{title}</h1>}
       {children}
       <span className="flex-1" />
       <Countdown status={status} onChanged={onChanged} />
@@ -1157,12 +1224,14 @@ function Countdown({ status, onChanged }: WorkspaceProps) {
   )
 }
 
-const INDENT = ['pl-2', 'pl-6', 'pl-10', 'pl-14', 'pl-[4.5rem]', 'pl-[5.5rem]']
+const INDENT = ['pl-2.5', 'pl-7', 'pl-11', 'pl-15', 'pl-[4.75rem]', 'pl-[5.75rem]']
 
 function TreeRow({
   depth = 0,
   selected,
   colour,
+  icon: Icon,
+  count,
   dropping,
   onClick,
   onDragOver,
@@ -1175,6 +1244,8 @@ function TreeRow({
   depth?: number
   selected: boolean
   colour?: string | null
+  icon?: LucideIcon
+  count?: number
   dropping?: boolean
   onClick: () => void
   onDragOver?: (event: React.DragEvent) => void
@@ -1190,29 +1261,45 @@ function TreeRow({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={cn(
-        'group flex items-center rounded-md pr-1 transition-colors',
-        dropping && 'ring-2 ring-primary',
+        'group flex h-[30px] items-center rounded-md pr-1.5 transition-colors',
+        dropping && 'ring-2 ring-ring',
         // Static classes rather than a computed padding: Tailwind only ships the classes it can see
         // in the source, and an interpolated one would simply not exist in the stylesheet.
         INDENT[Math.min(depth, INDENT.length - 1)],
-        selected ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted',
+        selected
+          ? 'bg-sidebar-accent font-semibold text-sidebar-accent-foreground'
+          : 'text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-foreground',
       )}
     >
       <button
         type="button"
         onClick={onClick}
-        className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left text-sm"
+        className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-sm"
       >
-        {colour !== undefined && (
-          <Folder className={cn('size-3.5 shrink-0', colourOf(colour).text)} />
+        {Icon ? (
+          <Icon className="size-4 shrink-0" />
+        ) : (
+          colour !== undefined && <Folder className={cn('size-4 shrink-0', colourOf(colour).text)} />
         )}
         <span className="truncate">{children}</span>
       </button>
 
+      {count !== undefined && (
+        <span
+          className={cn(
+            'shrink-0 pl-2 text-xs tabular-nums opacity-75',
+            // The count gives way to the menu on hover, so the row never grows a column.
+            entries && 'group-hover:hidden group-has-aria-expanded:hidden',
+          )}
+        >
+          {count}
+        </span>
+      )}
+
       {/* The menu appears on hover and stays put once opened, so it never moves out from under a
           pointer that is already on its way to it. */}
       {entries && (
-        <span className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 has-aria-expanded:opacity-100">
+        <span className="hidden shrink-0 group-hover:block group-has-aria-expanded:block focus-within:block">
           <MenuButton entries={entries} label={menuLabel ?? 'Ações'} />
         </span>
       )}

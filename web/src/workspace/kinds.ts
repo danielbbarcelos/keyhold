@@ -16,6 +16,8 @@ export interface RecordKind {
   hint: string
   starter: Field[]
   icon: LucideIcon
+  /** The tile behind the icon: tells a key from a note at a glance, in a long list. */
+  tone: string
 }
 
 export const RECORD_KINDS: RecordKind[] = [
@@ -25,6 +27,7 @@ export const RECORD_KINDS: RecordKind[] = [
     hint: 'Usuário e senha de um site ou sistema.',
     starter: [{ label: 'Senha', kind: 'password', value: '' }],
     icon: KeyRound,
+    tone: 'bg-sky-500/15 text-sky-500',
   },
   {
     value: 'note',
@@ -32,6 +35,7 @@ export const RECORD_KINDS: RecordKind[] = [
     hint: 'Um texto que não pode ficar em qualquer lugar.',
     starter: [],
     icon: FileText,
+    tone: 'bg-amber-500/15 text-amber-500',
   },
   {
     value: 'ssh_key',
@@ -42,6 +46,7 @@ export const RECORD_KINDS: RecordKind[] = [
       { label: 'Frase secreta', kind: 'password', value: '' },
     ],
     icon: Terminal,
+    tone: 'bg-zinc-500/20 text-zinc-400',
   },
   {
     value: 'certificate',
@@ -52,6 +57,7 @@ export const RECORD_KINDS: RecordKind[] = [
       { label: 'Validade', kind: 'date', value: '' },
     ],
     icon: ScrollText,
+    tone: 'bg-violet-500/15 text-violet-500',
   },
   {
     value: 'card',
@@ -63,6 +69,7 @@ export const RECORD_KINDS: RecordKind[] = [
       { label: 'Código', kind: 'password', value: '' },
     ],
     icon: CreditCard,
+    tone: 'bg-emerald-500/15 text-emerald-500',
   },
 ]
 
@@ -72,4 +79,13 @@ export function kindOf(value: string): RecordKind {
 
 export function kindIcon(value: string): LucideIcon {
   return kindOf(value).icon
+}
+
+export function kindTone(value: string): string {
+  return kindOf(value).tone
+}
+
+/** What goes under a record's title in the list: who it logs in as, or else what it is. */
+export function subtitleOf(record: { kind: string; username: string }): string {
+  return record.username || kindOf(record.kind).label
 }

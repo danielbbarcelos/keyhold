@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronsUpDown, Vault } from 'lucide-react'
+import { ChevronDown, HardDrive, Plus, Vault } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -39,10 +39,12 @@ export function VaultPicker({
   vaults,
   value,
   onPick,
+  onNew,
 }: {
   vaults: VaultSummary[]
   value: string | null
   onPick: (id: string) => void
+  onNew: () => void
 }) {
   const [open, setOpen] = useState(false)
 
@@ -61,11 +63,11 @@ export function VaultPicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
-          variant="outline"
+          variant="ghost"
           role="combobox"
           aria-expanded={open}
           aria-label="Cofre"
-          className="h-8 min-w-0 flex-1 justify-between px-2 font-normal"
+          className="h-9 min-w-0 flex-1 justify-start gap-2 px-2 text-base font-semibold text-sidebar-foreground hover:bg-sidebar-hover hover:text-sidebar-foreground aria-expanded:bg-sidebar-hover dark:hover:bg-sidebar-hover"
         >
           <span className="flex min-w-0 items-center gap-2">
             {value === EVERY_VAULT ? (
@@ -78,7 +80,14 @@ export function VaultPicker({
             )}
             <span className="truncate">{label}</span>
           </span>
-          <ChevronsUpDown className="size-3.5 shrink-0 opacity-50" />
+          {/* Where the vault lives. Today always here; a vault kept elsewhere will say so. */}
+          {chosen && value !== EVERY_VAULT && (
+            <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-md bg-sidebar-hover px-1.5 text-xs font-semibold text-sidebar-muted">
+              <HardDrive className="size-3" />
+              Local
+            </span>
+          )}
+          <ChevronDown className="size-4 shrink-0 opacity-70" />
         </Button>
       </PopoverTrigger>
 
@@ -119,6 +128,21 @@ export function VaultPicker({
                   <span className="truncate">{vault.name}</span>
                 </CommandItem>
               ))}
+            </CommandGroup>
+
+            <CommandSeparator />
+
+            <CommandGroup>
+              <CommandItem
+                value="novo cofre"
+                onSelect={() => {
+                  setOpen(false)
+                  onNew()
+                }}
+              >
+                <Plus className="text-muted-foreground" />
+                Novo cofre
+              </CommandItem>
             </CommandGroup>
           </CommandList>
         </Command>

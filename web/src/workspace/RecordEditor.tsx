@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react'
-import { GripVertical, Plus, Trash2, Wand2 } from 'lucide-react'
+import { GripVertical, Lock, Plus, Trash2, Wand2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Select,
   SelectContent,
@@ -48,6 +49,10 @@ interface RecordEditorProps {
   onChange: (payload: Payload) => void
   onSave: () => void
   onCancel: () => void
+  /** What the save button says: "Criar registro" for a new one, "Salvar alterações" otherwise. */
+  saveLabel?: string
+  /** Shown above the form when editing in place, where there is no dialog title. */
+  heading?: React.ReactNode
   busy?: boolean
   error?: string
 }
@@ -59,6 +64,8 @@ export function RecordEditor({
   onChange,
   onSave,
   onCancel,
+  saveLabel = 'Salvar alterações',
+  heading,
   busy,
   error,
 }: RecordEditorProps) {
@@ -97,200 +104,233 @@ export function RecordEditor({
   }
 
   return (
-    <div className="w-full space-y-6 p-6">
-      {onKindChange && (
-        <div className="space-y-2">
-          <Label>Tipo</Label>
-          <div className="flex flex-wrap gap-1.5">
-            {RECORD_KINDS.map((entry) => {
-              const Icon = entry.icon
+    // The footer stays put and the form scrolls under it: a long record should never push "save"
+    // out of reach.
+    <div className="flex h-full min-h-0 flex-col">
+      <ScrollArea className="min-h-0 flex-1">
+        <div className={cn('w-full space-y-6', heading ? 'max-w-3xl px-8 pt-7 pb-8' : 'px-6 pt-1 pb-6')}>
+          {heading}
 
-              return (
-                <Button
-                  key={entry.value}
-                  type="button"
-                  size="sm"
-                  variant={entry.value === kind ? 'default' : 'outline'}
-                  onClick={() => {
-                    onKindChange(entry.value)
-                    patch({ fields: entry.starter.map((field) => ({ ...field })) })
-                  }}
-                >
-                  <Icon />
-                  {entry.label}
-                </Button>
-              )
-            })}
-          </div>
-          <p className="text-sm text-muted-foreground">{template.hint}</p>
-        </div>
-      )}
+          {onKindChange && (
+            <div className="space-y-2">
+              <Label>Tipo</Label>
+              <div className="grid grid-cols-5 gap-2">
+                {RECORD_KINDS.map((entry) => {
+                  const Icon = entry.icon
+                  const chosen = entry.value === kind
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="title">Título</Label>
-          <Input
-            id="title"
-            value={payload.title}
-            autoFocus
-            onChange={(event) => patch({ title: event.target.value })}
-          />
-        </div>
+                  return (
+                    <button
+                      key={entry.value}
+                      type="button"
+                      aria-pressed={chosen}
+                      onClick={() => {
+                        onKindChange(entry.value)
+                        patch({ fields: entry.starter.map((field) => ({ ...field })) })
+                      }}
+                      className={cn(
+                        'flex flex-col items-center gap-2 rounded-xl border px-1.5 pt-3.5 pb-3 text-xs font-semibold transition-colors hover:bg-hover',
+                        chosen && 'border-ring bg-hover ring-1 ring-ring',
+                      )}
+                    >
+                      <span className={cn('grid size-9 place-items-center rounded-lg', entry.tone)}>
+                        <Icon className="size-[18px]" />
+                      </span>
+                      {entry.label}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">{template.hint}</p>
+            </div>
+          )}
 
-        <div className="space-y-2">
-          <Label htmlFor="username">Usuário</Label>
-          <Input
-            id="username"
-            value={payload.username}
-            onChange={(event) => patch({ username: event.target.value })}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="url">Endereço</Label>
-          <Input
-            id="url"
-            value={payload.url}
-            onChange={(event) => patch({ url: event.target.value })}
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label>Campos</Label>
-
-        {payload.fields.map((field, index) => (
-          <div
-            key={index}
-            onDragOver={(event) => {
-              event.preventDefault()
-              setOver(index)
-            }}
-            onDrop={(event) => {
-              event.preventDefault()
-
-              if (draggingFrom.current !== null) {
-                moveTo(draggingFrom.current, index)
-              }
-
-              draggingFrom.current = null
-              setDragging(null)
-              setOver(null)
-            }}
-            className={cn(
-              'flex items-center gap-1.5 rounded-md transition-colors',
-              dragging === index && 'opacity-50',
-              over === index && dragging !== index && 'ring-1 ring-primary',
-            )}
-          >
-            {/* Only the handle is draggable: the inputs beside it still select text. */}
-            <span
-              draggable
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = 'move'
-                draggingFrom.current = index
-                setDragging(index)
-              }}
-              onDragEnd={() => {
-                draggingFrom.current = null
-                setDragging(null)
-                setOver(null)
-              }}
-              aria-label="Arrastar para reordenar"
-              className="cursor-grab px-0.5 text-muted-foreground active:cursor-grabbing"
-            >
-              <GripVertical className="size-4" />
-            </span>
-
-            <Input
-              className="w-40"
-              value={field.label}
-              placeholder="Rótulo"
-              onChange={(event) => setField(index, { label: event.target.value })}
-            />
-
-            <Select
-              value={field.kind}
-              onValueChange={(value) => setField(index, { kind: value as Field['kind'] })}
-            >
-              <SelectTrigger className="w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {FIELD_KINDS.map(([value, label]) => (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {field.kind === 'password' || field.kind === 'hidden' ? (
-              <PasswordInput
-                value={field.value}
-                placeholder="Valor"
-                onChange={(event) => setField(index, { value: event.target.value })}
-              />
-            ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="title">Título</Label>
               <Input
-                className="flex-1"
-                value={field.value}
-                placeholder="Valor"
-                onChange={(event) => setField(index, { value: event.target.value })}
+                id="title"
+                value={payload.title}
+                placeholder="Ex.: GitHub"
+                autoFocus
+                onChange={(event) => patch({ title: event.target.value })}
               />
-            )}
+            </div>
 
-            {field.kind === 'password' && (
-              <IconAction
-                label="Gerar uma senha forte"
-                onClick={() =>
-                  void api.generatePassword().then((made) => setField(index, { value: made.password }))
-                }
-              >
-                <Wand2 />
-              </IconAction>
-            )}
+            <div className="space-y-2">
+              <Label htmlFor="username">Usuário</Label>
+              <Input
+                id="username"
+                value={payload.username}
+                placeholder="nome@exemplo.com"
+                onChange={(event) => patch({ username: event.target.value })}
+              />
+            </div>
 
-            <IconAction
-              label="Remover"
-              onClick={() => patch({ fields: payload.fields.filter((_, at) => at !== index) })}
-            >
-              <Trash2 />
-            </IconAction>
+            <div className="space-y-2">
+              <Label htmlFor="url">Endereço</Label>
+              <Input
+                id="url"
+                value={payload.url}
+                placeholder="Ex.: github.com"
+                onChange={(event) => patch({ url: event.target.value })}
+              />
+            </div>
           </div>
-        ))}
 
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            patch({ fields: [...payload.fields, { label: '', kind: 'text', value: '' }] })
-          }
-        >
-          <Plus />
-          Adicionar campo
+          <div className="space-y-2.5">
+            <Label>Campos</Label>
+
+            {/* Each field is a block: what it is called and what kind it is on top, the value on a
+                line of its own underneath, where a long token has room. */}
+            {payload.fields.map((field, index) => (
+              <div
+                key={index}
+                onDragOver={(event) => {
+                  event.preventDefault()
+                  setOver(index)
+                }}
+                onDrop={(event) => {
+                  event.preventDefault()
+
+                  if (draggingFrom.current !== null) {
+                    moveTo(draggingFrom.current, index)
+                  }
+
+                  draggingFrom.current = null
+                  setDragging(null)
+                  setOver(null)
+                }}
+                className={cn(
+                  'space-y-2.5 rounded-xl border bg-surface p-3 transition-colors',
+                  dragging === index && 'opacity-50',
+                  over === index && dragging !== index && 'ring-2 ring-ring',
+                )}
+              >
+                <div className="grid grid-cols-[1.25rem_minmax(0,1fr)_9.5rem_2.25rem] items-center gap-2">
+                  {/* Only the handle is draggable: the inputs beside it still select text. */}
+                  <span
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = 'move'
+                      draggingFrom.current = index
+                      setDragging(index)
+                    }}
+                    onDragEnd={() => {
+                      draggingFrom.current = null
+                      setDragging(null)
+                      setOver(null)
+                    }}
+                    aria-label="Arrastar para reordenar"
+                    className="cursor-grab text-muted-foreground active:cursor-grabbing"
+                  >
+                    <GripVertical className="size-4" />
+                  </span>
+
+                  <Input
+                    value={field.label}
+                    placeholder="Rótulo"
+                    aria-label="Rótulo"
+                    onChange={(event) => setField(index, { label: event.target.value })}
+                  />
+
+                  <Select
+                    value={field.kind}
+                    onValueChange={(value) => setField(index, { kind: value as Field['kind'] })}
+                  >
+                    <SelectTrigger className="w-full" aria-label="Tipo do campo">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FIELD_KINDS.map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <IconAction
+                    label="Remover campo"
+                    onClick={() => patch({ fields: payload.fields.filter((_, at) => at !== index) })}
+                  >
+                    <Trash2 />
+                  </IconAction>
+                </div>
+
+                <div className="pl-7">
+                  {field.kind === 'password' || field.kind === 'hidden' ? (
+                    <PasswordInput
+                      value={field.value}
+                      placeholder="Valor"
+                      aria-label={`Valor de ${field.label || 'campo sem rótulo'}`}
+                      onChange={(event) => setField(index, { value: event.target.value })}
+                      trailing={
+                        field.kind === 'password' && (
+                          <IconAction
+                            label="Gerar uma senha forte"
+                            small
+                            onClick={() =>
+                              void api
+                                .generatePassword()
+                                .then((made) => setField(index, { value: made.password }))
+                            }
+                          >
+                            <Wand2 />
+                          </IconAction>
+                        )
+                      }
+                    />
+                  ) : (
+                    <Input
+                      value={field.value}
+                      placeholder="Valor"
+                      aria-label={`Valor de ${field.label || 'campo sem rótulo'}`}
+                      onChange={(event) => setField(index, { value: event.target.value })}
+                    />
+                  )}
+                </div>
+              </div>
+            ))}
+
+            <Button
+              type="button"
+              variant="outline"
+              className="border-dashed"
+              onClick={() =>
+                patch({ fields: [...payload.fields, { label: '', kind: 'text', value: '' }] })
+              }
+            >
+              <Plus />
+              Adicionar campo
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="notes">Notas</Label>
+            <Textarea
+              id="notes"
+              rows={4}
+              value={payload.notes}
+              placeholder="Qualquer coisa que ajude a lembrar depois"
+              onChange={(event) => patch({ notes: event.target.value })}
+            />
+          </div>
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </div>
+      </ScrollArea>
+
+      <div className="flex shrink-0 items-center justify-end gap-2.5 border-t px-6 py-4">
+        <span className="mr-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Lock className="size-3.5" />
+          Selado antes de tocar o disco
+        </span>
+        <Button variant="outline" onClick={onCancel}>
+          Cancelar
         </Button>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="notes">Notas</Label>
-        <Textarea
-          id="notes"
-          rows={4}
-          value={payload.notes}
-          onChange={(event) => patch({ notes: event.target.value })}
-        />
-      </div>
-
-      {error && <p className="text-sm text-destructive">{error}</p>}
-
-      <div className="flex items-center gap-2">
         <Button onClick={onSave} disabled={busy || payload.title.trim().length === 0}>
-          Salvar
-        </Button>
-        <Button variant="ghost" onClick={onCancel}>
-          Descartar
+          {saveLabel}
         </Button>
       </div>
     </div>
@@ -299,17 +339,26 @@ export function RecordEditor({
 
 function IconAction({
   label,
+  small,
   onClick,
   children,
 }: {
   label: string
+  small?: boolean
   onClick: () => void
   children: React.ReactNode
 }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button type="button" variant="ghost" size="icon-sm" aria-label={label} onClick={onClick}>
+        <Button
+          type="button"
+          variant="ghost"
+          size={small ? 'icon-sm' : 'icon'}
+          className="text-muted-foreground"
+          aria-label={label}
+          onClick={onClick}
+        >
           {children}
         </Button>
       </TooltipTrigger>

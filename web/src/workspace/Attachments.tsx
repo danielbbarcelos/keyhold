@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Download, Loader2, Paperclip, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 import { api, ApiError, type AttachmentInfo } from '../api'
 import { fromBase64url, toBase64url } from '../base64'
@@ -19,7 +20,21 @@ export function Attachments({ recordId }: { recordId: string }) {
   const [maxBytes, setMaxBytes] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [over, setOver] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
+
+  function upload(file: File) {
+    void attempt(async () => {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+
+      await api.addAttachment(
+        recordId,
+        file.name,
+        file.type || 'application/octet-stream',
+        toBase64url(bytes),
+      )
+    })
+  }
 
   const refresh = () =>
     api
@@ -50,8 +65,7 @@ export function Attachments({ recordId }: { recordId: string }) {
 
   return (
     <div className="space-y-2">
-      <h3 className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        <Paperclip className="size-3" />
+      <h3 className="pt-2 text-sm font-bold">
         Arquivos
       </h3>
 
@@ -108,40 +122,47 @@ export function Attachments({ recordId }: { recordId: string }) {
           const file = event.target.files?.[0]
           event.target.value = ''
 
-          if (!file) {
-            return
+          if (file) {
+            upload(file)
           }
-
-          void attempt(async () => {
-            const bytes = new Uint8Array(await file.arrayBuffer())
-
-            await api.addAttachment(
-              recordId,
-              file.name,
-              file.type || 'application/octet-stream',
-              toBase64url(bytes),
-            )
-          })
         }}
       />
 
-      <Button
-        variant="outline"
-        size="sm"
-        className="w-full"
+      {/* A place to drop a file as well as a button to pick one: dragging from the file manager is
+          how most people already hold the file they mean to keep. */}
+      <button
+        type="button"
         disabled={busy}
         onClick={() => picker.current?.click()}
-      >
-        {busy ? <Loader2 className="animate-spin" /> : <Paperclip />}
-        Anexar um arquivo
-      </Button>
+        onDragOver={(event) => {
+          event.preventDefault()
+          setOver(true)
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(event) => {
+          event.preventDefault()
+          setOver(false)
 
-      {maxBytes > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Até {Math.round(maxBytes / (1024 * 1024))} MB. O nome e o tipo são selados junto com o
-          conteúdo.
-        </p>
-      )}
+          const file = event.dataTransfer.files?.[0]
+
+          if (file) {
+            upload(file)
+          }
+        }}
+        className={cn(
+          'flex w-full flex-col items-center gap-1.5 rounded-xl border border-dashed border-input px-3 py-5 text-center text-xs text-muted-foreground transition-colors hover:bg-hover',
+          over && 'border-ring bg-hover',
+        )}
+      >
+        {busy ? <Loader2 className="size-5 animate-spin" /> : <Paperclip className="size-5" />}
+        <span className="text-sm font-semibold text-foreground">Anexar um arquivo</span>
+        {maxBytes > 0 && (
+          <span>
+            Até {Math.round(maxBytes / (1024 * 1024))} MB. O nome e o tipo são selados junto com o
+            conteúdo.
+          </span>
+        )}
+      </button>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>

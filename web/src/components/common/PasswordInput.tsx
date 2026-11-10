@@ -20,11 +20,14 @@ import { cn } from '@/lib/utils'
 interface PasswordInputProps extends Omit<React.ComponentProps<typeof Input>, 'type'> {
   /** Start visible — used where the value was just generated and is meant to be copied. */
   initiallyVisible?: boolean
+  /** One more control inside the field, before the eye (the generator, in the editor). */
+  trailing?: React.ReactNode
 }
 
 export function PasswordInput({
   className,
   initiallyVisible = false,
+  trailing,
   ...props
 }: PasswordInputProps) {
   const [visible, setVisible] = useState(initiallyVisible)
@@ -34,8 +37,10 @@ export function PasswordInput({
       <Input
         {...props}
         type={visible ? 'text' : 'password'}
-        className={cn('pr-9', className)}
+        className={cn(trailing ? 'pr-[4.5rem]' : 'pr-10', className)}
       />
+
+      {trailing && <span className="absolute top-1/2 right-9 -translate-y-1/2">{trailing}</span>}
 
       <Button
         type="button"

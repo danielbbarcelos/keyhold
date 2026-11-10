@@ -1,15 +1,7 @@
 import { useState } from 'react'
-import { Loader2, Lock } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
@@ -58,106 +50,90 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
   }
 
   return (
-    <main className="grid min-h-screen place-items-center p-8">
-      <div className="flex w-full max-w-sm flex-col items-center gap-6">
-        <div className="flex flex-col items-center gap-2">
-          <Logo className="size-14" />
-          <span className="text-sm font-medium text-muted-foreground">Keyhold</span>
+    <main className="grid min-h-screen place-items-center bg-background p-8">
+      <form
+        className="flex w-full max-w-[26rem] flex-col items-center text-center"
+        onSubmit={(event) => void submit(event)}
+      >
+        <Logo className="size-14 rounded-2xl" />
+
+        <h1 className="mt-6 text-4xl font-bold tracking-tight">Destrancar o Keyhold</h1>
+        <p className="mt-2 mb-7 text-base text-muted-foreground">
+          {usingRecovery
+            ? 'Digite a chave de recuperação que você guardou ao criar o cofre.'
+            : needsPassword
+              ? 'Digite a senha-mestra para abrir os seus cofres.'
+              : 'Este cofre não usa senha-mestra: ele abre com a chave guardada nesta máquina.'}
+        </p>
+
+        <div className="w-full space-y-3 text-left">
+          {needsPassword && !usingRecovery && (
+            <PasswordInput
+              id="password"
+              aria-label="Senha-mestra"
+              placeholder="Senha-mestra"
+              className="h-11 text-base md:text-base"
+              value={password}
+              autoFocus
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          )}
+
+          {usingRecovery && (
+            <Input
+              id="recovery"
+              aria-label="Chave de recuperação"
+              placeholder="Chave de recuperação"
+              className="h-11 text-base md:text-base"
+              value={recovery}
+              autoFocus
+              onChange={(event) => setRecovery(event.target.value)}
+            />
+          )}
+
+          {needsCode && (
+            <div className="space-y-2">
+              <Label htmlFor="code">Código do seu app autenticador</Label>
+              <Input
+                id="code"
+                value={code}
+                inputMode="numeric"
+                maxLength={6}
+                className="h-11 tracking-[0.3em]"
+                onChange={(event) => setCode(event.target.value)}
+              />
+            </div>
+          )}
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+
+          {status.attemptsLeft <= 2 && (
+            <p className="text-sm text-muted-foreground">
+              {status.attemptsLeft > 0
+                ? `${status.attemptsLeft} tentativas antes de o Keyhold parar de responder.`
+                : 'Feche o Keyhold e abra de novo para tentar outra vez.'}
+            </p>
+          )}
+
+          <Button type="submit" size="lg" className="h-11 w-full text-base" disabled={busy}>
+            {busy && <Loader2 className="animate-spin" />}
+            Destrancar
+          </Button>
         </div>
 
-        <Card className="w-full gap-5 py-8">
-          {/*
-            * The form carries the layout, not the card.
-            *
-            * `Card` spaces its own children, and wrapping the header, body and footer in a form makes
-            * all three a single child — so the card's gap applied to nothing and the label sat flush
-            * against the title. The spacing belongs wherever the children actually are.
-            */}
-          <form className="flex flex-col gap-5" onSubmit={(event) => void submit(event)}>
-            <CardHeader className="px-8">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Lock className="size-4" />
-                Cofre trancado
-              </CardTitle>
-              {!needsPassword && !usingRecovery && (
-                <CardDescription>
-                  Este cofre não usa senha-mestra: ele abre com a chave guardada nesta máquina.
-                </CardDescription>
-              )}
-            </CardHeader>
-
-            <CardContent className="space-y-5 px-8">
-              {needsPassword && !usingRecovery && (
-                <div className="space-y-2">
-                  <Label htmlFor="password">Senha-mestra</Label>
-                  <PasswordInput
-                    id="password"
-                    value={password}
-                    autoFocus
-                    onChange={(event) => setPassword(event.target.value)}
-                  />
-                </div>
-              )}
-
-              {usingRecovery && (
-                <div className="space-y-2">
-                  <Label htmlFor="recovery">Chave de recuperação</Label>
-                  <Input
-                    id="recovery"
-                    value={recovery}
-                    autoFocus
-                    onChange={(event) => setRecovery(event.target.value)}
-                  />
-                </div>
-              )}
-
-              {needsCode && (
-                <div className="space-y-2">
-                  <Label htmlFor="code">Código do seu app autenticador</Label>
-                  <Input
-                    id="code"
-                    value={code}
-                    inputMode="numeric"
-                    maxLength={6}
-                    className="tracking-[0.3em]"
-                    onChange={(event) => setCode(event.target.value)}
-                  />
-                </div>
-              )}
-
-              {error && <p className="text-sm text-destructive">{error}</p>}
-
-              {status.attemptsLeft <= 2 && (
-                <p className="text-sm text-muted-foreground">
-                  {status.attemptsLeft > 0
-                    ? `${status.attemptsLeft} tentativas antes de o Keyhold parar de responder.`
-                    : 'Feche o Keyhold e abra de novo para tentar outra vez.'}
-                </p>
-              )}
-            </CardContent>
-
-            <CardFooter className="gap-2 px-8">
-              <Button type="submit" disabled={busy}>
-                {busy && <Loader2 className="animate-spin" />}
-                Destrancar
-              </Button>
-
-              {needsPassword && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => {
-                    setUsingRecovery(!usingRecovery)
-                    setError('')
-                  }}
-                >
-                  {usingRecovery ? 'Usar a senha-mestra' : 'Perdi a senha-mestra'}
-                </Button>
-              )}
-            </CardFooter>
-          </form>
-        </Card>
-      </div>
+        {needsPassword && (
+          <button
+            type="button"
+            className="mt-5 text-sm text-link hover:underline"
+            onClick={() => {
+              setUsingRecovery(!usingRecovery)
+              setError('')
+            }}
+          >
+            {usingRecovery ? 'Usar a senha-mestra' : 'Perdi a senha-mestra'}
+          </button>
+        )}
+      </form>
     </main>
   )
 }
