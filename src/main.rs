@@ -76,9 +76,11 @@ enum Cmd {
 
     /// Give this machine's Keyhold a name, in /etc/hosts. Needs sudo.
     ///
-    ///     sudo keyhold set-host                  # keyhold.local
-    ///     sudo keyhold set-host cofre.local
-    ///     sudo keyhold set-host --remove
+    ///     sudo ~/.local/bin/keyhold set-host                  # keyhold.local
+    ///     sudo ~/.local/bin/keyhold set-host cofre.local
+    ///     sudo ~/.local/bin/keyhold set-host --remove
+    ///
+    /// The full path because sudo does not search ~/.local/bin.
     ///
     /// Only names that never exist on the internet: .local, .localhost, .internal, .test,
     /// .home.arpa. Restart Keyhold afterwards; it reads the name when it starts.
@@ -388,8 +390,14 @@ fn set_host(name: Option<String>, remove: bool) -> Result<()> {
     if unsafe { libc::geteuid() } != 0 {
         let again = if remove { "--remove".to_string() } else { name.clone() };
 
+        // The full path, not `keyhold`: sudo searches its own secure_path, which does not include
+        // ~/.local/bin, so "sudo keyhold" says the command does not exist.
+        let me = std::env::current_exe()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|_| "keyhold".to_string());
+
         anyhow::bail!(
-            "mexer no /etc/hosts precisa de sudo. Rode de novo assim:\n\n    sudo keyhold set-host {again}\n"
+            "mexer no /etc/hosts precisa de sudo. Rode de novo assim:\n\n    sudo {me} set-host {again}\n"
         );
     }
 
@@ -422,7 +430,7 @@ fn set_host(name: Option<String>, remove: bool) -> Result<()> {
             println!("  copiar senhas nem mostrar notificações fora de 127.0.0.1. Para ter HTTPS:");
             println!();
             println!("      sudo apt install mkcert libnss3-tools");
-            println!("      sudo keyhold set-host {name}");
+            println!("      sudo {} set-host {name}", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "keyhold".into()));
             "http"
         }
         hosts::Certificate::NoInvoker => {

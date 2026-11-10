@@ -108,13 +108,16 @@ keyhold --no-browser # do not open a browser
 keyhold --present    # bring a running Keyhold forward (or start one)
 keyhold --replace    # close a running Keyhold without asking first
 keyhold where        # print where the vault and its directories live
-sudo keyhold set-host            # answer to keyhold.local as well
-sudo keyhold set-host --remove   # stop
+sudo ~/.local/bin/keyhold set-host            # answer to keyhold.local as well
+sudo ~/.local/bin/keyhold set-host --remove   # stop
 ```
+
+`sudo` searches its own `secure_path`, which does not include `~/.local/bin`, so it needs the full
+path: plain `sudo keyhold` answers "command not found".
 
 ### A name instead of 127.0.0.1
 
-`sudo keyhold set-host [name]` writes one line to `/etc/hosts`, `127.0.0.1  keyhold.local  # keyhold`,
+`sudo ~/.local/bin/keyhold set-host [name]` writes one line to `/etc/hosts`, `127.0.0.1  keyhold.local  # keyhold`,
 and Keyhold answers to that name from its next start: `https://keyhold.local:7717`. The line is the
 only place the name lives; remove it (or run `set-host --remove`) and the name stops working.
 

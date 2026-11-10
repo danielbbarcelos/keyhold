@@ -247,7 +247,7 @@ set_host() {
   if sudo "$BIN_DIR/$APP_BIN" set-host "$SET_HOST"; then
     ok "http://$SET_HOST:7717 reaches Keyhold from its next start"
   else
-    warn "the name was not set; run later: sudo $APP_BIN set-host $SET_HOST"
+    warn "the name was not set; run later: sudo $BIN_DIR/$APP_BIN set-host $SET_HOST"
   fi
 }
 
