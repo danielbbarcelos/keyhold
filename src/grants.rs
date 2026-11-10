@@ -291,6 +291,7 @@ mod tests {
                     label: "Senha".into(),
                     kind: "password".into(),
                     value: "hunter2".into(),
+                    ..Default::default()
                 }],
                 ..Payload::default()
             },

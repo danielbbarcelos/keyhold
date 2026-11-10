@@ -21,6 +21,8 @@
 //! only mean re-wrapping a key every time a record is dragged between folders, in exchange for
 //! nothing. Folder keys still seal folder names.
 
+use std::collections::BTreeMap;
+
 use anyhow::{anyhow, bail, Context, Result};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -29,11 +31,44 @@ use crate::crypto::{self, unwrap_key, wrap_key, SecretKey};
 use crate::db::Store;
 use crate::vaults::{self, new_id};
 
-/// What a record is, as far as the interface is concerned.
+/// What older versions of keyhold called a record's kind.
 ///
-/// Unknown kinds are kept rather than rejected: a vault written by a newer keyhold should still
-/// open here, showing a record it can read but has no template for, instead of hiding it.
-pub const KINDS: [&str; 5] = ["login", "note", "ssh_key", "certificate", "card"];
+/// Records no longer have a type: a record is a title, an icon, notes and whatever fields it needs.
+/// The `kind` column stays because records written before that change carry it, and the interface
+/// uses it to pick a default icon for a record that has none of its own. New records are written as
+/// `item`. Unknown kinds are kept rather than rejected.
+pub const KINDS: [&str; 6] = ["item", "login", "note", "ssh_key", "certificate", "card"];
+
+/// The kinds of field a record can hold.
+///
+/// A kind decides how a field is drawn and whether it is a secret: it never changes how the field
+/// is stored. Unknown kinds are kept, shown as plain text, so a vault from a newer keyhold opens.
+pub const FIELD_KINDS: [&str; 15] = [
+    "text",
+    "multiline",
+    "multiline_hidden",
+    "hidden",
+    "password",
+    "pin",
+    "totp",
+    "email",
+    "name",
+    "phone",
+    "url",
+    "address",
+    "date",
+    "security_question",
+    "card",
+];
+
+/// Field kinds whose value is a secret: kept under dots, never in a list preview, and the ones the
+/// main button of a record copies.
+pub fn is_secret_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "password" | "pin" | "hidden" | "multiline_hidden" | "totp" | "security_question" | "card"
+    )
+}
 
 fn payload_aad(id: &str, version: i64, vault_id: &str) -> Vec<u8> {
     format!("keyhold:record:v1|{id}|{version}|{vault_id}").into_bytes()
@@ -44,26 +79,156 @@ fn key_aad(id: &str) -> Vec<u8> {
 }
 
 /// One field of a record, as the person arranged it.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Field {
     pub label: String,
-    /// `password` and `hidden` are the two the interface keeps under dots.
+    /// One of [`FIELD_KINDS`]. Decides how the field is drawn and whether it is a secret.
     pub kind: String,
+    /// The value somebody copies: the password, the answer to a security question, a card number.
     pub value: String,
+    /// The other parts of a composite field: the question of a security question; holder, expiry,
+    /// code and PIN of a card.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, String>,
+    /// Shown under the title in lists. Without one marked, the first e-mail, name or text is.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub list: bool,
+    /// Copied by the record's main button. Without one marked, the first secret is.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub primary: bool,
 }
 
+impl Field {
+    pub fn new(label: &str, kind: &str, value: &str) -> Self {
+        Field { label: label.into(), kind: kind.into(), value: value.into(), ..Field::default() }
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// How a record looks in a list: a lucide icon in one of the interface's colours, or a picture of
+/// the person's own, sealed with the rest of the payload. Nothing is fetched from the web.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Icon {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub colour: String,
+    /// A `data:image/...` address, already shrunk by the interface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+}
+
+/// The largest picture a record's icon may carry, as a data address.
+pub const ICON_IMAGE_LIMIT: usize = 256 * 1024;
+
 /// Everything readable about a record. Never leaves the process except to the interface that asked.
+///
+/// `username` and `url` are what records looked like before they lost their type. They are read so
+/// old records still open, folded into ordinary fields by [`Payload::normalise`], and never written
+/// again.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Payload {
     pub title: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub username: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub url: String,
     #[serde(default)]
     pub notes: String,
     #[serde(default)]
     pub fields: Vec<Field>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Icon>,
+}
+
+impl Payload {
+    /// Fold the old built-in username and address into fields, where every record now keeps them.
+    ///
+    /// The username goes first, the address right after the first password (where people expect to
+    /// find it), and both keep the place a list used to give them: the username is what shows under
+    /// the title.
+    pub fn normalise(mut self) -> Self {
+        let username = std::mem::take(&mut self.username);
+        let url = std::mem::take(&mut self.url);
+
+        if !url.trim().is_empty() {
+            let at = self
+                .fields
+                .iter()
+                .position(|f| f.kind == "password")
+                .map(|i| i + 1)
+                .unwrap_or(self.fields.len());
+            self.fields.insert(at, Field::new("Endereço web", "url", &url));
+        }
+
+        if !username.trim().is_empty() {
+            let kind = if username.contains('@') { "email" } else { "text" };
+            let label = if kind == "email" { "E-mail" } else { "Usuário" };
+            self.fields.insert(0, Field::new(label, kind, &username));
+        }
+
+        self
+    }
+
+    /// What a list shows under the title: the field marked for it, or the first e-mail, name or
+    /// text. Never a secret, whatever the marks say.
+    pub fn subtitle(&self) -> String {
+        let shown = |f: &&Field| !is_secret_kind(&f.kind) && !f.value.trim().is_empty();
+
+        self.fields
+            .iter()
+            .filter(shown)
+            .find(|f| f.list)
+            .or_else(|| {
+                self.fields
+                    .iter()
+                    .filter(shown)
+                    .find(|f| matches!(f.kind.as_str(), "email" | "name" | "text"))
+            })
+            .map(|f| f.value.lines().next().unwrap_or_default().to_string())
+            .unwrap_or_default()
+    }
+
+    /// The first web address, for search and for the agent.
+    pub fn first_url(&self) -> String {
+        self.fields
+            .iter()
+            .find(|f| f.kind == "url" && !f.value.trim().is_empty())
+            .map(|f| f.value.clone())
+            .unwrap_or_default()
+    }
+
+    /// The secret the record's main button copies.
+    pub fn primary_secret(&self) -> Option<&Field> {
+        let secret = |f: &&Field| is_secret_kind(&f.kind) && !f.value.is_empty();
+
+        self.fields
+            .iter()
+            .filter(secret)
+            .find(|f| f.primary)
+            .or_else(|| self.fields.iter().filter(secret).find(|f| f.kind != "totp"))
+    }
+
+    /// Refuse what the interface should never have sent.
+    pub fn check(&self) -> Result<()> {
+        if self.title.trim().is_empty() {
+            bail!("a record needs a title");
+        }
+
+        if let Some(image) = self.icon.as_ref().and_then(|i| i.image.as_deref()) {
+            if !image.starts_with("data:image/") {
+                bail!("a record's picture has to be an image");
+            }
+            if image.len() > ICON_IMAGE_LIMIT {
+                bail!("this picture is too large for a record's icon");
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// A record with its payload left sealed — enough to list, sort and flag, and nothing more.
@@ -98,8 +263,10 @@ pub struct RecordPreview {
     #[serde(flatten)]
     pub header: RecordHeader,
     pub title: String,
-    pub username: String,
+    /// The line under the title. See [`Payload::subtitle`].
+    pub subtitle: String,
     pub url: String,
+    pub icon: Option<Icon>,
 }
 
 /// A record the caller has the key for.
@@ -124,9 +291,8 @@ pub fn create(
     kind: &str,
     payload: &Payload,
 ) -> Result<RecordHeader> {
-    if payload.title.trim().is_empty() {
-        bail!("a record needs a title");
-    }
+    payload.check()?;
+    let payload = &payload.clone().normalise();
 
     let vault_key = vaults::vault_key(store, master, vault_id)?;
     check_folder(store, vault_id, folder_id)?;
@@ -192,16 +358,18 @@ pub fn list_with_previews(
 
         previews.push(match opened {
             Some(record) => RecordPreview {
+                subtitle: record.payload.subtitle(),
+                url: record.payload.first_url(),
                 header: record.header,
                 title: record.payload.title,
-                username: record.payload.username,
-                url: record.payload.url,
+                icon: record.payload.icon,
             },
             None => RecordPreview {
                 header,
                 title: "(não foi possível abrir)".into(),
-                username: String::new(),
+                subtitle: String::new(),
                 url: String::new(),
+                icon: None,
             },
         });
     }
@@ -249,7 +417,9 @@ pub fn open(store: &Store, master: &SecretKey, id: &str) -> Result<OpenRecord> {
 
     Ok(OpenRecord {
         header,
-        payload: serde_json::from_slice(&bytes).context("this record is not readable")?,
+        payload: serde_json::from_slice::<Payload>(&bytes)
+            .context("this record is not readable")?
+            .normalise(),
     })
 }
 
@@ -265,9 +435,8 @@ pub fn update(
     id: &str,
     payload: &Payload,
 ) -> Result<RecordHeader> {
-    if payload.title.trim().is_empty() {
-        bail!("a record needs a title");
-    }
+    payload.check()?;
+    let payload = &payload.clone().normalise();
 
     let current = header(store, id)?;
     let next = current.version + 1;
@@ -516,7 +685,9 @@ pub fn read_version(
     )
     .context("that version did not open")?;
 
-    serde_json::from_slice(&bytes).context("that version is not readable")
+    Ok(serde_json::from_slice::<Payload>(&bytes)
+        .context("that version is not readable")?
+        .normalise())
 }
 
 /// Bring an old version back as a new one.
@@ -657,12 +828,8 @@ mod tests {
             title: title.into(),
             username: "daniel".into(),
             url: "https://example.com".into(),
-            notes: String::new(),
-            fields: vec![Field {
-                label: "Senha".into(),
-                kind: "password".into(),
-                value: password.into(),
-            }],
+            fields: vec![Field::new("Senha", "password", password)],
+            ..Payload::default()
         }
     }
 
@@ -676,7 +843,7 @@ mod tests {
         let opened = open(&store, &master, &made.id).unwrap();
 
         assert_eq!(opened.payload.title, "Servidor");
-        assert_eq!(opened.payload.fields[0].value, "hunter2");
+        assert_eq!(opened.payload.primary_secret().unwrap().value, "hunter2");
         assert_eq!(opened.header.version, 1);
     }
 
@@ -725,11 +892,11 @@ mod tests {
         let updated = update(&mut store, &master, &made.id, &login("Servidor", "new")).unwrap();
 
         assert_eq!(updated.version, 2);
-        assert_eq!(open(&store, &master, &made.id).unwrap().payload.fields[0].value, "new");
+        assert_eq!(open(&store, &master, &made.id).unwrap().payload.primary_secret().unwrap().value, "new");
 
         let past = history(&store, &made.id).unwrap();
         assert_eq!(past.len(), 1);
-        assert_eq!(read_version(&store, &master, &made.id, 1).unwrap().fields[0].value, "old");
+        assert_eq!(read_version(&store, &master, &made.id, 1).unwrap().primary_secret().unwrap().value, "old");
     }
 
     #[test]
@@ -741,10 +908,10 @@ mod tests {
         let restored = restore_version(&mut store, &master, &made.id, 1).unwrap();
 
         assert_eq!(restored.version, 3, "restoring rewound the version instead of advancing it");
-        assert_eq!(open(&store, &master, &made.id).unwrap().payload.fields[0].value, "first");
+        assert_eq!(open(&store, &master, &made.id).unwrap().payload.primary_secret().unwrap().value, "first");
 
         // And what was current before the restore is still there.
-        assert_eq!(read_version(&store, &master, &made.id, 2).unwrap().fields[0].value, "second");
+        assert_eq!(read_version(&store, &master, &made.id, 2).unwrap().primary_secret().unwrap().value, "second");
     }
 
     #[test]
@@ -931,11 +1098,11 @@ mod tests {
         let moved = open(&store, &master, &made.id).unwrap();
 
         assert_eq!(moved.header.vault_id, other.id);
-        assert_eq!(moved.payload.fields[0].value, "segunda");
+        assert_eq!(moved.payload.primary_secret().unwrap().value, "segunda");
 
         // The version written before the move still opens, which is the part a naive move loses.
         let old = read_version(&store, &master, &made.id, 1).unwrap();
-        assert_eq!(old.fields[0].value, "primeira");
+        assert_eq!(old.primary_secret().unwrap().value, "primeira");
 
         let after: Vec<u8> = store
             .conn()
@@ -1069,9 +1236,9 @@ mod tests {
         let payload = Payload {
             title: "Chave".into(),
             fields: vec![
-                Field { label: "Porta".into(), kind: "text".into(), value: "2222".into() },
-                Field { label: "Chave privada".into(), kind: "hidden".into(), value: "—".into() },
-                Field { label: "Frase".into(), kind: "password".into(), value: "s".into() },
+                Field::new("Porta", "text", "2222"),
+                Field::new("Chave privada", "hidden", "—"),
+                Field::new("Frase", "password", "s"),
             ],
             ..Payload::default()
         };
@@ -1092,7 +1259,7 @@ mod tests {
         let rendered = serde_json::to_string(&previews).unwrap();
 
         assert_eq!(previews[0].title, "Servidor");
-        assert_eq!(previews[0].username, "daniel");
+        assert_eq!(previews[0].subtitle, "daniel");
         assert!(!rendered.contains("hunter2"), "a list preview carried a secret: {rendered}");
         assert!(!rendered.contains("fields"), "a list preview carried the fields: {rendered}");
     }

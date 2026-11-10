@@ -562,8 +562,13 @@ async fn a_record_round_trips_through_the_api() {
 
     // Opening one does.
     let opened = app.get(&format!("/api/records/{id}")).await;
-    assert_eq!(opened.json()["record"]["payload"]["fields"][0]["value"], "hunter2");
+    assert_eq!(opened.json()["record"]["payload"]["fields"][1]["value"], "hunter2");
     assert_eq!(opened.json()["record"]["payload"]["title"], "Produção");
+
+    // The old built-in username and address come back as ordinary fields, around the password.
+    assert_eq!(opened.json()["record"]["payload"]["fields"][0]["value"], "deploy");
+    assert_eq!(opened.json()["record"]["payload"]["fields"][2]["kind"], "url");
+    assert!(opened.json()["record"]["payload"].get("username").is_none());
 }
 
 #[tokio::test]
@@ -828,7 +833,7 @@ async fn a_record_can_be_moved_to_another_vault_and_still_opens() {
     let opened = app.get(&format!("/api/records/{id}")).await.json();
 
     assert_eq!(opened["record"]["vault_id"], second);
-    assert_eq!(opened["record"]["payload"]["fields"][0]["value"], "uma senha");
+    assert_eq!(opened["record"]["payload"]["fields"][1]["value"], "uma senha");
 }
 
 // ── health, rotation and the trash (F5) ─────────────────────────────────────────────────────────

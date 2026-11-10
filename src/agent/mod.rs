@@ -422,7 +422,7 @@ fn search(state: &Arc<AppState>, query: &str) -> Response {
             };
 
             for preview in previews {
-                let haystack = format!("{} {} {}", preview.title, preview.username, preview.url)
+                let haystack = format!("{} {} {}", preview.title, preview.subtitle, preview.url)
                     .to_lowercase();
 
                 if !needle.is_empty() && !haystack.contains(&needle) {
@@ -432,7 +432,7 @@ fn search(state: &Arc<AppState>, query: &str) -> Response {
                 found.push(RecordSummary {
                     id: preview.header.id,
                     title: preview.title,
-                    username: preview.username,
+                    username: preview.subtitle,
                     url: preview.url,
                     vault: name.clone(),
                     kind: preview.header.kind,
@@ -484,15 +484,8 @@ fn describe(state: &Arc<AppState>, record_id: &str) -> Response {
                 .map(|field| FieldSummary {
                     label: field.label.clone(),
                     kind: field.kind.clone(),
-                    secret: field.kind == "password" || field.kind == "hidden",
+                    secret: records::is_secret_kind(&field.kind),
                 })
-                .chain(record.payload.username.is_empty().then_some(()).is_none().then(|| {
-                    FieldSummary {
-                        label: "username".into(),
-                        kind: "text".into(),
-                        secret: false,
-                    }
-                }))
                 .collect(),
         },
     }
@@ -507,15 +500,18 @@ fn value_of(state: &Arc<AppState>, record_id: &str, field: &str) -> Option<Strin
             let record = records::open(&store, key, record_id).ok()?;
 
             if field == "username" {
-                return Some(record.payload.username);
+                return Some(record.payload.subtitle()).filter(|s| !s.is_empty());
             }
 
-            record
-                .payload
-                .fields
-                .iter()
-                .find(|one| one.label.eq_ignore_ascii_case(field))
-                .map(|one| one.value.clone())
+            let one = record.payload.fields.iter().find(|one| one.label.eq_ignore_ascii_case(field))?;
+
+            // A 2FA field hands out the code of the moment, never the secret that makes codes.
+            if one.kind == "totp" {
+                return crate::totp::code_for_field(&one.value, now_seconds())
+                    .map(|(code, _)| code);
+            }
+
+            Some(one.value.clone())
         })
         .flatten()
 }

@@ -1047,6 +1047,7 @@ mod tests {
                     label: "Senha".into(),
                     kind: "password".into(),
                     value: "hunter2".into(),
+                    ..Default::default()
                 }],
                 ..Default::default()
             },
@@ -1091,7 +1092,7 @@ mod tests {
 
         let opened = crate::records::open(&store, &master, &record.id).unwrap();
         assert_eq!(opened.payload.title, "Servidor");
-        assert_eq!(opened.payload.fields[0].value, "hunter2");
+        assert_eq!(opened.payload.primary_secret().unwrap().value, "hunter2");
     }
 
     #[test]

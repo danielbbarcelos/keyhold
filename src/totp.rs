@@ -65,6 +65,10 @@ fn urlencode(input: &str) -> String {
 
 /// The code for one counter step.
 fn code_at(secret: &[u8], counter: u64) -> String {
+    code_at_digits(secret, counter, DIGITS)
+}
+
+fn code_at_digits(secret: &[u8], counter: u64, digits: u32) -> String {
     let mut mac = HmacSha1::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(&counter.to_be_bytes());
 
@@ -77,7 +81,40 @@ fn code_at(secret: &[u8], counter: u64) -> String {
         | (digest[offset + 2] as u32) << 8
         | (digest[offset + 3] as u32);
 
-    format!("{:0width$}", binary % 10u32.pow(DIGITS), width = DIGITS as usize)
+    format!("{:0width$}", binary % 10u32.pow(digits), width = digits as usize)
+}
+
+/// The code a record's "Código 2FA" field gives right now, and how many seconds it has left.
+///
+/// The field holds what a site hands out when you turn on two-factor: either the bare base32
+/// secret or the whole `otpauth://` address (whose `digits` and `period` are honoured; SHA-1 only,
+/// which is what sites issue). Anything else gives `None`, and the interface says the field is not
+/// a 2FA secret instead of showing a wrong code.
+pub fn code_for_field(value: &str, unix_seconds: u64) -> Option<(String, u64)> {
+    let value = value.trim();
+    let (mut secret, mut digits, mut period) = (value.to_string(), DIGITS, STEP_SECONDS);
+
+    if let Some(rest) = value.strip_prefix("otpauth://totp/") {
+        let query = rest.split_once('?')?.1;
+        secret.clear();
+        for pair in query.split('&') {
+            let (key, val) = pair.split_once('=').unwrap_or((pair, ""));
+            match key.to_ascii_lowercase().as_str() {
+                "secret" => secret = val.to_string(),
+                "digits" => digits = val.parse().ok().filter(|d| (6..=8).contains(d))?,
+                "period" => period = val.parse().ok().filter(|p| *p > 0)?,
+                "algorithm" if !val.eq_ignore_ascii_case("sha1") => return None,
+                _ => {}
+            }
+        }
+    }
+
+    let cleaned: String =
+        secret.chars().filter(|c| !c.is_whitespace() && *c != '=').collect::<String>().to_uppercase();
+    let key = crate::encoding::from_base32(&cleaned).filter(|k| !k.is_empty())?;
+    let code = code_at_digits(&key, unix_seconds / period, digits);
+
+    Some((code, period - unix_seconds % period))
 }
 
 pub fn code_now(secret: &[u8], unix_seconds: u64) -> String {
@@ -169,5 +206,17 @@ mod tests {
         assert!(uri.contains("issuer=Keyhold"));
         assert!(uri.contains("digits=6"));
         assert!(uri.contains("period=30"));
+    }
+
+    #[test]
+    fn a_record_field_gives_the_rfc_code_from_a_bare_secret_or_an_address() {
+        let bare = "GEZD GNBV GY3T QOJQ GEZD GNBV GY3T QOJQ";
+        assert_eq!(code_for_field(bare, 59), Some(("287082".into(), 1)));
+
+        let address = "otpauth://totp/x?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&digits=8&period=30";
+        assert_eq!(code_for_field(address, 59).unwrap().0, "94287082");
+
+        assert_eq!(code_for_field("not a secret!", 59), None);
+        assert_eq!(code_for_field("otpauth://totp/x?secret=GEZD&algorithm=SHA256", 59), None);
     }
 }

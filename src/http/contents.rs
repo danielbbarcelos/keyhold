@@ -43,6 +43,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/folders/:id/move", post(move_folder))
         .route("/records/:id", get(open_record).put(update_record))
         .route("/records/:id/move", post(move_record))
+        .route("/records/:id/totp/:index", get(totp_code))
         .route("/records/:id/favourite", post(set_favourite))
         .route("/records/:id/archive", post(archive_record))
         .route("/records/:id/compromised", post(set_compromised))
@@ -585,10 +586,16 @@ async fn list_records(
 
 #[derive(Deserialize)]
 struct NewRecord {
+    /// Records no longer have a type; older interfaces still send one.
+    #[serde(default = "item_kind")]
     kind: String,
     #[serde(default)]
     folder_id: Option<String>,
     payload: Payload,
+}
+
+fn item_kind() -> String {
+    "item".into()
 }
 
 async fn create_record(
@@ -625,6 +632,31 @@ async fn open_record(State(state): State<Arc<AppState>>, Path(id): Path<String>)
     let opened = with_key!(state, |key| records::open(&store, key, &id)).map_err(bad_request)?;
 
     Ok(Json(json!({ "record": opened })))
+}
+
+/// The code a record's 2FA field gives right now.
+///
+/// Computed here rather than in the page: the page may be served over plain HTTP under a name of
+/// its own, where the browser withholds the cryptography it would need.
+async fn totp_code(
+    State(state): State<Arc<AppState>>,
+    Path((id, index)): Path<(String, usize)>,
+) -> Answer {
+    let store = state.store.lock().unwrap();
+    let opened = with_key!(state, |key| records::open(&store, key, &id)).map_err(bad_request)?;
+
+    let field = opened
+        .payload
+        .fields
+        .get(index)
+        .filter(|f| f.kind == "totp")
+        .ok_or_else(|| bad_request(anyhow::anyhow!("esse campo não é um código 2FA")))?;
+
+    let (code, remaining) =
+        crate::totp::code_for_field(&field.value, crate::identity::now_seconds())
+            .ok_or_else(|| bad_request(anyhow::anyhow!("o segredo desse campo não é um 2FA válido")))?;
+
+    Ok(Json(json!({ "code": code, "remaining": remaining })))
 }
 
 async fn update_record(

@@ -259,7 +259,7 @@ pub fn from_csv(text: &str) -> Result<Vec<ExportedRecord>> {
         let mut fields = Vec::new();
 
         if let Some(secret) = password.map(|at| cell(Some(at))).filter(|v| !v.is_empty()) {
-            fields.push(Field { label: "Senha".into(), kind: "password".into(), value: secret });
+            fields.push(Field::new("Senha", "password", &secret));
         }
 
         // Whatever the file had that this does not understand, kept under its own column name.
@@ -269,7 +269,7 @@ pub fn from_csv(text: &str) -> Result<Vec<ExportedRecord>> {
             }
 
             let label = header.get(index).cloned().unwrap_or_else(|| format!("Coluna {index}"));
-            fields.push(Field { label, kind: "text".into(), value: value.clone() });
+            fields.push(Field::new(&label, "text", value));
         }
 
         found.push(ExportedRecord {
@@ -281,7 +281,9 @@ pub fn from_csv(text: &str) -> Result<Vec<ExportedRecord>> {
                 url: cell(url),
                 notes: cell(notes),
                 fields,
-            },
+                icon: None,
+            }
+            .normalise(),
         });
     }
 
@@ -364,6 +366,7 @@ mod tests {
                 label: "Senha".into(),
                 kind: "password".into(),
                 value: password.into(),
+                ..Default::default()
             }],
             ..Payload::default()
         }
@@ -379,7 +382,7 @@ mod tests {
 
         assert_eq!(archive.vault, "Trabalho");
         assert_eq!(archive.records.len(), 1);
-        assert_eq!(archive.records[0].payload.fields[0].value, "hunter2");
+        assert_eq!(archive.records[0].payload.primary_secret().unwrap().value, "hunter2");
     }
 
     #[test]
@@ -477,11 +480,11 @@ mod tests {
 
         assert_eq!(found.len(), 2);
         assert_eq!(found[0].payload.title, "Servidor");
-        assert_eq!(found[0].payload.username, "deploy");
-        assert_eq!(found[0].payload.url, "https://exemplo.test");
-        assert_eq!(found[0].payload.fields[0].value, "hunter2");
+        assert_eq!(found[0].payload.subtitle(), "deploy");
+        assert_eq!(found[0].payload.first_url(), "https://exemplo.test");
+        assert_eq!(found[0].payload.primary_secret().unwrap().value, "hunter2");
         assert_eq!(found[1].payload.title, "Banco");
-        assert!(found[1].payload.fields[0].value == "outra senha");
+        assert!(found[1].payload.primary_secret().unwrap().value == "outra senha");
     }
 
     #[test]
@@ -493,7 +496,7 @@ mod tests {
 
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].payload.title, "Servidor, o principal");
-        assert_eq!(found[0].payload.fields[0].value, "tem \"aspas\" dentro");
+        assert_eq!(found[0].payload.primary_secret().unwrap().value, "tem \"aspas\" dentro");
         assert_eq!(found[0].payload.notes, "uma nota\nem duas linhas");
     }
 
