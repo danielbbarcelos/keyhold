@@ -234,15 +234,9 @@ fn open_one(key: &SecretKey, id: &str, sealed: &[u8]) -> Option<Sealed> {
     serde_json::from_slice(&body).ok()
 }
 
-/// When a process started, in clock ticks since boot — its identity, alongside its pid.
-///
-/// Field 22 of `/proc/<pid>/stat`. The parse starts after the last `)` because field 2 is the
-/// command name and a command name may contain spaces and parentheses.
+/// When a process started, as the kernel marks it — its identity, alongside its pid.
 pub fn started_at(pid: i64) -> Option<u64> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let after = stat.rfind(')')?;
-
-    stat[after + 1..].split_whitespace().nth(19)?.parse().ok()
+    crate::procinfo::start_mark(i32::try_from(pid).ok()?)
 }
 
 #[cfg(test)]

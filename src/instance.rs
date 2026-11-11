@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::paths;
+use crate::{paths, procinfo};
 
 /// How long a replaced instance gets to close the vault properly before it is taken down.
 const GRACE: Duration = Duration::from_secs(5);
@@ -115,15 +115,15 @@ pub fn claim() -> Result<Claim> {
 ///
 /// PIDs are reused. Signalling one that a stale marker happens to name would take down whatever
 /// unrelated program inherited the number, so liveness alone is not enough — on Linux the name is
-/// checked too. Where `/proc` says nothing, the signal test stands on its own; the marker is in a
+/// checked too. Where the kernel says nothing, the signal test stands on its own; the marker is in a
 /// directory only this user can write, which is the reason that is tolerable.
 pub fn alive(marker: &Marker) -> bool {
     if marker.pid <= 1 || marker.pid == std::process::id() as i32 {
         return false;
     }
 
-    if let Ok(name) = fs::read_to_string(format!("/proc/{}/comm", marker.pid)) {
-        return name.trim() == env!("CARGO_PKG_NAME");
+    if let Some(name) = procinfo::name(marker.pid) {
+        return name == env!("CARGO_PKG_NAME");
     }
 
     signal(marker.pid, 0)
@@ -212,6 +212,18 @@ fn ask_on_desktop(other: &Marker, can_present: bool) -> Choice {
             other.pid
         )
     };
+
+    if cfg!(target_os = "macos") {
+        let open = "Abrir e continuar";
+        let buttons: &[&str] = if can_present { &["Cancelar", START_OVER, open] } else { &["Cancelar", START_OVER] };
+        let default = if can_present { open } else { "Cancelar" };
+
+        return match mac_dialog(&text, buttons, default).as_deref() {
+            Some(answer) if answer == open => Choice::Present,
+            Some(START_OVER) => Choice::Replace,
+            _ => Choice::Nothing,
+        };
+    }
 
     // zenity has two buttons plus extras. An extra button exits non-zero and prints its own label,
     // which is how a three-way question fits into a yes/no dialog.
@@ -319,14 +331,16 @@ pub fn present(other: &Marker) -> Result<()> {
 fn same_build(pid: i32) -> bool {
     use std::os::unix::fs::MetadataExt;
 
-    let ours = match fs::metadata("/proc/self/exe") {
-        Ok(meta) => meta,
-        Err(_) => return false,
+    // On Linux the kernel's link opens the very file a process runs. macOS gives a path only, so a
+    // reinstall over the same path reads as the same build there: `USR1` then reaches a build that
+    // may predate its handler, which is the risk the Linux check avoids.
+    let Some(ours) = procinfo::exe(std::process::id() as i32).and_then(|p| fs::metadata(p).ok()) else {
+        return false;
     };
 
-    match fs::metadata(format!("/proc/{pid}/exe")) {
-        Ok(theirs) => theirs.dev() == ours.dev() && theirs.ino() == ours.ino(),
-        Err(_) => false,
+    match procinfo::exe(pid).and_then(|p| fs::metadata(p).ok()) {
+        Some(theirs) => theirs.dev() == ours.dev() && theirs.ino() == ours.ino(),
+        None => false,
     }
 }
 
@@ -340,6 +354,17 @@ fn same_build(pid: i32) -> bool {
 /// answer is no, and the interface stays where it is.
 pub async fn ask_to_open(text: &str) -> bool {
     const OPEN: &str = "Abrir o Keyhold";
+
+    if cfg!(target_os = "macos") {
+        let output = tokio::process::Command::new("osascript")
+            .args(mac_dialog_args(text, &["Agora não", OPEN], OPEN))
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .output()
+            .await;
+
+        return output.is_ok_and(|o| answered(&o.stdout).as_deref() == Some(OPEN));
+    }
 
     let zenity = tokio::process::Command::new("zenity")
         .args(["--question", "--title", "Keyhold", "--no-markup"])
@@ -375,6 +400,34 @@ pub async fn ask_to_open(text: &str) -> bool {
     false
 }
 
+/// The arguments for an AppleScript dialog. The text and the buttons arrive as `argv`, never
+/// spliced into the script, so nothing in them can be read as AppleScript.
+fn mac_dialog_args(text: &str, buttons: &[&str], default: &str) -> Vec<String> {
+    let count = buttons.len();
+    let list = (0..count).map(|i| format!("item {} of argv", i + 3)).collect::<Vec<_>>().join(", ");
+    let script = format!(
+        "on run argv\n  display dialog (item 1 of argv) with title \"Keyhold\" buttons {{{list}}} default button (item 2 of argv)\nend run"
+    );
+
+    let mut args = vec!["-e".to_string(), script, "--".to_string(), text.to_string(), default.to_string()];
+    args.extend(buttons.iter().map(|b| b.to_string()));
+    args
+}
+
+/// The button an AppleScript dialog answered with, from its "button returned:…" line.
+fn answered(stdout: &[u8]) -> Option<String> {
+    let out = String::from_utf8_lossy(stdout);
+
+    out.trim().strip_prefix("button returned:").map(|b| b.split(',').next().unwrap_or(b).trim().to_string())
+}
+
+/// Ask on the macOS desktop, and say which button was pressed (`None`: no answer).
+fn mac_dialog(text: &str, buttons: &[&str], default: &str) -> Option<String> {
+    let output = Command::new("osascript").args(mac_dialog_args(text, buttons, default)).stderr(Stdio::null()).output().ok()?;
+
+    answered(&output.stdout)
+}
+
 /// Hand the URL to the desktop.
 ///
 /// The token is in the fragment, which is why this is safe to pass as an argument: the fragment
@@ -397,6 +450,17 @@ pub fn open_browser(url: &str) {
 /// is a window that did not open, as far as they can tell. A notification lands on top of whatever
 /// has focus, which is the one place this can be sure of.
 pub fn announce(text: &str) {
+    if cfg!(target_os = "macos") {
+        let _ = Command::new("osascript")
+            .args(["-e", "on run argv", "-e", "display notification (item 1 of argv) with title \"Keyhold\"", "-e", "end run", "--"])
+            .arg(text)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+
+        return;
+    }
+
     let _ = Command::new("notify-send")
         .args(["--app-name", "Keyhold", "--icon", "keyhold", "Keyhold"])
         .arg(text)
@@ -478,32 +542,21 @@ pub fn running() -> Option<Marker> {
 /// on screen rather than in `ps`. It is also the place a leftover from an older build — one that
 /// started before any of this existed and so claimed nothing — becomes visible.
 ///
-/// Read from `/proc` and filtered by owner: another user's processes are none of this window's
+/// Read from the kernel (`procinfo`) and filtered by owner: another user's processes are none of this window's
 /// business, and would not be signallable anyway.
 pub fn processes() -> Vec<Process> {
     let me = std::process::id() as i32;
     let uid = our_uid();
     let marker = read_marker();
-    let uptime = uptime_seconds().unwrap_or(0.0);
-    let ticks = clock_ticks() as f64;
 
-    let mut found: Vec<Process> = fs::read_dir("/proc")
+    let mut found: Vec<Process> = procinfo::all_pids()
         .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name();
-
-            name.to_str()?.parse::<i32>().ok()
-        })
-        .filter(|pid| owner_of(*pid) == Some(uid))
+        .filter(|pid| procinfo::owner(*pid) == Some(uid))
         .filter(|pid| is_keyhold(*pid))
         .map(|pid| Process {
             pid,
             role: role_of(pid),
-            running_for: started_ticks(pid)
-                .map(|started| (uptime - started as f64 / ticks).max(0.0) as u64)
-                .unwrap_or(0),
+            running_for: procinfo::age_seconds(pid).unwrap_or(0),
             is_this_one: pid == me,
             holds_the_vault: matches!(&marker, Some(one) if one.pid == pid),
         })
@@ -577,9 +630,7 @@ pub fn close(pid: i32) -> Result<()> {
 }
 
 fn is_keyhold(pid: i32) -> bool {
-    fs::read_to_string(format!("/proc/{pid}/comm"))
-        .map(|name| name.trim() == env!("CARGO_PKG_NAME"))
-        .unwrap_or(false)
+    procinfo::name(pid).is_some_and(|name| name == env!("CARGO_PKG_NAME"))
 }
 
 fn our_uid() -> u32 {
@@ -587,50 +638,12 @@ fn our_uid() -> u32 {
     unsafe { libc::getuid() }
 }
 
-fn owner_of(pid: i32) -> Option<u32> {
-    use std::os::unix::fs::MetadataExt;
-
-    fs::metadata(format!("/proc/{pid}")).ok().map(|meta| meta.uid())
-}
-
-fn clock_ticks() -> u64 {
-    // SAFETY: `sysconf` reads a constant of the running kernel.
-    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-
-    if ticks > 0 {
-        ticks as u64
-    } else {
-        100
-    }
-}
-
-fn uptime_seconds() -> Option<f64> {
-    fs::read_to_string("/proc/uptime").ok()?.split_whitespace().next()?.parse().ok()
-}
-
-/// Field 22 of `/proc/<pid>/stat`, in clock ticks since boot.
-///
-/// The parse starts after the last `)` for the same reason the agent's does: field 2 is the command
-/// name, and a command name may contain spaces and parentheses.
-fn started_ticks(pid: i32) -> Option<u64> {
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let after = stat.rfind(')')?;
-
-    stat[after + 1..].split_whitespace().nth(19)?.parse().ok()
-}
-
 fn role_of(pid: i32) -> Role {
-    let raw = match fs::read(format!("/proc/{pid}/cmdline")) {
-        Ok(raw) => raw,
-        Err(_) => return Role::Other,
+    let Some(args) = procinfo::args(pid) else {
+        return Role::Other;
     };
 
-    let subcommand = raw
-        .split(|byte| *byte == 0)
-        .filter(|part| !part.is_empty())
-        .skip(1)
-        .map(|part| String::from_utf8_lossy(part).into_owned())
-        .find(|part| !part.starts_with('-'));
+    let subcommand = args.into_iter().skip(1).find(|part| !part.starts_with('-'));
 
     match subcommand.as_deref() {
         None => Role::Interface,
@@ -752,5 +765,16 @@ mod tests {
         drop(held);
 
         assert!(marker_path().exists(), "somebody else's claim survives our drop");
+    }
+
+    #[test]
+    fn an_applescript_dialog_takes_its_words_as_arguments_never_as_script() {
+        let args = mac_dialog_args("Abrir \" & do shell script \"x\"", &["Não", "Sim"], "Sim");
+
+        assert!(!args[1].contains("do shell script"), "the text is never part of the script");
+        assert_eq!(&args[3..], ["Abrir \" & do shell script \"x\"", "Sim", "Não", "Sim"]);
+        assert!(args[1].contains("buttons {item 3 of argv, item 4 of argv}"));
+        assert_eq!(answered(b"button returned:Sim\n").as_deref(), Some("Sim"));
+        assert_eq!(answered(b"").as_deref(), None);
     }
 }

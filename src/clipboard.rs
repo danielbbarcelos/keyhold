@@ -24,6 +24,11 @@ pub const CLEAR_AFTER_SECONDS: u64 = 45;
 /// Wayland first because a session that has both is a Wayland session running an X11 bridge, and
 /// writing through the bridge lands in the wrong place often enough to be worth avoiding.
 fn writer() -> Option<(&'static str, Vec<&'static str>)> {
+    // macOS has one clipboard and one tool for it, always installed.
+    if cfg!(target_os = "macos") {
+        return Some(("pbcopy", vec![]));
+    }
+
     let has = |program: &str| {
         Command::new("sh")
             .arg("-c")

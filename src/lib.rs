@@ -30,6 +30,7 @@ pub mod instance;
 pub mod lock;
 pub mod mcp;
 pub mod paths;
+pub mod procinfo;
 pub mod records;
 pub mod session;
 pub mod settings;

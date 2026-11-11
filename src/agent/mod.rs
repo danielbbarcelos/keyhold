@@ -206,26 +206,14 @@ fn restrict(path: &std::path::Path) -> Result<()> {
 ///
 /// The process on the socket is always `keyhold mcp` — it is the translator, and naming it would
 /// tell somebody nothing. What is worth showing is what launched it, so the parent is read too:
-/// that is `claude`, or whatever else is driving. Both come from `/proc`, never from anything the
-/// client says about itself.
+/// that is `claude`, or whatever else is driving. Both come from the kernel (`procinfo`), never
+/// from anything the client says about itself.
 fn peer_of(stream: &UnixStream) -> Peer {
     let credentials = stream.peer_cred().ok();
     let pid = credentials.and_then(|c| c.pid()).unwrap_or(0) as i64;
 
-    let name_of = |pid: i64| {
-        std::fs::read_to_string(format!("/proc/{pid}/comm"))
-            .ok()
-            .map(|name| name.trim().to_string())
-            .filter(|name| !name.is_empty())
-    };
-
-    // Field 4 of /proc/<pid>/stat is the parent's pid. The comm field before it can contain spaces
-    // and parentheses, so the parse starts after its closing one.
-    let parent_pid = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|stat| {
-        let after = stat.rfind(')')?;
-
-        stat[after + 1..].split_whitespace().nth(1)?.parse::<i64>().ok()
-    });
+    let name_of = |pid: i64| i32::try_from(pid).ok().and_then(crate::procinfo::name);
+    let parent_pid = i32::try_from(pid).ok().and_then(crate::procinfo::parent).map(i64::from);
 
     Peer {
         pid,

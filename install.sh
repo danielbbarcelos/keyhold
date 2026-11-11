@@ -3,8 +3,8 @@
 #  Keyhold — installer
 #
 #  Builds the interface bundle, compiles the binary with it embedded, puts it
-#  on your PATH, and adds a desktop shortcut that opens Keyhold in your
-#  browser.
+#  on your PATH, and adds a desktop shortcut (Linux) or Keyhold.app (macOS)
+#  that opens Keyhold in your browser.
 #
 #  Options:
 #      --with=set-host[=NAME]  Also give Keyhold a name in /etc/hosts
@@ -130,19 +130,8 @@ install_icons() {
   return 0
 }
 
-install_desktop_shortcut() {
-  if [ "${SKIP_DESKTOP:-0}" = "1" ]; then
-    warn "SKIP_DESKTOP=1 — skipping the desktop shortcut"
-    return
-  fi
-
-  info "Installing the desktop shortcut..."
-
-  local apps_dir="$HOME/.local/share/applications"
-  mkdir -p "$apps_dir" "$BIN_DIR"
-
-  install_icons || true
-
+write_launcher() {
+  mkdir -p "$BIN_DIR"
   # A wrapper rather than calling the binary directly: a desktop launcher has no
   # terminal, so Keyhold's output — including the URL it opens — would go
   # nowhere. This keeps it in a log you can read when something did not start.
@@ -181,6 +170,22 @@ fi
 exec "\$BIN" "\$@" >"\$LOG" 2>&1
 LAUNCHER
   chmod +x "$launcher"
+}
+
+install_desktop_shortcut() {
+  if [ "${SKIP_DESKTOP:-0}" = "1" ]; then
+    warn "SKIP_DESKTOP=1 — skipping the desktop shortcut"
+    return
+  fi
+
+  info "Installing the desktop shortcut..."
+
+  local apps_dir="$HOME/.local/share/applications"
+  mkdir -p "$apps_dir" "$BIN_DIR"
+
+  install_icons || true
+
+  local launcher="$BIN_DIR/$APP_BIN-launch"
 
   local desktop_file="$apps_dir/$APP_BIN.desktop"
   cat >"$desktop_file" <<DESKTOP
@@ -245,12 +250,78 @@ URLDESKTOP
   ok "shortcut installed — look for \"$APP_DISPLAY_NAME\" in your launcher"
 }
 
+# macOS: an app in ~/Applications, so Keyhold is in Launchpad and Spotlight, and the
+# owner of keyhold:// links. Opening it brings the running Keyhold forward or starts
+# one (--present), which is also all a keyhold:// link from any page can do.
+install_macos_app() {
+  if [ "${SKIP_DESKTOP:-0}" = "1" ]; then
+    warn "SKIP_DESKTOP=1 — skipping the app"
+    return
+  fi
+
+  info "Installing Keyhold.app..."
+  local launcher="$BIN_DIR/$APP_BIN-launch"
+  local app="$HOME/Applications/$APP_DISPLAY_NAME.app"
+  rm -rf "$app"
+  mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+
+  cat >"$app/Contents/MacOS/$APP_DISPLAY_NAME" <<APPEXEC
+#!/usr/bin/env bash
+exec "$launcher" --present
+APPEXEC
+  chmod +x "$app/Contents/MacOS/$APP_DISPLAY_NAME"
+
+  local icon_key=""
+  if [ -f "$SOURCE_DIR/assets/icon.png" ] && has sips && has iconutil; then
+    local set
+    set="$(mktemp -d)/AppIcon.iconset"
+    mkdir -p "$set"
+    for size in 16 32 128 256 512; do
+      sips -z "$size" "$size" "$SOURCE_DIR/assets/icon.png" --out "$set/icon_${size}x${size}.png" >/dev/null 2>&1 || true
+      sips -z $((size * 2)) $((size * 2)) "$SOURCE_DIR/assets/icon.png" --out "$set/icon_${size}x${size}@2x.png" >/dev/null 2>&1 || true
+    done
+    iconutil -c icns "$set" -o "$app/Contents/Resources/AppIcon.icns" 2>/dev/null &&
+      icon_key="<key>CFBundleIconFile</key><string>AppIcon</string>"
+  fi
+
+  cat >"$app/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>$APP_DISPLAY_NAME</string>
+  <key>CFBundleDisplayName</key><string>$APP_DISPLAY_NAME</string>
+  <key>CFBundleIdentifier</key><string>io.github.keyhold</string>
+  <key>CFBundleExecutable</key><string>$APP_DISPLAY_NAME</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSUIElement</key><true/>
+  $icon_key
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>$APP_DISPLAY_NAME</string>
+      <key>CFBundleURLSchemes</key><array><string>$APP_BIN</string></array>
+    </dict>
+  </array>
+</dict>
+</plist>
+PLIST
+
+  local lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+  [ -x "$lsregister" ] && "$lsregister" -f "$app" >/dev/null 2>&1 || true
+
+  ok "Keyhold.app installed in ~/Applications (Launchpad and Spotlight find it)"
+}
+
 check_path() {
   case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
     *)
       warn "$BIN_DIR is not on your PATH"
-      warn "add it with: echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
+      local rc="~/.bashrc"
+      [ "$(uname -s)" = "Darwin" ] && rc="~/.zshrc"
+      warn "add it with: echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> $rc"
       ;;
   esac
 }
@@ -279,7 +350,12 @@ header
 check_toolchain
 build_frontend
 build_binary
-install_desktop_shortcut
+write_launcher
+if [ "$(uname -s)" = "Darwin" ]; then
+  install_macos_app
+else
+  install_desktop_shortcut
+fi
 check_path
 set_host
 farewell
