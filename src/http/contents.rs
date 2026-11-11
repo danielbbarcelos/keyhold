@@ -629,7 +629,7 @@ async fn move_folder(
     Json(body): Json<MoveFolder>,
 ) -> Answer {
     if is_aws_id(&id) {
-        return Err(not_yet_for_aws_folders());
+        return aws::move_folder(&state, &id, body.parent_id.as_deref()).await;
     }
 
     let store = state.store.lock().unwrap();
@@ -650,12 +650,6 @@ async fn delete_folder(State(state): State<Arc<AppState>>, Path(id): Path<String
     with_key!(state, |_key| vaults::delete_folder(&store, &id)).map_err(bad_request)?;
 
     Ok(Json(json!({ "deleted": true })))
-}
-
-/// Parameter Store has no rename: moving a folder means rewriting every parameter under it, and
-/// that is a bigger operation than a drag should start without its own confirmation.
-fn not_yet_for_aws_folders() -> super::Failure {
-    bad_request("mover pastas de um cofre AWS para outro lugar ainda não é possível. Renomear é")
 }
 
 // ── records ─────────────────────────────────────────────────────────────────────────────────────

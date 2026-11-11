@@ -1282,6 +1282,138 @@ pub(crate) async fn ensure_folder_label(state: &AppState, vault_id: &str, path: 
     write_folder_label(state, &place, &listing, path, &description, exists).await
 }
 
+/// What moving a folder's path came to.
+enum Relocated {
+    Moved { target: String, warning: Option<String> },
+    /// Nothing was moved: these cannot be (a `String` parameter, or one with attachments).
+    Blocked(String),
+}
+
+/// Move every parameter under `path` to `new_path`, keys and tags and description (the folder's
+/// name, on its marker) included; each one starts its history over. Checked before anything is
+/// written: a `String` parameter is never rewritten, and one with attachments would leave its files
+/// behind, so either refuses the whole move. A failure half way stops and says what moved.
+async fn relocate_folder(
+    state: &AppState,
+    place: &Place,
+    listing: &Snapshot,
+    path: &str,
+    new_path: &str,
+) -> Result<Relocated, Failure> {
+    mapping::validate_name(new_path).map_err(bad_request)?;
+
+    let paths = mapping::folder_paths(listing.parameters.iter().map(|p| p.name.as_str()));
+    if paths.contains(new_path) {
+        return Err(conflict(format!("já existe uma pasta {new_path} na AWS")));
+    }
+
+    let prefix = format!("{}/", path.trim_end_matches('/'));
+    let inside: Vec<&crate::aws::Parameter> = listing
+        .parameters
+        .iter()
+        .filter(|p| mapping::absolute(&p.name).starts_with(&prefix))
+        .collect();
+
+    let mut blocked = Vec::new();
+    for parameter in &inside {
+        if !is_secure(&parameter.kind) {
+            blocked.push(format!("{} (parâmetro String)", mapping::leaf(&parameter.name)));
+            continue;
+        }
+        if mapping::is_keep(&parameter.name) {
+            continue;
+        }
+        match attachments_in(state, place, &parameter.name).await {
+            Ok(Some((_, _, keys))) if !keys.is_empty() => {
+                blocked.push(format!("{} (tem anexos)", mapping::leaf(&parameter.name)))
+            }
+            Ok(_) => {}
+            Err(Ok(failure)) => return Err(because("não movi a pasta porque precisei conferir os anexos", failure)),
+            Err(Err(failure)) => return Err(failure),
+        }
+    }
+
+    if !blocked.is_empty() {
+        return Ok(Relocated::Blocked(blocked.join(", ")));
+    }
+
+    let mut warning = None;
+    let mut moved = 0;
+    for parameter in &inside {
+        let old = mapping::absolute(&parameter.name);
+        let new_name = format!("{new_path}{}", &old[path.trim_end_matches('/').len()..]);
+        let old_id = record_id(&place.vault_id, &parameter.name);
+
+        match move_parameter(state, place, &old_id, &parameter.name, &new_name).await {
+            Ok(Json(answer)) => {
+                moved += 1;
+                if let Some(text) = answer.get("warning").and_then(Value::as_str) {
+                    warning = Some(text.to_string());
+                }
+            }
+            Err(failure) => {
+                state.aws.invalidate(&place.vault_id);
+                if moved == 0 {
+                    return Err(failure);
+                }
+                // Half way: both folders exist now. Say so, and name the new one.
+                warning = Some(format!(
+                    "movi {moved} de {} parâmetros para {new_path} e parei: {}. O resto continua em {path}",
+                    inside.len(),
+                    failure.1
+                ));
+                break;
+            }
+        }
+    }
+
+    state.aws.invalidate(&place.vault_id);
+    Ok(Relocated::Moved { target: new_path.to_string(), warning })
+}
+
+/// Move a folder under another one, or to the root: its path changes, and so does the name of
+/// every parameter under it (see [`relocate_folder`]). Its name in Keyhold travels on its marker.
+pub(crate) async fn move_folder(state: &AppState, id: &str, parent_id: Option<&str>) -> Answer {
+    let (vault_id, path) = target_folder(id)?;
+    let parent = folder_path(&vault_id, parent_id)?;
+
+    if parent.as_deref().is_some_and(|p| p == path || p.starts_with(&format!("{}/", path.trim_end_matches('/')))) {
+        return Err(bad_request("uma pasta não vai para dentro dela mesma"));
+    }
+
+    let new_path = mapping::join(parent.as_deref(), mapping::leaf(&path));
+    let place = place(state, &vault_id).await?;
+
+    state.aws.invalidate(&vault_id);
+    let listing = snapshot(state, &place).await?;
+    let label = folder_labels(&listing).get(&path).cloned();
+
+    if !mapping::folder_paths(listing.parameters.iter().map(|p| p.name.as_str())).contains(&path) {
+        return Err(not_found("essa pasta não existe mais"));
+    }
+
+    if mapping::absolute(&new_path) == mapping::absolute(&path) {
+        return Ok(Json(json!({ "moved": true, "id": id })));
+    }
+
+    match relocate_folder(state, &place, &listing, &path, &new_path).await? {
+        Relocated::Blocked(blocked) => Err(conflict(format!(
+            "a pasta não foi movida, porque estes não podem mudar de nome na AWS: {blocked}"
+        ))),
+        Relocated::Moved { target, warning } => {
+            let node = FolderNode {
+                id: folder_id(&vault_id, &target),
+                vault_id: vault_id.clone(),
+                parent_id: mapping::parent_path(&target).map(|p| folder_id(&vault_id, &p)),
+                name: label.unwrap_or_else(|| mapping::leaf(&target).to_string()),
+                colour: None,
+                depth: target.matches('/').count().saturating_sub(1),
+            };
+            Ok(Json(with_warning(json!({ "moved": true, "id": node.id, "folder": node }), warning)))
+        }
+    }
+}
+
 /// Rename a folder (F9, A7 revisited): its name in Keyhold always, and its path in AWS only when
 /// `segment` asks for it.
 ///
@@ -1306,83 +1438,24 @@ pub(crate) async fn rename_folder(state: &AppState, id: &str, label: &str, segme
     }
 
     let mut target = path.clone();
-    let mut warning = None;
+    let mut warning: Option<String> = None;
 
     let wanted = segment.map(str::trim).filter(|s| !s.is_empty() && *s != mapping::leaf(&path));
 
     if let Some(wanted) = wanted {
         mapping::validate_segment(wanted).map_err(bad_request)?;
         let new_path = mapping::join(mapping::parent_path(&path).as_deref(), wanted);
-        mapping::validate_name(&new_path).map_err(bad_request)?;
 
-        if paths.contains(&new_path) {
-            return Err(conflict(format!("já existe uma pasta {new_path} na AWS")));
-        }
-
-        let prefix = format!("{}/", path.trim_end_matches('/'));
-        let inside: Vec<&crate::aws::Parameter> = listing
-            .parameters
-            .iter()
-            .filter(|p| mapping::absolute(&p.name).starts_with(&prefix))
-            .collect();
-
-        let mut blocked = Vec::new();
-        for parameter in &inside {
-            if !is_secure(&parameter.kind) {
-                blocked.push(format!("{} (parâmetro String)", mapping::leaf(&parameter.name)));
-                continue;
+        match relocate_folder(state, &place, &listing, &path, &new_path).await? {
+            Relocated::Moved { target: moved_to, warning: said } => {
+                target = moved_to;
+                warning = said;
             }
-            if mapping::is_keep(&parameter.name) {
-                continue;
+            Relocated::Blocked(blocked) => {
+                warning = Some(format!(
+                    "só o nome no Keyhold mudou. O caminho na AWS ficou {path}, porque estes não podem ser movidos: {blocked}"
+                ));
             }
-            match attachments_in(state, &place, &parameter.name).await {
-                Ok(Some((_, _, keys))) if !keys.is_empty() => {
-                    blocked.push(format!("{} (tem anexos)", mapping::leaf(&parameter.name)))
-                }
-                Ok(_) => {}
-                Err(Ok(failure)) => {
-                    return Err(because("não renomeei a pasta porque precisei conferir os anexos", failure))
-                }
-                Err(Err(failure)) => return Err(failure),
-            }
-        }
-
-        if blocked.is_empty() {
-            let mut moved = 0;
-            for parameter in &inside {
-                let old = mapping::absolute(&parameter.name);
-                let new_name = format!("{new_path}{}", &old[path.trim_end_matches('/').len()..]);
-                let old_id = record_id(&vault_id, &parameter.name);
-
-                match move_parameter(state, &place, &old_id, &parameter.name, &new_name).await {
-                    Ok(Json(answer)) => {
-                        moved += 1;
-                        if let Some(text) = answer.get("warning").and_then(Value::as_str) {
-                            warning = Some(text.to_string());
-                        }
-                    }
-                    Err(failure) => {
-                        state.aws.invalidate(&vault_id);
-                        if moved == 0 {
-                            return Err(failure);
-                        }
-                        // Half way: both folders exist now. Say so, and name the new one.
-                        warning = Some(format!(
-                            "movi {moved} de {} parâmetros para {new_path} e parei: {}. O resto                              continua em {path}",
-                            inside.len(),
-                            failure.1
-                        ));
-                        break;
-                    }
-                }
-            }
-            target = new_path;
-            state.aws.invalidate(&vault_id);
-        } else {
-            warning = Some(format!(
-                "só o nome no Keyhold mudou. O caminho na AWS ficou {path}, porque estes não podem                  ser movidos: {}",
-                blocked.join(", ")
-            ));
         }
     }
 

@@ -733,8 +733,25 @@ async fn folders_are_markers_and_a_full_one_is_not_deleted() {
     assert_eq!(empty.status, 200, "{}", empty.body);
     assert!(h.parameter("/app/novo/.keep").is_none());
 
-    let moved = h.post(&format!("/folders/{}/move", h.folder("/app/dev")), json!({ "parent_id": null })).await;
-    assert_eq!(moved.status, 400, "moving an AWS folder elsewhere is still refused");
+}
+
+#[tokio::test]
+async fn a_folder_moves_under_another_with_everything_in_it() {
+    let h = start(account, None, None).await;
+
+    let into_itself = h.post(&format!("/folders/{}/move", h.folder("/app")), json!({ "parent_id": h.folder("/app/prod") })).await;
+    assert_eq!(into_itself.status, 400, "a folder never goes inside itself");
+
+    let moved = h.post(&format!("/folders/{}/move", h.folder("/app/prod")), json!({ "parent_id": h.folder("/app/dev") })).await;
+    assert_eq!(moved.status, 200, "{}", moved.body);
+    assert_eq!(moved.body["id"], h.folder("/app/dev/prod"));
+    assert!(h.parameter("/app/prod/db").is_none());
+    assert_eq!(h.parameter("/app/dev/prod/db").unwrap().value, "hunter2");
+    assert_eq!(h.parameter("/app/dev/prod/api").unwrap().key_id, "alias/prod", "each keeps its key");
+
+    let root = h.post(&format!("/folders/{}/move", h.folder("/app/dev/prod")), json!({ "parent_id": null })).await;
+    assert_eq!(root.status, 200, "{}", root.body);
+    assert!(h.parameter("/prod/db").is_some());
 }
 
 #[tokio::test]

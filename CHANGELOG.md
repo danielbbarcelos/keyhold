@@ -26,8 +26,10 @@
   Keyhold across restarts. Double-click a handle to go back to the default.
 - Text cut short in the tree and in field names shows whole in a tooltip.
 - **Several items at once in the tree**: Ctrl (⌘) click and Shift click pick records and folders,
-  and dragging them drops all of them on a folder or on the root. Folders can be dragged now too
-  (in a local vault; in AWS a folder is part of every name under it, and "Renomear" moves it).
+  and dragging them drops all of them on a folder or on the root. Folders can be dragged now too,
+  local and AWS. In AWS, moving shows first every parameter name that changes, from and to, since
+  each one is rewritten under its new name and loses its history; a folder holding a `String`
+  parameter or attachments is refused whole.
   In the tree, Ctrl click picks instead of opening a new tab; the middle button still does that.
   The selection has an "Ações" menu: move to the root or a folder, copy, favourite, and delete
   (a picked folder goes with everything inside it, shown a shade lighter while picked).

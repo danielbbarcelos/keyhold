@@ -112,7 +112,8 @@ export function VaultPage({
   const [askingJson, setAskingJson] = useState(false)
   // "Excluir…" on the picked items: every record they reach, and the folders, deepest first.
   const [bulkDeleting, setBulkDeleting] = useState<{ records: string[]; folders: string[] } | null>(null)
-  const [movingAws, setMovingAws] = useState<{ ids: string[]; folderId: string | null } | null>(null)
+  // An AWS move waiting for its yes: the items (`r:`/`f:`) and where they go.
+  const [movingAws, setMovingAws] = useState<{ items: string[]; folderId: string | null } | null>(null)
   const [unavailable, setUnavailable] = useState<{ message: string; code?: string } | null>(null)
   // False until the first read of this vault answers: until then the tree and the panel are skeletons
   // rather than an "empty vault" that is not empty.
@@ -430,7 +431,7 @@ export function VaultPage({
   async function moveTo(id: string, folderId: string | null, confirmed = false) {
     // In Parameter Store a move is a new name: the old one, with its history, is deleted.
     if (aws && !confirmed) {
-      setMovingAws({ ids: [id], folderId })
+      setMovingAws({ items: [`r:${id}`], folderId })
 
       return
     }
@@ -470,15 +471,11 @@ export function VaultPage({
       .filter((item) => item.startsWith('r:'))
       .map((item) => item.slice(2))
       .filter((id) => records.find((record) => record.id === id)?.folder_id !== folderId)
-    let folderIds = items
+    const folderIds = items
       .filter((item) => item.startsWith('f:'))
       .map((item) => item.slice(2))
       .filter((id) => !isUnder(folderId, id) && folders.find((folder) => folder.id === id)?.parent_id !== folderId)
 
-    if (aws && folderIds.length) {
-      toast('Pastas não se movem na AWS', 'Use "Renomear" na pasta, com "Mudar o nome na AWS também".', 'error')
-      folderIds = []
-    }
     if (recordIds.length === 0 && folderIds.length === 0) return
 
     if (recordIds.length === 1 && folderIds.length === 0) {
@@ -487,7 +484,7 @@ export function VaultPage({
     }
 
     if (aws && !confirmed) {
-      setMovingAws({ ids: recordIds, folderId })
+      setMovingAws({ items: [...recordIds.map((id) => `r:${id}`), ...folderIds.map((id) => `f:${id}`)], folderId })
       return
     }
 
@@ -511,8 +508,8 @@ export function VaultPage({
       }
     }
 
-    // In AWS a moved record is a new name, so the one open may no longer exist under its id.
-    if (aws && open && recordIds.includes(open.id)) onSelect(null)
+    // In AWS a moved record or folder is a new name, so what is open may no longer exist under its id.
+    if (aws && ((open && recordIds.includes(open.id)) || folderIds.length > 0)) onSelect(null)
     await refresh()
 
     const where = folderPath(folders, folderId) || 'Raiz do cofre'
@@ -553,7 +550,7 @@ export function VaultPage({
     const entries: MenuEntry[] = [
       {
         kind: 'sub',
-        label: aws && !onlyRecords ? 'Mover para (só os registros)' : 'Mover para',
+        label: 'Mover para',
         icon: FolderInput,
         items: [
           { label: 'Raiz do cofre', onSelect: run(() => void moveMany(top, null)) },
@@ -616,6 +613,34 @@ export function VaultPage({
     })
 
     return entries
+  }
+
+  /**
+   * What an AWS move renames, for the preview: every parameter that changes name, from and to.
+   * Ids carry the names (`aws~vault~r~<name>`), so this is read from them, not asked of AWS.
+   */
+  function awsMoves(items: string[], folderId: string | null): Array<{ from: string; to: string }> {
+    const base = awsPathOf(folderId)
+    const leaf = (name: string) => name.split('/').filter(Boolean).at(-1) ?? ''
+    const out: Array<{ from: string; to: string }> = []
+
+    for (const item of items) {
+      const from = awsPathOf(item.slice(2))
+      if (!from) continue
+      const to = `${(base ?? '').replace(/\/+$/, '')}/${leaf(from)}`
+
+      if (item.startsWith('r:')) {
+        out.push({ from, to })
+        continue
+      }
+      for (const record of records) {
+        const name = awsPathOf(record.id)
+        if (name?.startsWith(`${from}/`)) out.push({ from: name, to: to + name.slice(from.length) })
+      }
+      if (!records.some((record) => awsPathOf(record.id)?.startsWith(`${from}/`))) out.push({ from: `${from}/`, to: `${to}/` })
+    }
+
+    return out
   }
 
   async function deleteMany(target: { records: string[]; folders: string[] }) {
@@ -979,7 +1004,7 @@ export function VaultPage({
           onFolder={(id) => select({ kind: 'folder', id })}
           onTrash={() => select({ kind: 'trash' })}
           onDrop={(items, folderId) => void moveMany(items, folderId)}
-          canMoveFolders={!aws}
+          canMoveFolders
           pickedEntries={pickedEntries}
           folderEntries={folderEntries}
           recordEntries={recordEntries}
@@ -1166,24 +1191,25 @@ export function VaultPage({
 
       {movingAws && (
         <AlertDialog open onOpenChange={(isOpen) => !isOpen && setMovingAws(null)}>
-          <AlertDialogContent>
+          <AlertDialogContent className="data-[size=default]:max-w-[calc(100%-2rem)] data-[size=default]:sm:max-w-2xl">
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {movingAws.ids.length > 1 ? `Mover ${movingAws.ids.length} registros na AWS?` : 'Mover na AWS?'}
+                {movingAws.items.length > 1 ? `Mover ${movingAws.items.length} itens na AWS?` : 'Mover na AWS?'}
               </AlertDialogTitle>
               <AlertDialogDescription>
-                No Parameter Store, a pasta é parte do nome. Mover grava cada registro com o nome novo e apaga o
-                antigo, e o histórico de versões do nome antigo vai junto com ele.
+                No Parameter Store, a pasta é parte do nome. Mover grava cada parâmetro com o nome novo e apaga o antigo,
+                e o histórico de versões do nome antigo vai junto. Quem lê pelo nome antigo para de achar.
               </AlertDialogDescription>
             </AlertDialogHeader>
+            <MovePreview moves={awsMoves(movingAws.items, movingAws.folderId)} />
             <AlertDialogFooter>
               <AlertDialogCancel>Cancelar</AlertDialogCancel>
               <AlertDialogAction
                 onClick={() => {
-                  const { ids, folderId } = movingAws
+                  const { items, folderId } = movingAws
                   setMovingAws(null)
-                  if (ids.length === 1) void moveTo(ids[0], folderId, true)
-                  else void moveMany(ids.map((id) => `r:${id}`), folderId, true)
+                  if (items.length === 1 && items[0].startsWith('r:')) void moveTo(items[0].slice(2), folderId, true)
+                  else void moveMany(items, folderId, true)
                 }}
               >
                 Mover
@@ -1239,5 +1265,36 @@ function isPlainValue(payload: Payload): boolean {
     !payload.icon &&
     (payload.alerts?.length ?? 0) === 0 &&
     payload.notes.trim() === ''
+  )
+}
+
+/** The names an AWS move changes, from and to, readable at a glance and never endless. */
+function MovePreview({ moves }: { moves: Array<{ from: string; to: string }> }) {
+  const shown = moves.slice(0, 60)
+
+  return (
+    <div className="max-h-[320px] overflow-auto rounded-lg border bg-raised">
+      <table className="w-full font-mono text-[12px]">
+        <thead>
+          <tr className="border-b text-left font-sans text-xs text-faint">
+            <th className="px-3 py-2 font-normal">Nome atual</th>
+            <th className="w-6" />
+            <th className="px-3 py-2 font-normal">Nome novo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((move) => (
+            <tr key={move.from} className="border-b last:border-b-0 align-top">
+              <td className="px-3 py-1.5 break-all text-muted-foreground">{move.from}</td>
+              <td className="py-1.5 text-faint">→</td>
+              <td className="px-3 py-1.5 break-all">{move.to}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {moves.length > shown.length && (
+        <p className="border-t px-3 py-2 text-xs text-faint">e mais {moves.length - shown.length} parâmetros</p>
+      )}
+    </div>
   )
 }
