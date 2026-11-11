@@ -38,10 +38,9 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Serialize;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
 use crate::audit::{self, Detail};
 use crate::http::AppState;
@@ -135,9 +134,13 @@ impl AgentState {
     }
 }
 
-/// Where the socket lives.
+/// Where the socket lives: a file in the state directory on Unix, a named pipe on Windows.
 pub fn socket_path() -> std::path::PathBuf {
-    crate::paths::state_dir().join("agent.sock")
+    #[cfg(unix)]
+    return crate::paths::state_dir().join("agent.sock");
+
+    #[cfg(windows)]
+    return std::path::PathBuf::from(pipe::name());
 }
 
 /// Start listening, replacing any socket left behind by a previous run.
@@ -145,7 +148,11 @@ pub fn socket_path() -> std::path::PathBuf {
 /// The listener lives in the spawned task for as long as the process does; there is no handle to
 /// hold on to, because there is nothing a caller would do with one. Stopping the surface means
 /// deleting the socket and letting the accept loop end — see [`stop`].
+#[cfg(unix)]
 pub fn listen(state: Arc<AppState>) -> Result<()> {
+    use anyhow::Context;
+    use tokio::net::UnixListener;
+
     let path = socket_path();
 
     crate::paths::ensure_private_dir(&crate::paths::state_dir())?;
@@ -164,9 +171,10 @@ pub fn listen(state: Arc<AppState>) -> Result<()> {
         loop {
             match listener.accept().await {
                 Ok((stream, _)) => {
+                    let pid = stream.peer_cred().ok().and_then(|c| c.pid()).unwrap_or(0);
                     let state = state.clone();
                     tokio::spawn(async move {
-                        let _ = serve(stream, state).await;
+                        let _ = serve(stream, peer_of(pid), state).await;
                     });
                 }
                 Err(_) => break,
@@ -182,11 +190,13 @@ pub fn listen(state: Arc<AppState>) -> Result<()> {
 /// Removing the file is what makes the integration stop existing rather than start refusing: a new
 /// connection has nowhere to land. Connections already open finish what they were doing, which is
 /// at most one question that the vault will answer or refuse on its own terms.
+#[cfg(unix)]
 pub fn stop() {
     let _ = std::fs::remove_file(socket_path());
 }
 
 /// Whether the socket is there to be connected to.
+#[cfg(unix)]
 pub fn listening() -> bool {
     socket_path().exists()
 }
@@ -202,30 +212,138 @@ fn restrict(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// The agent's door on Windows: a named pipe, per user.
+///
+/// A pipe has no file to delete, so "stopped" is a switch the accept loop reads: a connection that
+/// arrives while it is off is dropped unanswered. Every connection is also checked against the
+/// kernel's idea of who the client is ([`crate::procinfo::is_mine`]): the pipe namespace is shared
+/// by every user of the machine, and only this user's processes get an answer.
+#[cfg(windows)]
+pub mod pipe {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    use anyhow::{Context, Result};
+    use tokio::net::windows::named_pipe::ServerOptions;
+
+    use crate::http::AppState;
+
+    static ON: AtomicBool = AtomicBool::new(false);
+    static RUNNING: AtomicBool = AtomicBool::new(false);
+
+    pub fn name() -> String {
+        let user: String = std::env::var("USERNAME")
+            .unwrap_or_default()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+
+        format!(r"\\.\pipe\keyhold-agent-{user}")
+    }
+
+    /// The pid at the other end of a pipe, from the kernel.
+    pub fn client_pid(handle: std::os::windows::io::RawHandle) -> Option<u32> {
+        let mut pid = 0u32;
+        // SAFETY: one out-parameter on a handle owned by the caller.
+        let ok = unsafe { windows_sys::Win32::System::Pipes::GetNamedPipeClientProcessId(handle as _, &mut pid) } != 0;
+
+        ok.then_some(pid)
+    }
+
+    pub fn listen(state: Arc<AppState>) -> Result<()> {
+        ON.store(true, Ordering::SeqCst);
+
+        if RUNNING.swap(true, Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        let name = name();
+        // The first instance, so a pipe somebody else created under this name is a refusal here
+        // rather than a door that leads to them.
+        let mut server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .reject_remote_clients(true)
+            .create(&name)
+            .with_context(|| format!("could not open the agent pipe {name}"))?;
+
+        tokio::spawn(async move {
+            loop {
+                if server.connect().await.is_err() {
+                    break;
+                }
+
+                let connected = server;
+                server = match ServerOptions::new().reject_remote_clients(true).create(&name) {
+                    Ok(next) => next,
+                    Err(_) => break,
+                };
+
+                use std::os::windows::io::AsRawHandle;
+                let pid = client_pid(connected.as_raw_handle()).unwrap_or(0);
+
+                if !ON.load(Ordering::SeqCst) || !crate::procinfo::is_mine(pid as i32) {
+                    drop(connected);
+                    continue;
+                }
+
+                let state = state.clone();
+                tokio::spawn(async move {
+                    let _ = super::serve(connected, super::peer_of(pid as i32), state).await;
+                });
+            }
+
+            RUNNING.store(false, Ordering::SeqCst);
+        });
+
+        Ok(())
+    }
+
+    pub fn stop() {
+        ON.store(false, Ordering::SeqCst);
+    }
+
+    pub fn listening() -> bool {
+        ON.load(Ordering::SeqCst)
+    }
+}
+
+#[cfg(windows)]
+pub fn listen(state: Arc<AppState>) -> Result<()> {
+    pipe::listen(state)
+}
+
+#[cfg(windows)]
+pub fn stop() {
+    pipe::stop()
+}
+
+#[cfg(windows)]
+pub fn listening() -> bool {
+    pipe::listening()
+}
+
 /// Who is on the other end, from the kernel rather than from the client.
 ///
 /// The process on the socket is always `keyhold mcp` — it is the translator, and naming it would
 /// tell somebody nothing. What is worth showing is what launched it, so the parent is read too:
 /// that is `claude`, or whatever else is driving. Both come from the kernel (`procinfo`), never
 /// from anything the client says about itself.
-fn peer_of(stream: &UnixStream) -> Peer {
-    let credentials = stream.peer_cred().ok();
-    let pid = credentials.and_then(|c| c.pid()).unwrap_or(0) as i64;
-
-    let name_of = |pid: i64| i32::try_from(pid).ok().and_then(crate::procinfo::name);
-    let parent_pid = i32::try_from(pid).ok().and_then(crate::procinfo::parent).map(i64::from);
+fn peer_of(pid: i32) -> Peer {
+    let parent_pid = crate::procinfo::parent(pid);
 
     Peer {
-        pid,
-        process: name_of(pid).unwrap_or_else(|| "desconhecido".into()),
-        parent: parent_pid.and_then(name_of),
-        parent_pid,
+        pid: i64::from(pid),
+        process: crate::procinfo::name(pid).unwrap_or_else(|| "desconhecido".into()),
+        parent: parent_pid.and_then(crate::procinfo::name),
+        parent_pid: parent_pid.map(i64::from),
     }
 }
 
-async fn serve(stream: UnixStream, state: Arc<AppState>) -> Result<()> {
-    let peer = peer_of(&stream);
-    let (reader, mut writer) = stream.into_split();
+async fn serve<S>(stream: S, peer: Peer, state: Arc<AppState>) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let (reader, mut writer) = tokio::io::split(stream);
     let mut lines = BufReader::new(reader).lines();
 
     while let Some(line) = lines.next_line().await? {

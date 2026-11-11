@@ -51,8 +51,22 @@ pub fn all_pids() -> Vec<i32> {
     imp::all_pids()
 }
 
+/// Whether the process runs as the same user as this one. Unknown is no.
+pub fn is_mine(pid: i32) -> bool {
+    imp::is_mine(pid)
+}
+
+#[cfg(unix)]
+mod mine {
+    pub fn is_mine(pid: i32) -> bool {
+        // SAFETY: `getuid` reads a field of this process and cannot fail.
+        super::owner(pid) == Some(unsafe { libc::getuid() })
+    }
+}
+
 #[cfg(target_os = "linux")]
 mod imp {
+    pub use super::mine::is_mine;
     use std::fs;
     use std::os::unix::fs::MetadataExt;
     use std::path::PathBuf;
@@ -125,6 +139,7 @@ mod imp {
 
 #[cfg(target_os = "macos")]
 mod imp {
+    pub use super::mine::is_mine;
     use std::ffi::CStr;
     use std::os::raw::{c_char, c_int, c_void};
     use std::path::PathBuf;
@@ -242,6 +257,230 @@ mod imp {
     }
 }
 
+#[cfg(windows)]
+mod imp {
+    use std::path::PathBuf;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, INVALID_HANDLE_VALUE, UNICODE_STRING};
+    use windows_sys::Win32::Security::{EqualSid, GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    };
+    use windows_sys::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, GetProcessTimes, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW,
+        PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    /// A handle that closes itself.
+    struct Owned(HANDLE);
+
+    impl Drop for Owned {
+        fn drop(&mut self) {
+            // SAFETY: the handle came from a successful open and is closed exactly once.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    fn open(pid: i32) -> Option<Owned> {
+        // SAFETY: plain call; a null handle is the failure.
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32) };
+
+        (!handle.is_null()).then(|| Owned(handle))
+    }
+
+    /// Every process, from a ToolHelp snapshot: (pid, parent, executable name).
+    fn snapshot() -> Vec<(i32, i32, String)> {
+        let mut out = Vec::new();
+
+        // SAFETY: the entry is plain data with its size set, as the API requires.
+        unsafe {
+            let shot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if shot == INVALID_HANDLE_VALUE || shot.is_null() {
+                return out;
+            }
+            let shot = Owned(shot);
+
+            let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+            entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+            let mut more = Process32FirstW(shot.0, &mut entry) != 0;
+            while more {
+                let len = entry.szExeFile.iter().position(|c| *c == 0).unwrap_or(entry.szExeFile.len());
+                let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
+                out.push((entry.th32ProcessID as i32, entry.th32ParentProcessID as i32, name));
+                more = Process32NextW(shot.0, &mut entry) != 0;
+            }
+        }
+
+        out
+    }
+
+    fn entry(pid: i32) -> Option<(i32, i32, String)> {
+        snapshot().into_iter().find(|(p, _, _)| *p == pid)
+    }
+
+    /// "keyhold.exe" reads as "keyhold", the name the other systems give.
+    pub fn name(pid: i32) -> Option<String> {
+        let (_, _, name) = entry(pid)?;
+
+        Some(name.strip_suffix(".exe").or_else(|| name.strip_suffix(".EXE")).unwrap_or(&name).to_string())
+    }
+
+    pub fn parent(pid: i32) -> Option<i32> {
+        entry(pid).map(|(_, parent, _)| parent)
+    }
+
+    /// Windows has no uid; "owner" is answered by [`is_mine`] instead.
+    pub fn owner(_pid: i32) -> Option<u32> {
+        None
+    }
+
+    fn filetime(time: FILETIME) -> u64 {
+        ((time.dwHighDateTime as u64) << 32) | time.dwLowDateTime as u64
+    }
+
+    /// The creation time, in 100 ns units since 1601.
+    pub fn start_mark(pid: i32) -> Option<u64> {
+        let process = open(pid)?;
+        let zero = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+        let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+
+        // SAFETY: four out-parameters of the right type.
+        let ok = unsafe { GetProcessTimes(process.0, &mut created, &mut exited, &mut kernel, &mut user) } != 0;
+
+        // A process that has exited but whose handle lingers is not running.
+        (ok && filetime(exited) == 0).then(|| filetime(created))
+    }
+
+    pub fn age_seconds(pid: i32) -> Option<u64> {
+        let started = start_mark(pid)?;
+        let mut now = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+        // SAFETY: one out-parameter.
+        unsafe { GetSystemTimeAsFileTime(&mut now) };
+
+        Some(filetime(now).saturating_sub(started) / 10_000_000)
+    }
+
+    /// The command line, read with `NtQueryInformationProcess` (class 60,
+    /// ProcessCommandLineInformation), split the way the C runtime splits it.
+    pub fn args(pid: i32) -> Option<Vec<String>> {
+        let process = open(pid)?;
+        let mut buffer = vec![0u8; 64 * 1024];
+        let mut needed = 0u32;
+
+        // SAFETY: the buffer is large and aligned enough for the UNICODE_STRING the call puts at its
+        // start, with the text right after it, inside the same buffer.
+        let line = unsafe {
+            let status = windows_sys::Wdk::System::Threading::NtQueryInformationProcess(
+                process.0,
+                60,
+                buffer.as_mut_ptr() as *mut _,
+                buffer.len() as u32,
+                &mut needed,
+            );
+            if status < 0 {
+                return None;
+            }
+
+            let text = &*(buffer.as_ptr() as *const UNICODE_STRING);
+            if text.Buffer.is_null() {
+                return None;
+            }
+            let chars = std::slice::from_raw_parts(text.Buffer, text.Length as usize / 2);
+            String::from_utf16_lossy(chars)
+        };
+
+        Some(split_command_line(&line))
+    }
+
+    /// Spaces separate, double quotes group, a backslash before a quote escapes it.
+    pub(super) fn split_command_line(line: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut current = String::new();
+        let mut quoted = false;
+        let mut any = false;
+        let mut chars = line.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' if chars.peek() == Some(&'"') => {
+                    current.push('"');
+                    chars.next();
+                    any = true;
+                }
+                '"' => {
+                    quoted = !quoted;
+                    any = true;
+                }
+                ' ' | '\t' if !quoted => {
+                    if any {
+                        out.push(std::mem::take(&mut current));
+                        any = false;
+                    }
+                }
+                other => {
+                    current.push(other);
+                    any = true;
+                }
+            }
+        }
+        if any {
+            out.push(current);
+        }
+
+        out
+    }
+
+    pub fn exe(pid: i32) -> Option<PathBuf> {
+        let process = open(pid)?;
+        let mut buffer = vec![0u16; 32 * 1024];
+        let mut size = buffer.len() as u32;
+
+        // SAFETY: the size says how much the buffer holds; the call says how much it wrote.
+        let ok = unsafe { QueryFullProcessImageNameW(process.0, PROCESS_NAME_WIN32, buffer.as_mut_ptr(), &mut size) } != 0;
+
+        ok.then(|| PathBuf::from(String::from_utf16_lossy(&buffer[..size as usize])))
+    }
+
+    pub fn all_pids() -> Vec<i32> {
+        snapshot().into_iter().map(|(pid, _, _)| pid).filter(|pid| *pid > 0).collect()
+    }
+
+    /// The user a process's token belongs to, as the raw TOKEN_USER buffer.
+    fn token_user(process: HANDLE) -> Option<Vec<u8>> {
+        let mut token: HANDLE = std::ptr::null_mut();
+        // SAFETY: one out-parameter; the token is closed by `Owned`.
+        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+            return None;
+        }
+        let token = Owned(token);
+
+        let mut needed = 0u32;
+        // SAFETY: the first call asks for the size, the second fills a buffer of that size.
+        unsafe { GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut needed) };
+        let mut buffer = vec![0u8; needed as usize];
+        let ok = unsafe { GetTokenInformation(token.0, TokenUser, buffer.as_mut_ptr() as *mut _, needed, &mut needed) } != 0;
+
+        ok.then_some(buffer)
+    }
+
+    pub fn is_mine(pid: i32) -> bool {
+        let Some(process) = open(pid) else { return false };
+        // SAFETY: the pseudo-handle of this process needs no closing.
+        let (Some(theirs), Some(ours)) = (token_user(process.0), token_user(unsafe { GetCurrentProcess() })) else {
+            return false;
+        };
+
+        // SAFETY: both buffers hold a TOKEN_USER whose SID points inside the same buffer.
+        unsafe {
+            let theirs = &*(theirs.as_ptr() as *const TOKEN_USER);
+            let ours = &*(ours.as_ptr() as *const TOKEN_USER);
+            EqualSid(theirs.User.Sid, ours.User.Sid) != 0
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,8 +491,7 @@ mod tests {
 
         assert!(name(me).is_some_and(|n| !n.is_empty()));
         assert!(parent(me).is_some_and(|p| p > 0));
-        // SAFETY: `getuid` reads a field of this process and cannot fail.
-        assert_eq!(owner(me), Some(unsafe { libc::getuid() }));
+        assert!(is_mine(me));
         assert!(start_mark(me).is_some());
         assert_eq!(start_mark(me), start_mark(me), "the mark is stable");
         assert!(age_seconds(me).is_some());
@@ -262,9 +500,22 @@ mod tests {
         assert!(all_pids().contains(&me));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_command_line_splits_like_the_c_runtime() {
+        assert_eq!(
+            imp::split_command_line(r#""C:\Program Files\keyhold.exe" mcp --x "a b""#),
+            ["C:\\Program Files\\keyhold.exe", "mcp", "--x", "a b"]
+        );
+    }
+
     #[test]
     fn a_reaped_process_is_described_by_nothing() {
-        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let mut child = if cfg!(windows) {
+            std::process::Command::new("cmd").args(["/C", "exit 0"]).spawn().unwrap()
+        } else {
+            std::process::Command::new("true").spawn().unwrap()
+        };
         let pid = child.id() as i32;
         child.wait().unwrap();
 

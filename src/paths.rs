@@ -28,6 +28,24 @@ fn home() -> PathBuf {
     std::env::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
+/// Windows: `%LOCALAPPDATA%\\Keyhold\\<kind>` (the profile's own, not roamed to other machines,
+/// and readable only by this user by the profile's default permissions).
+/// The XDG variable still wins when set, which is how tests (and anyone who wants the vault
+/// elsewhere) move it.
+#[cfg(windows)]
+fn windows_dir(kind: &str, var: &str) -> PathBuf {
+    if let Some(value) = std::env::var_os(var).filter(|v| !v.is_empty()) {
+        return PathBuf::from(value).join(APP);
+    }
+
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home().join("AppData").join("Local"));
+
+    base.join("Keyhold").join(kind)
+}
+
+#[cfg_attr(windows, allow(dead_code))]
 fn xdg(var: &str, fallback: &str) -> PathBuf {
     match std::env::var_os(var) {
         Some(value) if !value.is_empty() => PathBuf::from(value).join(APP),
@@ -37,17 +55,29 @@ fn xdg(var: &str, fallback: &str) -> PathBuf {
 
 /// The vault lives here.
 pub fn data_dir() -> PathBuf {
-    xdg("XDG_DATA_HOME", ".local/share")
+    #[cfg(windows)]
+    return windows_dir("data", "XDG_DATA_HOME");
+
+    #[cfg(not(windows))]
+    return xdg("XDG_DATA_HOME", ".local/share");
 }
 
 /// Sockets and other things that die with the process.
 pub fn state_dir() -> PathBuf {
-    xdg("XDG_STATE_HOME", ".local/state")
+    #[cfg(windows)]
+    return windows_dir("state", "XDG_STATE_HOME");
+
+    #[cfg(not(windows))]
+    return xdg("XDG_STATE_HOME", ".local/state");
 }
 
 /// Preferences. Nothing here is ever secret.
 pub fn config_dir() -> PathBuf {
-    xdg("XDG_CONFIG_HOME", ".config")
+    #[cfg(windows)]
+    return windows_dir("config", "XDG_CONFIG_HOME");
+
+    #[cfg(not(windows))]
+    return xdg("XDG_CONFIG_HOME", ".config");
 }
 
 /// The certificate `sudo keyhold set-host` made with mkcert, and its key. Present means HTTPS.

@@ -11,8 +11,7 @@
 //! second is advice, and the interface never relies on it: what protects the vault is that the
 //! person approves each read and can see afterwards exactly what was taken.
 
-use std::io::{BufRead, Write};
-use std::os::unix::net::UnixStream;
+use std::io::{BufRead, Read, Write};
 
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
@@ -31,7 +30,7 @@ const PROTOCOL_VERSION: &str = "2024-11-05";
 fn ask(request: &Request) -> Result<Response> {
     let path = socket_path();
 
-    let mut stream = UnixStream::connect(&path).map_err(|_| {
+    let mut stream = connect().map_err(|_| {
         anyhow::anyhow!(
             "o Keyhold não está aberto nesta máquina (nenhum socket em {})",
             path.display()
@@ -43,13 +42,38 @@ fn ask(request: &Request) -> Result<Response> {
     stream.flush()?;
 
     let mut answer = String::new();
-    std::io::BufReader::new(&stream).read_line(&mut answer)?;
+    std::io::BufReader::new(stream).read_line(&mut answer)?;
 
     if answer.trim().is_empty() {
         bail!("o Keyhold fechou a conexão sem responder");
     }
 
     Ok(serde_json::from_str(&answer)?)
+}
+
+#[cfg(unix)]
+fn connect() -> Result<impl Read + Write> {
+    Ok(std::os::unix::net::UnixStream::connect(socket_path())?)
+}
+
+/// The pipe opens like a file. Whoever serves it has to be this user's process: the pipe namespace
+/// is shared, and a pipe of the same name made by somebody else would otherwise hear the questions.
+#[cfg(windows)]
+fn connect() -> Result<impl Read + Write> {
+    use std::os::windows::io::AsRawHandle;
+
+    let pipe = std::fs::OpenOptions::new().read(true).write(true).open(socket_path())?;
+    let mut pid = 0u32;
+    // SAFETY: one out-parameter on the handle just opened.
+    let ok = unsafe {
+        windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId(pipe.as_raw_handle() as _, &mut pid)
+    } != 0;
+
+    if !ok || !crate::procinfo::is_mine(pid as i32) {
+        bail!("o canal do Keyhold não é deste usuário");
+    }
+
+    Ok(pipe)
 }
 
 /// What the tools look like to an agent.

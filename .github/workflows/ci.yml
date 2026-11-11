@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -38,3 +38,12 @@ jobs:
           plutil -lint ~/Applications/Keyhold.app/Contents/Info.plist
           test -x ~/Applications/Keyhold.app/Contents/MacOS/Keyhold
           ~/.local/bin/keyhold --version
+
+      - name: Installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\install.ps1 -SkipBuild
+          & "$env:LOCALAPPDATA\Programs\Keyhold\keyhold.exe" --version
+          if (-not (Test-Path 'HKCU:\Software\Classes\keyhold\shell\open\command')) { throw 'keyhold:// not registered' }
+          if (-not (Test-Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'Keyhold.lnk'))) { throw 'no Start menu entry' }

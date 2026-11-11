@@ -126,7 +126,7 @@ pub fn alive(marker: &Marker) -> bool {
         return name == env!("CARGO_PKG_NAME");
     }
 
-    signal(marker.pid, 0)
+    exists(marker.pid)
 }
 
 /// What to do about a Keyhold that is already open.
@@ -212,6 +212,20 @@ fn ask_on_desktop(other: &Marker, can_present: bool) -> Choice {
             other.pid
         )
     };
+
+    if cfg!(windows) {
+        let question = if can_present {
+            format!("{text}\n\nSim: abrir e continuar.\nNão: encerrar e começar de novo.\nCancelar: não fazer nada.")
+        } else {
+            format!("{text}\n\nOK: encerrar e começar de novo.\nCancelar: não fazer nada.")
+        };
+
+        return match (windows_dialog(&question, if can_present { "YesNoCancel" } else { "OKCancel" }).as_deref(), can_present) {
+            (Some("Yes"), true) => Choice::Present,
+            (Some("No"), true) | (Some("OK"), false) => Choice::Replace,
+            _ => Choice::Nothing,
+        };
+    }
 
     if cfg!(target_os = "macos") {
         let open = "Abrir e continuar";
@@ -317,17 +331,58 @@ pub fn present(other: &Marker) -> Result<()> {
         );
     }
 
-    if !signal(other.pid, libc::SIGUSR1) {
+    if !ask_to_show(other) {
         bail!("não foi possível falar com o Keyhold no PID {}", other.pid);
     }
 
     Ok(())
 }
 
+/// `USR1` on Unix. Windows has no such signal, so there the running Keyhold is asked over its own
+/// port, at the same `/open-window` its page uses; it opens its own address, token and all, and
+/// nothing comes back here.
+#[cfg(unix)]
+fn ask_to_show(other: &Marker) -> bool {
+    signal(other.pid, libc::SIGUSR1)
+}
+
+#[cfg(windows)]
+fn ask_to_show(other: &Marker) -> bool {
+    use std::io::{Read, Write as _};
+
+    let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", other.port)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+    let host = format!("127.0.0.1:{}", other.port);
+    let request = format!(
+        "POST /open-window HTTP/1.1\r\nHost: {host}\r\nOrigin: http://{host}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+
+    let mut answer = String::new();
+    let _ = stream.read_to_string(&mut answer);
+
+    answer.starts_with("HTTP/1.1 200")
+}
+
 /// Whether another process is running the very same file this one is.
 ///
 /// By device and inode rather than by path: reinstalling writes a new file at the same name, and
 /// the process that was already running keeps the old one open. Two different builds, one path.
+#[cfg(windows)]
+fn same_build(pid: i32) -> bool {
+    // A running program file cannot be replaced on Windows, so the same path is the same build.
+    match (procinfo::exe(std::process::id() as i32), procinfo::exe(pid)) {
+        (Some(ours), Some(theirs)) => ours.to_string_lossy().eq_ignore_ascii_case(&theirs.to_string_lossy()),
+        _ => false,
+    }
+}
+
+#[cfg(unix)]
 fn same_build(pid: i32) -> bool {
     use std::os::unix::fs::MetadataExt;
 
@@ -354,6 +409,16 @@ fn same_build(pid: i32) -> bool {
 /// answer is no, and the interface stays where it is.
 pub async fn ask_to_open(text: &str) -> bool {
     const OPEN: &str = "Abrir o Keyhold";
+
+    if cfg!(windows) {
+        let text = text.to_string();
+        let answer = tokio::task::spawn_blocking(move || windows_dialog(&format!("{text}\n\nSim: abrir o Keyhold."), "YesNo"))
+            .await
+            .ok()
+            .flatten();
+
+        return answer.as_deref() == Some("Yes");
+    }
 
     if cfg!(target_os = "macos") {
         let output = tokio::process::Command::new("osascript")
@@ -421,6 +486,24 @@ fn answered(stdout: &[u8]) -> Option<String> {
     out.trim().strip_prefix("button returned:").map(|b| b.split(',').next().unwrap_or(b).trim().to_string())
 }
 
+/// A Windows message box through PowerShell, answering "Yes", "No", "OK" or "Cancel". The text
+/// travels in an environment variable, never inside the command, so nothing in it runs.
+fn windows_dialog(text: &str, buttons: &str) -> Option<String> {
+    let script = format!(
+        "Add-Type -AssemblyName System.Windows.Forms; \
+         [System.Windows.Forms.MessageBox]::Show($env:KEYHOLD_DIALOG, 'Keyhold', '{buttons}', 'Question').ToString()"
+    );
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .env("KEYHOLD_DIALOG", text)
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+
+    let answer = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!answer.is_empty()).then_some(answer)
+}
+
 /// Ask on the macOS desktop, and say which button was pressed (`None`: no answer).
 fn mac_dialog(text: &str, buttons: &[&str], default: &str) -> Option<String> {
     let output = Command::new("osascript").args(mac_dialog_args(text, buttons, default)).stderr(Stdio::null()).output().ok()?;
@@ -435,9 +518,18 @@ fn mac_dialog(text: &str, buttons: &[&str], default: &str) -> Option<String> {
 /// own `/proc/self/cmdline` for as long as the helper runs, which is the reason the token is
 /// worthless the moment keyhold exits.
 pub fn open_browser(url: &str) {
-    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    // On Windows, `start` would read the `&` in a URL as a second command; the URL protocol
+    // handler takes the address as one argument.
+    let (opener, first): (&str, &[&str]) = if cfg!(windows) {
+        ("rundll32", &["url.dll,FileProtocolHandler"])
+    } else if cfg!(target_os = "macos") {
+        ("open", &[])
+    } else {
+        ("xdg-open", &[])
+    };
 
     let _ = Command::new(opener)
+        .args(first)
         .arg(url)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -450,6 +542,12 @@ pub fn open_browser(url: &str) {
 /// is a window that did not open, as far as they can tell. A notification lands on top of whatever
 /// has focus, which is the one place this can be sure of.
 pub fn announce(text: &str) {
+    // Windows: no notification without an app identity to send it from. The log keeps it.
+    if cfg!(windows) {
+        eprintln!("{text}");
+        return;
+    }
+
     if cfg!(target_os = "macos") {
         let _ = Command::new("osascript")
             .args(["-e", "on run argv", "-e", "display notification (item 1 of argv) with title \"Keyhold\"", "-e", "end run", "--"])
@@ -475,7 +573,7 @@ pub fn announce(text: &str) {
 /// out and removes its own marker. `KILL` only after the grace period, for a process too wedged to
 /// do any of that — and then the marker is cleared here, since nothing ran to clear it.
 pub fn replace(other: &Marker) -> Result<()> {
-    if !signal(other.pid, libc::SIGTERM) && alive(other) {
+    if !terminate(other.pid) && alive(other) {
         bail!("could not signal the keyhold at pid {}", other.pid);
     }
 
@@ -490,7 +588,7 @@ pub fn replace(other: &Marker) -> Result<()> {
     }
 
     if alive(other) {
-        signal(other.pid, libc::SIGKILL);
+        kill_hard(other.pid);
         std::thread::sleep(Duration::from_millis(300));
     }
 
@@ -507,10 +605,51 @@ pub fn replace(other: &Marker) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn signal(pid: i32, number: i32) -> bool {
     // SAFETY: `kill` takes two integers and touches nothing this process owns. A pid that no longer
     // exists is an error return, not undefined behaviour.
     unsafe { libc::kill(pid, number) == 0 }
+}
+
+/// Whether a pid is a running process.
+fn exists(pid: i32) -> bool {
+    #[cfg(unix)]
+    return signal(pid, 0);
+
+    #[cfg(windows)]
+    return procinfo::start_mark(pid).is_some();
+}
+
+/// Ask a Keyhold to close. On Unix it is `TERM`, which it handles: it wipes the key and releases
+/// its claim. Windows has nothing a console-less process can catch, so there it ends at once; the
+/// key goes with the process's memory, and the claim is cleared by whoever asked.
+fn terminate(pid: i32) -> bool {
+    #[cfg(unix)]
+    return signal(pid, libc::SIGTERM);
+
+    #[cfg(windows)]
+    return kill_hard(pid);
+}
+
+fn kill_hard(pid: i32) -> bool {
+    #[cfg(unix)]
+    return signal(pid, libc::SIGKILL);
+
+    #[cfg(windows)]
+    // SAFETY: the handle is opened for termination only and closed right after.
+    unsafe {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid as u32);
+        if handle.is_null() {
+            return false;
+        }
+        let done = TerminateProcess(handle, 1) != 0;
+        CloseHandle(handle);
+        done
+    }
 }
 
 fn create_marker(marker: &Marker) -> std::io::Result<()> {
@@ -546,12 +685,11 @@ pub fn running() -> Option<Marker> {
 /// business, and would not be signallable anyway.
 pub fn processes() -> Vec<Process> {
     let me = std::process::id() as i32;
-    let uid = our_uid();
     let marker = read_marker();
 
     let mut found: Vec<Process> = procinfo::all_pids()
         .into_iter()
-        .filter(|pid| procinfo::owner(*pid) == Some(uid))
+        .filter(|pid| procinfo::is_mine(*pid))
         .filter(|pid| is_keyhold(*pid))
         .map(|pid| Process {
             pid,
@@ -612,14 +750,14 @@ pub fn close(pid: i32) -> Result<()> {
         bail!("esta é a instância que está desenhando esta janela — use Trancar agora, ou feche-a");
     }
 
-    if !signal(pid, libc::SIGTERM) {
+    if !terminate(pid) {
         bail!("não foi possível pedir ao PID {pid} que encerrasse");
     }
 
     let deadline = Instant::now() + Duration::from_secs(3);
 
     while Instant::now() < deadline {
-        if !signal(pid, 0) {
+        if !exists(pid) {
             return Ok(());
         }
 
@@ -631,11 +769,6 @@ pub fn close(pid: i32) -> Result<()> {
 
 fn is_keyhold(pid: i32) -> bool {
     procinfo::name(pid).is_some_and(|name| name == env!("CARGO_PKG_NAME"))
-}
-
-fn our_uid() -> u32 {
-    // SAFETY: `getuid` reads a field of this process and cannot fail.
-    unsafe { libc::getuid() }
 }
 
 fn role_of(pid: i32) -> Role {
@@ -663,7 +796,11 @@ mod tests {
 
     /// A pid that certainly belongs to nobody: a process that has already been reaped.
     fn dead_pid() -> i32 {
-        let mut child = Command::new("true").spawn().expect("spawn /bin/true");
+        let mut child = if cfg!(windows) {
+            Command::new("cmd").args(["/C", "exit 0"]).spawn().expect("spawn cmd")
+        } else {
+            Command::new("true").spawn().expect("spawn /bin/true")
+        };
         let pid = child.id() as i32;
 
         child.wait().expect("reap");

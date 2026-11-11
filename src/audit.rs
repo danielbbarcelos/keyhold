@@ -582,7 +582,7 @@ mod tests {
 
     #[test]
     fn an_empty_trail_is_intact() {
-        let (_dir, store, lock) = scratch();
+        let (_dir, store, _lock) = scratch();
         let integrity = verify(&store).unwrap();
 
         assert!(integrity.intact);

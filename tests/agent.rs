@@ -441,11 +441,16 @@ async fn run_returns_the_output_and_never_the_secret() {
                     field: "Senha".into(),
                     // Prints the length of the variable, so the test can prove the value arrived
                     // without the test itself echoing it.
-                    command: vec![
-                        "sh".into(),
-                        "-c".into(),
-                        "printf '%s' \"${#KEYHOLD_SECRET}\"".into(),
-                    ],
+                    command: if cfg!(windows) {
+                        vec![
+                            "powershell".into(),
+                            "-NoProfile".into(),
+                            "-Command".into(),
+                            "[Console]::Write($env:KEYHOLD_SECRET.Length)".into(),
+                        ]
+                    } else {
+                        vec!["sh".into(), "-c".into(), "printf '%s' \"${#KEYHOLD_SECRET}\"".into()]
+                    },
                     variable: "KEYHOLD_SECRET".into(),
                 },
                 &state,

@@ -29,6 +29,20 @@ fn writer() -> Option<(&'static str, Vec<&'static str>)> {
         return Some(("pbcopy", vec![]));
     }
 
+    // Windows: PowerShell, reading the value from stdin as UTF-8. `clip.exe` would read it in the
+    // console's code page and mangle anything outside ASCII.
+    if cfg!(windows) {
+        return Some((
+            "powershell",
+            vec![
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "[Console]::InputEncoding = [Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())",
+            ],
+        ));
+    }
+
     let has = |program: &str| {
         Command::new("sh")
             .arg("-c")

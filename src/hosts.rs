@@ -19,7 +19,12 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 
+#[cfg(unix)]
 pub const HOSTS_FILE: &str = "/etc/hosts";
+
+/// Read only (to know the names `set-host` would have given); `set-host` itself is Unix-only.
+#[cfg(windows)]
+pub const HOSTS_FILE: &str = r"C:\Windows\System32\drivers\etc\hosts";
 pub const DEFAULT_NAME: &str = "keyhold.local";
 
 /// The comment that marks a line as keyhold's.
@@ -354,6 +359,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn replacing_keeps_the_mode() {
         use std::os::unix::fs::PermissionsExt;

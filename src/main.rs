@@ -255,6 +255,8 @@ async fn serve(cli: Cli) -> Result<()> {
     // Another instance asking to be seen. It cannot open a browser on this process's behalf — it
     // does not know the URL, and the URL is where the session token lives — so it asks, and this is
     // the answer.
+    // On Windows there is no such signal; the same request arrives at `/open-window` instead.
+    #[cfg(unix)]
     if let Some(mut signals) = show_yourself {
         let url = url.clone();
 
@@ -265,6 +267,8 @@ async fn serve(cli: Cli) -> Result<()> {
             }
         });
     }
+    #[cfg(not(unix))]
+    let _ = show_yourself;
 
     let state = Arc::new(AppState {
         token,
@@ -389,6 +393,7 @@ async fn load_tls() -> Option<axum_server::tls_rustls::RustlsConfig> {
 
 /// `sudo keyhold set-host`: write or remove keyhold's line in /etc/hosts.
 /// Ask on the terminal whether to install mkcert's authority. No terminal means no.
+#[cfg(unix)]
 fn ask_to_install_authority() -> bool {
     use std::io::{BufRead, IsTerminal, Write};
 
@@ -410,6 +415,15 @@ fn ask_to_install_authority() -> bool {
     matches!(answer.trim().to_lowercase().as_str(), "s" | "sim" | "y" | "yes")
 }
 
+#[cfg(windows)]
+fn set_host(_name: Option<String>, _remove: bool, _install_ca: bool) -> Result<()> {
+    anyhow::bail!(
+        "set-host ainda não existe no Windows. O Keyhold funciona em http://127.0.0.1, que é o \
+         endereço que ele abre sozinho"
+    )
+}
+
+#[cfg(unix)]
 fn set_host(name: Option<String>, remove: bool, install_ca: bool) -> Result<()> {
     let name = name.unwrap_or_else(|| hosts::DEFAULT_NAME.to_string());
 
