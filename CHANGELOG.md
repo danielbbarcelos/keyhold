@@ -25,6 +25,10 @@
 - **Widths you drag**: the vault's tree, and the column of field names in a record, kept by
   Keyhold across restarts. Double-click a handle to go back to the default.
 - Text cut short in the tree and in field names shows whole in a tooltip.
+- **Several items at once in the tree**: Ctrl (⌘) click and Shift click pick records and folders,
+  and dragging them drops all of them on a folder or on the root. Folders can be dragged now too
+  (in a local vault; in AWS a folder is part of every name under it, and "Renomear" moves it).
+  In the tree, Ctrl click picks instead of opening a new tab; the middle button still does that.
 - **Nova pasta** in the top bar (at the root, or inside the folder being shown), and a right-click on
   the tree's empty space to make a folder or a record at the root. A folder at the root could not
   be made at all before.

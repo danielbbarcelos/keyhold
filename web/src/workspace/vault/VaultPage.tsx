@@ -110,7 +110,7 @@ export function VaultPage({
   const [copying, setCopying] = useState<CopySource | null>(null)
   const [saving, setSaving] = useState(false)
   const [askingJson, setAskingJson] = useState(false)
-  const [movingAws, setMovingAws] = useState<{ id: string; folderId: string | null } | null>(null)
+  const [movingAws, setMovingAws] = useState<{ ids: string[]; folderId: string | null } | null>(null)
   const [unavailable, setUnavailable] = useState<{ message: string; code?: string } | null>(null)
   // False until the first read of this vault answers: until then the tree and the panel are skeletons
   // rather than an "empty vault" that is not empty.
@@ -428,7 +428,7 @@ export function VaultPage({
   async function moveTo(id: string, folderId: string | null, confirmed = false) {
     // In Parameter Store a move is a new name: the old one, with its history, is deleted.
     if (aws && !confirmed) {
-      setMovingAws({ id, folderId })
+      setMovingAws({ ids: [id], folderId })
 
       return
     }
@@ -446,6 +446,76 @@ export function VaultPage({
     } catch (cause) {
       toastError(cause, 'Não movi o registro')
     }
+  }
+
+  /** Whether `folderId` is `ancestor` or lies anywhere under it. */
+  const isUnder = (folderId: string | null, ancestor: string): boolean => {
+    let at = folderId
+    while (at) {
+      if (at === ancestor) return true
+      at = folders.find((folder) => folder.id === at)?.parent_id ?? null
+    }
+    return false
+  }
+
+  /**
+   * Several items dragged together onto a folder or the root. Records and folders already there are
+   * left alone, and a folder never goes inside itself. In AWS one question covers every record (each
+   * loses its history), and folders do not move: a folder there is part of every name under it.
+   */
+  async function moveMany(items: string[], folderId: string | null, confirmed = false) {
+    const recordIds = items
+      .filter((item) => item.startsWith('r:'))
+      .map((item) => item.slice(2))
+      .filter((id) => records.find((record) => record.id === id)?.folder_id !== folderId)
+    let folderIds = items
+      .filter((item) => item.startsWith('f:'))
+      .map((item) => item.slice(2))
+      .filter((id) => !isUnder(folderId, id) && folders.find((folder) => folder.id === id)?.parent_id !== folderId)
+
+    if (aws && folderIds.length) {
+      toast('Pastas não se movem na AWS', 'Use "Renomear" na pasta, com "Mudar o nome na AWS também".', 'error')
+      folderIds = []
+    }
+    if (recordIds.length === 0 && folderIds.length === 0) return
+
+    if (recordIds.length === 1 && folderIds.length === 0) {
+      void moveTo(recordIds[0], folderId, confirmed)
+      return
+    }
+
+    if (aws && !confirmed) {
+      setMovingAws({ ids: recordIds, folderId })
+      return
+    }
+
+    let failed = 0
+    let moved = 0
+    for (const id of recordIds) {
+      try {
+        const answer = await api.moveRecord(id, folderId)
+        if (answer.warning) toast('Movido, com um aviso', answer.warning, 'error')
+        moved++
+      } catch {
+        failed++
+      }
+    }
+    for (const id of folderIds) {
+      try {
+        await api.moveFolder(id, folderId)
+        moved++
+      } catch {
+        failed++
+      }
+    }
+
+    // In AWS a moved record is a new name, so the one open may no longer exist under its id.
+    if (aws && open && recordIds.includes(open.id)) onSelect(null)
+    await refresh()
+
+    const where = folderPath(folders, folderId) || 'Raiz do cofre'
+    if (moved) toast(`${moved} ${moved === 1 ? 'item movido' : 'itens movidos'}`, where)
+    if (failed) toast(`${failed} ${failed === 1 ? 'item não foi movido' : 'itens não foram movidos'}`, 'Tente de novo, um de cada vez, para ver o motivo.', 'error')
   }
 
   async function sendToTrash(id: string) {
@@ -779,7 +849,8 @@ export function VaultPage({
           onRecord={(id) => select({ kind: 'record', id })}
           onFolder={(id) => select({ kind: 'folder', id })}
           onTrash={() => select({ kind: 'trash' })}
-          onDrop={(id, folderId) => void moveTo(id, folderId)}
+          onDrop={(items, folderId) => void moveMany(items, folderId)}
+          canMoveFolders={!aws}
           folderEntries={folderEntries}
           recordEntries={recordEntries}
           rootEntries={[
@@ -929,19 +1000,22 @@ export function VaultPage({
         <AlertDialog open onOpenChange={(isOpen) => !isOpen && setMovingAws(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Mover na AWS?</AlertDialogTitle>
+              <AlertDialogTitle>
+                {movingAws.ids.length > 1 ? `Mover ${movingAws.ids.length} registros na AWS?` : 'Mover na AWS?'}
+              </AlertDialogTitle>
               <AlertDialogDescription>
-                No Parameter Store, a pasta é parte do nome. Mover grava o registro com o nome novo e apaga o antigo,
-                e o histórico de versões do nome antigo vai junto com ele.
+                No Parameter Store, a pasta é parte do nome. Mover grava cada registro com o nome novo e apaga o
+                antigo, e o histórico de versões do nome antigo vai junto com ele.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancelar</AlertDialogCancel>
               <AlertDialogAction
                 onClick={() => {
-                  const { id, folderId } = movingAws
+                  const { ids, folderId } = movingAws
                   setMovingAws(null)
-                  void moveTo(id, folderId, true)
+                  if (ids.length === 1) void moveTo(ids[0], folderId, true)
+                  else void moveMany(ids.map((id) => `r:${id}`), folderId, true)
                 }}
               >
                 Mover

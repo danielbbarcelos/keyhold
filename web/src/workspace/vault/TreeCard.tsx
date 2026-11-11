@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Folder, FolderOpen, List, ListTree, Search, Star, Trash2 } from 'lucide-react'
 
 import { Input } from '@/components/ui/input'
@@ -43,6 +43,7 @@ export function TreeCard({
   onFolder,
   onTrash,
   onDrop,
+  canMoveFolders = true,
   folderEntries,
   recordEntries,
   rootEntries,
@@ -66,7 +67,10 @@ export function TreeCard({
   onRecord: (id: string) => void
   onFolder: (id: string) => void
   onTrash: () => void
-  onDrop: (recordId: string, folderId: string | null) => void
+  /** Records (`r:<id>`) and folders (`f:<id>`) dropped on a folder, or on the root (`null`). */
+  onDrop: (items: string[], folderId: string | null) => void
+  /** Folders can be dragged too (not in AWS, where a folder is part of every name under it). */
+  canMoveFolders?: boolean
   /** Right-click on the empty space of the tree: what can be made at the root. */
   rootEntries: MenuEntry[]
   folderEntries: (folder: FolderNode) => MenuEntry[]
@@ -76,6 +80,16 @@ export function TreeCard({
   const [closed, setClosed] = useState<Set<string>>(new Set())
   const allClosed = folders.length > 0 && folders.every((folder) => closed.has(folder.id))
   const [dropping, setDropping] = useState<string | null | undefined>(undefined)
+  // Items picked with Ctrl/⌘ or Shift click, to drag together: `r:<id>` and `f:<id>`.
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [anchor, setAnchor] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (picked.size === 0) return
+    const clear = (event: KeyboardEvent) => event.key === 'Escape' && setPicked(new Set())
+    window.addEventListener('keydown', clear)
+    return () => window.removeEventListener('keydown', clear)
+  }, [picked.size])
 
   const term = query.trim().toLowerCase()
   const narrowed = filter !== 'all' || term !== ''
@@ -109,25 +123,102 @@ export function TreeCard({
 
   const sortRecords = (list: RecordPreview[]) => [...list].sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'))
 
+  /** Every row in the order it is drawn, for Shift click. */
+  function order(): string[] {
+    if (mode === 'list') return sortRecords(shown).map((record) => `r:${record.id}`)
+
+    const out: string[] = []
+    const walk = (folder: FolderNode) => {
+      if (narrowed && !leadsSomewhere(folder.id)) return
+      out.push(`f:${folder.id}`)
+      if (!narrowed && closed.has(folder.id)) return
+      folders.filter((child) => child.parent_id === folder.id).forEach(walk)
+      sortRecords(shown.filter((record) => record.folder_id === folder.id)).forEach((record) => out.push(`r:${record.id}`))
+    }
+    folders.filter((folder) => folder.parent_id === null).forEach(walk)
+    sortRecords(shown.filter((record) => record.folder_id === null)).forEach((record) => out.push(`r:${record.id}`))
+    return out
+  }
+
+  /**
+   * A click on a row: Ctrl/⌘ picks or unpicks it, Shift picks everything from the last pick to it.
+   * `true` when the click was a pick, so the row does not also open.
+   */
+  function pick(key: string, event: React.MouseEvent): boolean {
+    if (event.ctrlKey || event.metaKey) {
+      setPicked((was) => {
+        const next = new Set(was)
+        if (next.has(key)) next.delete(key)
+        else next.add(key)
+        return next
+      })
+      setAnchor(key)
+      return true
+    }
+
+    if (event.shiftKey) {
+      const all = order()
+      const from = all.indexOf(anchor ?? key)
+      const to = all.indexOf(key)
+      if (from >= 0 && to >= 0) {
+        const [a, b] = from < to ? [from, to] : [to, from]
+        setPicked(new Set(all.slice(a, b + 1)))
+      }
+      return true
+    }
+
+    if (picked.size) setPicked(new Set())
+    setAnchor(key)
+    return false
+  }
+
+  /** What a drag carries: the picked items when the row is one of them, the row alone otherwise. */
+  function startDrag(key: string, event: React.DragEvent) {
+    const items = picked.has(key) ? [...picked] : [key]
+    event.dataTransfer.setData('text/keyhold-items', JSON.stringify(items))
+    event.dataTransfer.effectAllowed = 'move'
+
+    if (items.length > 1) {
+      const badge = document.createElement('div')
+      badge.textContent = `${items.length} itens`
+      badge.style.cssText =
+        'position:fixed;top:-100px;left:0;padding:6px 12px;border-radius:999px;font:600 13px system-ui;background:var(--primary);color:var(--primary-foreground)'
+      document.body.appendChild(badge)
+      event.dataTransfer.setDragImage(badge, 10, 10)
+      window.setTimeout(() => badge.remove(), 0)
+    }
+  }
+
   function dropProps(folderId: string | null) {
     return {
       onDragOver: (event: React.DragEvent) => {
-        if (!event.dataTransfer.types.includes('text/keyhold-record')) return
+        if (!event.dataTransfer.types.includes('text/keyhold-items')) return
         event.preventDefault()
+        event.stopPropagation()
         setDropping(folderId)
       },
       onDragLeave: () => setDropping(undefined),
       onDrop: (event: React.DragEvent) => {
         event.preventDefault()
+        event.stopPropagation()
         setDropping(undefined)
-        const id = event.dataTransfer.getData('text/keyhold-record')
-        if (id) onDrop(id, folderId)
+        try {
+          const items = JSON.parse(event.dataTransfer.getData('text/keyhold-items')) as string[]
+          if (items.length) {
+            onDrop(items, folderId)
+            setPicked(new Set())
+          }
+        } catch {
+          /* not ours */
+        }
       },
     }
   }
 
   function recordRow(record: RecordPreview, depth: number, flat = false) {
     const on = selection?.kind === 'record' && selection.id === record.id
+    const key = `r:${record.id}`
+    const link = linkProps({ place: 'vault', vault: vaultId, record: record.id }, () => onRecord(record.id))
 
     return (
       <RowMenu key={record.id} entries={recordEntries(record)}>
@@ -135,17 +226,22 @@ export function TreeCard({
           role="button"
           tabIndex={0}
           draggable
-          onDragStart={(event) => {
-            event.dataTransfer.setData('text/keyhold-record', record.id)
-            event.dataTransfer.effectAllowed = 'move'
+          aria-selected={picked.has(key)}
+          onDragStart={(event) => startDrag(key, event)}
+          {...dropProps(record.folder_id)}
+          onClick={(event) => !pick(key, event) && onRecord(record.id)}
+          onAuxClick={link.onAuxClick}
+          onMouseDown={(event) => {
+            if (event.shiftKey) event.preventDefault()
+            link.onMouseDown(event)
           }}
-          {...linkProps({ place: 'vault', vault: vaultId, record: record.id }, () => onRecord(record.id))}
           onKeyDown={(event) => event.key === 'Enter' && onRecord(record.id)}
           style={flat ? undefined : { paddingLeft: 8 + depth * 22 + (depth > 0 ? 0 : 0) }}
           className={cn(
             'group flex cursor-pointer items-center gap-2 rounded-lg pr-2 outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50',
             flat ? 'h-14 px-2.5' : 'h-[34px]',
             on && 'bg-primary-soft hover:bg-primary-soft',
+            picked.has(key) && 'bg-primary-soft/70 ring-1 ring-primary/50 ring-inset',
           )}
         >
           {!flat && <span className="w-4 shrink-0" />}
@@ -183,16 +279,22 @@ export function TreeCard({
     const children = folders.filter((child) => child.parent_id === folder.id)
     const inside = sortRecords(shown.filter((record) => record.folder_id === folder.id))
     const Icon = open ? FolderOpen : Folder
+    const key = `f:${folder.id}`
+    const link = linkProps({ place: 'vault', vault: vaultId, folder: folder.id }, () => onFolder(folder.id))
 
     return (
       <div key={folder.id}>
         <RowMenu entries={folderEntries(folder)}>
           <div
             {...dropProps(folder.id)}
+            draggable={canMoveFolders}
+            onDragStart={canMoveFolders ? (event) => startDrag(key, event) : undefined}
+            aria-selected={picked.has(key)}
             style={{ paddingLeft: 4 + folder.depth * 22 }}
             className={cn(
               'group flex h-[34px] items-center gap-1.5 rounded-lg pr-1.5 hover:bg-hover',
               on && 'bg-primary-soft hover:bg-primary-soft',
+              picked.has(key) && 'bg-primary-soft/70 ring-1 ring-primary/50 ring-inset',
               dropping === folder.id && 'ring-2 ring-primary',
             )}
           >
@@ -213,7 +315,12 @@ export function TreeCard({
             </button>
             <button
               type="button"
-              {...linkProps({ place: 'vault', vault: vaultId, folder: folder.id }, () => onFolder(folder.id))}
+              onClick={(event) => !pick(key, event) && onFolder(folder.id)}
+              onAuxClick={link.onAuxClick}
+              onMouseDown={(event) => {
+                if (event.shiftKey) event.preventDefault()
+                link.onMouseDown(event)
+              }}
               className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium"
             >
               <Icon className={cn('size-4 shrink-0', folder.colour && folder.colour !== 'default' ? colourOf(folder.colour).text : 'text-faint')} />
@@ -283,6 +390,18 @@ export function TreeCard({
         </FilterChip>
 
       </div>
+
+      {picked.size > 0 && (
+        <div className="flex items-center gap-2 border-b bg-primary-soft/50 px-3 py-2 text-xs">
+          <span className="min-w-0 flex-1">
+            <b className="font-semibold">{picked.size} {picked.size === 1 ? 'item selecionado' : 'itens selecionados'}.</b>{' '}
+            Arraste para uma pasta ou para a raiz.
+          </span>
+          <button type="button" className="shrink-0 text-primary-text hover:underline" onClick={() => setPicked(new Set())}>
+            Limpar
+          </button>
+        </div>
+      )}
 
       <div
         className={cn('flex min-h-0 flex-1 flex-col overflow-y-auto px-1.5 py-2', dropping === null && 'bg-primary-soft/40')}

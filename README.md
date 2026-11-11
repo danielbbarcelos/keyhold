@@ -109,8 +109,10 @@ keyhold where        # show where the vault file lives
   kinds, drag them into order, pick an icon (or use a picture of your own), and mark which field
   shows under the title and which one the main button copies.
 - **Ctrl P** searches every vault by title, never by secret.
-- **Right-click, Ctrl click or the middle button** opens a vault, folder, record or screen in a new
-  tab of the same session.
+- **Right-click or the middle button** opens a vault, folder, record or screen in a new tab of the
+  same session (Ctrl click too, outside the tree).
+- **In the tree**, Ctrl (⌘) click and Shift click pick several records and folders; drag them onto a
+  folder, or onto the tree's empty space for the root.
 - **Trilha** is the trail of what happened: unlocks, changes, and (if you turn it on) every reveal
   and copy. Each line carries the fingerprint of the one before, so editing the trail breaks it.
 - **The lock** at the bottom of the rail shows how long until Keyhold locks itself. Locking forgets
