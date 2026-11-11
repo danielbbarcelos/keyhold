@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Card,
   CardContent,
@@ -165,6 +166,7 @@ function RenameDialog({
   const [name, setName] = useState(vault.name)
   const [colour, setColour] = useState(vault.colour)
   const [icon, setIcon] = useState<RecordIcon | null>(vault.icon ?? null)
+  const [renameWithTitle, setRenameWithTitle] = useState(vault.aws?.rename_with_title ?? false)
   const [error, setError] = useState('')
 
   return (
@@ -190,6 +192,22 @@ function RenameDialog({
             <Input value={name} autoFocus aria-label="Nome" onChange={(event) => setName(event.target.value)} />
           </div>
           <ColourPicker value={colour} onChange={setColour} />
+          {vault.aws && (
+            <label className="flex items-start gap-2.5 rounded-[10px] border p-3 text-[13px]">
+              <Checkbox
+                className="mt-0.5"
+                checked={renameWithTitle}
+                onCheckedChange={(on) => setRenameWithTitle(on === true)}
+              />
+              <span className="grid gap-0.5">
+                <span className="font-medium">Ao renomear, mudar o nome na AWS também</span>
+                <span className="text-xs text-faint">
+                  Só o ponto de partida: ao trocar o título de um registro ou o nome de uma pasta, a caixa já
+                  vem marcada. Mudar o nome na AWS apaga o parâmetro antigo e o histórico dele.
+                </span>
+              </span>
+            </label>
+          )}
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
 
@@ -204,6 +222,7 @@ function RenameDialog({
                   description: vault.description,
                   colour,
                   icon,
+                  ...(vault.aws ? { aws: { ...vault.aws, rename_with_title: renameWithTitle } } : {}),
                 })
                 .then(onDone)
                 .catch((cause) => setError(describe(cause)))

@@ -15,6 +15,7 @@ import {
 } from '../api'
 import { RecordTile } from './icons'
 import { AwsMark } from './AwsMark'
+import { linkProps, TabMenu } from './nav'
 import { Body, Panel, PanelHead, TopBar, Title, VaultInitial } from './shell'
 import { when } from './vault/paths'
 
@@ -128,10 +129,10 @@ export function Home({
             const flagged = inside.filter((record) => issues.has(record.id) || record.compromised_at).length
 
             return (
+              <TabMenu key={vault.id} to={{ place: 'vault', vault: vault.id }}>
               <button
-                key={vault.id}
                 type="button"
-                onClick={() => onVault(vault.id)}
+                {...linkProps({ place: 'vault', vault: vault.id }, () => onVault(vault.id))}
                 className="rounded-[14px] border bg-card p-[18px] text-left hover:border-line-2"
               >
                 <span className="flex items-center gap-3">
@@ -154,6 +155,7 @@ export function Home({
                   <span>{vault.agent_access ? 'agente ligado' : 'agente desligado'}</span>
                 </span>
               </button>
+              </TabMenu>
             )
           })}
           <button
@@ -235,10 +237,12 @@ export function Home({
 
         <Panel className="mt-5">
           <PanelHead title="Atividade e agentes">
-            <Button variant="ghost" size="sm" onClick={onTrail}>
-              Ver a trilha
-              <ArrowRight />
-            </Button>
+            <TabMenu to={{ place: 'trail' }}>
+              <Button variant="ghost" size="sm" {...linkProps({ place: 'trail' }, onTrail)}>
+                Ver a trilha
+                <ArrowRight />
+              </Button>
+            </TabMenu>
           </PanelHead>
           <Line icon={Lock} tone="amber" title={unlockedAt ? `Destrancado desde ${new Date(unlockedAt.endsWith('Z') ? unlockedAt : `${unlockedAt}Z`).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Destrancado'}
             detail={seconds === null ? 'sem tranca automática' : `tranca em ${seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${seconds} s`} parado`}>
@@ -263,9 +267,11 @@ export function Home({
               return on === 0 ? 'agente desligado em todos os cofres' : `agente ligado em ${on} ${on === 1 ? 'cofre' : 'cofres'}`
             })()}
           >
-            <Button variant="ghost" size="sm" onClick={onSettings}>
-              ver em Ajustes
-            </Button>
+            <TabMenu to={{ place: 'settings', section: 'agentes' }}>
+              <Button variant="ghost" size="sm" {...linkProps({ place: 'settings', section: 'agentes' }, onSettings)}>
+                ver em Ajustes
+              </Button>
+            </TabMenu>
           </Line>
         </Panel>
       </Body>
@@ -285,10 +291,13 @@ export function Home({
     onOpen: () => void
     children?: React.ReactNode
   }) {
+    const to = { place: 'vault' as const, vault: record.vault_id, record: record.id }
+
     return (
+      <TabMenu to={to}>
       <button
         type="button"
-        onClick={onOpen}
+        {...linkProps(to, onOpen)}
         className="flex h-[52px] w-full items-center gap-3 border-b px-5 text-left last:border-b-0 hover:bg-hover"
       >
         <RecordTile icon={record.icon} kind={record.kind} />
@@ -302,6 +311,7 @@ export function Home({
         </span>
         {children}
       </button>
+      </TabMenu>
     )
   }
 }

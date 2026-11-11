@@ -212,6 +212,24 @@ Exec=$launcher --replace
 DESKTOP
   chmod 644 "$desktop_file"
 
+  # keyhold:// opens Keyhold, so a tab whose program was closed can offer "Abrir o
+  # Keyhold" as a button. It only ever runs the launcher with --present (start, or
+  # bring the running one forward): any page could link to it, and that is all a
+  # page gets. The address is never passed on.
+  local url_file="$apps_dir/$APP_BIN-url.desktop"
+  cat >"$url_file" <<URLDESKTOP
+[Desktop Entry]
+Type=Application
+Name=$APP_DISPLAY_NAME
+Exec=$launcher --present
+Icon=$APP_BIN
+Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/$APP_BIN;
+URLDESKTOP
+  chmod 644 "$url_file"
+  has xdg-mime && xdg-mime default "$APP_BIN-url.desktop" "x-scheme-handler/$APP_BIN" >/dev/null 2>&1 || true
+
   # Logs written by an earlier version inherited the umask, and they hold the
   # session token of every run they saw.
   local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/$APP_BIN"

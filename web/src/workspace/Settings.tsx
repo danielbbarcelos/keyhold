@@ -69,6 +69,7 @@ import {
 import { askToNotify, notifyState, type NotifyState } from '../notify'
 import { AwsAccounts } from './AwsAccounts'
 import { AwsMark } from './AwsMark'
+import { linkProps, TabMenu } from './nav'
 import { TransferPanel } from './TransferPanel'
 import { VaultsPanel } from './VaultsPanel'
 
@@ -163,11 +164,11 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
     <div className="kh-wide grid min-h-0 flex-1 grid-cols-[232px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6 max-xl:grid-cols-[200px_minmax(0,1fr)]">
       <nav aria-label="Seções dos ajustes" className="h-fit space-y-0.5 rounded-[14px] border bg-card p-2.5">
         {SECTIONS.map(({ id, label, icon: Icon }) => (
+          <TabMenu key={id} to={{ place: 'settings', section: id }}>
           <button
-            key={id}
             type="button"
             aria-current={active === id}
-            onClick={() => open(id)}
+            {...linkProps({ place: 'settings', section: id }, () => open(id))}
             className={cn(
               'relative flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm whitespace-nowrap text-muted-foreground transition-colors hover:bg-hover hover:text-foreground',
               active === id &&
@@ -177,6 +178,7 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
             <Icon className="size-4" />
             {label}
           </button>
+          </TabMenu>
         ))}
       </nav>
 

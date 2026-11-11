@@ -50,12 +50,7 @@ export function App() {
     }
 
     if (offline) {
-      return (
-        <Notice title="Sem contato com o Keyhold">
-          O programa ainda está rodando? Se você o fechou, a chave já foi esquecida — é o que fechar
-          significa aqui.
-        </Notice>
-      )
+      return <Offline onRetry={refresh} />
     }
 
     if (!status) {
@@ -74,18 +69,60 @@ export function App() {
   }
 }
 
-function Notice({ title, children }: { title: string; children: React.ReactNode }) {
+function Notice({ title, children, logo = true }: { title: string; children: React.ReactNode; logo?: boolean }) {
   return (
     <main className="grid min-h-screen place-items-center p-8">
       <Card className="w-full max-w-md gap-5 py-8">
         <CardHeader className="px-8">
-          <LogoLockup className="mb-4 h-[44px] w-auto self-start" />
+          {logo && <LogoLockup className="mb-4 h-[44px] w-auto self-start" />}
           <CardTitle>{title}</CardTitle>
           {children && <CardDescription>{children}</CardDescription>}
         </CardHeader>
         <CardContent />
       </Card>
     </main>
+  )
+}
+
+/**
+ * The program stopped answering: closed, restarted, or the computer went to sleep and back.
+ *
+ * No logo here: it is served by the program that just went away, so it would be a broken image.
+ * The button goes through `keyhold://`, which the installer registers to start Keyhold (or bring
+ * the running one forward); the new window comes with a new session, and this tab is left behind.
+ */
+function Offline({ onRetry }: { onRetry: () => void }) {
+  const [asked, setAsked] = useState(false)
+
+  return (
+    <Notice logo={false} title="O Keyhold não está respondendo">
+      <span className="flex flex-col items-start gap-4">
+        <span>
+          Esta aba perdeu o contato com o programa. Ele foi fechado ou reiniciado, e com isso a chave
+          do cofre saiu da memória: é assim que o cofre fica protegido. Seus dados continuam no
+          arquivo. Abra o Keyhold de novo e destranque.
+        </span>
+        <span className="flex flex-wrap gap-2">
+          <Button
+            onClick={() => {
+              setAsked(true)
+              window.location.href = 'keyhold://open'
+            }}
+          >
+            Abrir o Keyhold
+          </Button>
+          <Button variant="outline" onClick={onRetry}>
+            Tentar de novo
+          </Button>
+        </span>
+        {asked && (
+          <span className="text-xs">
+            O Keyhold abre numa aba nova, e esta pode ser fechada. Se nada acontecer, abra pelo menu
+            de aplicativos.
+          </span>
+        )}
+      </span>
+    </Notice>
   )
 }
 

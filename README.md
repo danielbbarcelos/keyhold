@@ -35,6 +35,8 @@ with your master password, and forgets the key the moment you lock it or close i
 
 ## Get started
 
+Keyhold runs on **Linux**. macOS support is in progress; Windows is not supported.
+
 You need [Rust](https://rustup.rs) and [Node](https://nodejs.org). Node is only used to build the
 interface, which is then baked into the program.
 
@@ -92,6 +94,8 @@ keyhold where        # show where the vault file lives
   kinds, drag them into order, pick an icon (or use a picture of your own), and mark which field
   shows under the title and which one the main button copies.
 - **Ctrl P** searches every vault by title, never by secret.
+- **Right-click, Ctrl click or the middle button** opens a vault, folder, record or screen in a new
+  tab of the same session.
 - **Trilha** is the trail of what happened: unlocks, changes, and (if you turn it on) every reveal
   and copy. Each line carries the fingerprint of the one before, so editing the trail breaks it.
 - **The lock** at the bottom of the rail shows how long until Keyhold locks itself. Locking forgets
@@ -128,7 +132,10 @@ account it names. The [threat model](docs/THREAT_MODEL.md) says exactly what eac
 3. **Novo cofre → AWS Parameter Store.** Choose the account, the region, and the S3 bucket for
    attachments (Keyhold suggests `keyhold-<vault name>` and never creates it).
 
-Every `/` in a parameter name is a folder. A record with a single password is stored as that plain
+Every `/` in a parameter name is a folder. Titles and folder names can be anything except `/`: the
+parameter name is made from them (`Banco Inter (PJ)` becomes `banco-inter-pj`), shown as "Na AWS"
+while you type, and editable when you want your own. Renaming offers to move the parameter too,
+which loses its history; each AWS vault sets whether that box starts ticked. A record with a single password is stored as that plain
 value, so your applications keep reading it as before; a record with more fields, or with notes,
 becomes Keyhold's JSON. Keyhold only writes `SecureString` parameters, keeps the KMS key a
 parameter already uses, and refuses to save over a change someone else made in the meantime.

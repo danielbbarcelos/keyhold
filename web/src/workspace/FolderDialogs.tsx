@@ -21,7 +21,10 @@ import {
 } from '@/components/ui/select'
 
 import { api, ApiError, type FolderNode } from '../api'
+import { Checkbox } from '@/components/ui/checkbox'
+import { awsPathOf, AwsNameField, nameProblem, suggestName, titleProblem } from './awsName'
 import { ColourPicker } from './ColourPicker'
+import { toast } from './toast'
 
 /**
  * Renaming, moving and deleting a folder.
@@ -33,16 +36,29 @@ import { ColourPicker } from './ColourPicker'
 
 export function RenameFolderDialog({
   folder,
+  aws,
   onDone,
   onCancel,
 }: {
   folder: FolderNode
-  onDone: () => void
+  /** An AWS folder: its name lives on its marker, and its path moves only when asked. */
+  aws?: { renameDefault: boolean }
+  /** With the folder as it is now: an AWS folder whose path moved has a new id. */
+  onDone: (folder?: FolderNode) => void
   onCancel: () => void
 }) {
   const [name, setName] = useState(folder.name)
   const [colour, setColour] = useState(folder.colour ?? 'default')
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [move, setMove] = useState(aws?.renameDefault ?? false)
+  const [leaf, setLeaf] = useState<string | null>(null)
+
+  const path = awsPathOf(folder.id) ?? ''
+  const parent = path.split('/').slice(0, -1).join('/') || null
+  const changed = name.trim() !== folder.name || leaf !== null
+  const segment = aws && move && changed ? leaf ?? suggestName(name, 'pasta') : null
+  const wrong = aws ? titleProblem(name, 'O nome da pasta') ?? (segment !== null ? nameProblem(parent, segment) : null) : null
 
   return (
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
@@ -50,7 +66,9 @@ export function RenameFolderDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Renomear a pasta</AlertDialogTitle>
           <AlertDialogDescription>
-            O nome e a cor ficam cifrados como o resto do cofre.
+            {aws
+              ? 'O nome aparece no Keyhold como você escrever. Na AWS, a pasta é parte do nome de cada parâmetro dentro dela.'
+              : 'O nome e a cor ficam cifrados como o resto do cofre.'}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -61,25 +79,55 @@ export function RenameFolderDialog({
               id="folder-name"
               value={name}
               autoFocus
+              aria-invalid={aws ? titleProblem(name) !== null : undefined}
               onChange={(event) => setName(event.target.value)}
             />
           </div>
 
-          <ColourPicker value={colour} onChange={setColour} />
+          {aws ? (
+            changed && (
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-[13px]">
+                  <Checkbox checked={move} onCheckedChange={(on) => setMove(on === true)} />
+                  Mudar o nome na AWS também
+                </label>
+                {move ? (
+                  <>
+                    <AwsNameField parent={parent} from={name} value={leaf} onChange={setLeaf} fallback="pasta" />
+                    <p className="text-xs text-amber">
+                      Cada parâmetro dentro de {path} vai para o caminho novo e perde o histórico. Quem lê pelo
+                      caminho antigo para de achar. Se algum tiver anexos, só o nome no Keyhold muda.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-faint">
+                    Na AWS continua <code className="font-mono">{path}</code>. Só o nome no Keyhold muda.
+                  </p>
+                )}
+              </div>
+            )
+          ) : (
+            <ColourPicker value={colour} onChange={setColour} />
+          )}
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {(error || (aws && wrong)) && <p className="text-sm text-destructive">{error || wrong}</p>}
         </div>
 
         <AlertDialogFooter>
           <AlertDialogCancel>Cancelar</AlertDialogCancel>
           <Button
-            disabled={!name.trim()}
-            onClick={() =>
+            disabled={!name.trim() || busy || wrong !== null}
+            onClick={() => {
+              setBusy(true)
               void api
-                .renameFolder(folder.id, name.trim(), colour)
-                .then(onDone)
+                .renameFolder(folder.id, name.trim(), aws ? null : colour, segment ?? undefined)
+                .then((answer) => {
+                  if (answer.warning) toast('Renomeada, com um aviso', answer.warning, 'error')
+                  onDone(answer.folder)
+                })
                 .catch((cause) => setError(describe(cause)))
-            }
+                .finally(() => setBusy(false))
+            }}
           >
             Salvar
           </Button>

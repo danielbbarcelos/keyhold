@@ -8,12 +8,14 @@ import { CommandPalette } from './CommandPalette'
 import { DiscardDialog } from './DiscardDialog'
 import { Home, type Seen } from './Home'
 import { InstancesPanel } from './InstancesPanel'
+import { destinationFromLocation, rememberDestination, type Destination } from './nav'
 import { NewVaultDialog } from './NewVaultDialog'
 import { Settings } from './Settings'
 import { Body, Crumb, Rail, Title, TopBar, type Place } from './shell'
 import { toast, toastError, Toaster } from './toast'
 import type { Selection } from './vault/TreeCard'
 import { VaultPage } from './vault/VaultPage'
+import { VaultSkeleton } from './Skeletons'
 
 /**
  * The workspace: one shell for every screen.
@@ -29,17 +31,30 @@ interface WorkspaceProps {
 }
 
 export function Workspace({ status, onChanged }: WorkspaceProps) {
+  // A tab opened with "Abrir em nova guia" starts where it was sent.
+  const [start] = useState<Destination>(destinationFromLocation)
   const [vaults, setVaults] = useState<VaultSummary[]>([])
+  const [vaultsLoaded, setVaultsLoaded] = useState(false)
   const [records, setRecords] = useState<RecordPreview[]>([])
-  const [place, setPlace] = useState<Place>('home')
-  const [vaultId, setVaultId] = useState<string | null>(null)
-  const [selection, setSelection] = useState<Selection>(null)
+  const [place, setPlace] = useState<Place>(start.place)
+  const [vaultId, setVaultId] = useState<string | null>(start.place === 'vault' ? start.vault : null)
+  const [selection, setSelection] = useState<Selection>(() => {
+    if (start.place !== 'vault') return null
+    if (start.record) return { kind: 'record', id: start.record }
+    if (start.folder) return { kind: 'folder', id: start.folder }
+    return start.trash ? { kind: 'trash' } : null
+  })
+  // A vault being created: its page stands as a skeleton until the binary answers.
+  const [pendingVault, setPendingVault] = useState(false)
   const [seen, setSeen] = useState<Seen[]>([])
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [askingVault, setAskingVault] = useState(false)
   const [section, setSection] = useState('')
   // Which card Ajustes opens on; the counter makes a second "Abrir Contas AWS" land there again.
-  const [settingsAt, setSettingsAt] = useState({ id: 'aparencia', n: 0 })
+  const [settingsAt, setSettingsAt] = useState({
+    id: start.place === 'settings' && start.section ? start.section : 'aparencia',
+    n: 0,
+  })
   const [dirty, setDirty] = useState(false)
   const [leaving, setLeaving] = useState<(() => void) | null>(null)
 
@@ -79,12 +94,14 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
     try {
       const found = await api.vaults()
       setVaults(found.vaults)
+      setVaultsLoaded(true)
 
       const lists = await Promise.all(
         found.vaults.filter((vault) => !vault.archived).map((vault) => api.records(vault.id).catch(() => null)),
       )
       setRecords(lists.flatMap((list) => list?.records ?? []).filter((record) => !record.archived))
     } catch (cause) {
+      setVaultsLoaded(true)
       toastError(cause, 'Não consegui ler os cofres')
     }
   }, [])
@@ -116,6 +133,24 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   }, [refresh])
 
   const vault = vaults.find((one) => one.id === vaultId && !one.archived) ?? null
+
+  // The address follows the tab, so a reload lands where it was.
+  useEffect(() => {
+    if (place === 'vault') {
+      if (!vaultId) return
+      rememberDestination({
+        place: 'vault',
+        vault: vaultId,
+        record: selection?.kind === 'record' ? selection.id : undefined,
+        folder: selection?.kind === 'folder' ? selection.id : undefined,
+        trash: selection?.kind === 'trash',
+      })
+    } else if (place === 'settings') {
+      rememberDestination({ place, section: settingsAt.id })
+    } else {
+      rememberDestination({ place })
+    }
+  }, [place, vaultId, selection, settingsAt.id])
 
   const names = useMemo(() => {
     const out: Record<string, string> = {}
@@ -158,6 +193,10 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   }
 
   function page() {
+    if (pendingVault || (place === 'vault' && !vault && !vaultsLoaded)) {
+      return <VaultSkeleton />
+    }
+
     if (place === 'vault' && vault) {
       return (
         <VaultPage
@@ -187,6 +226,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
           <Body className="flex flex-col">
             <AuditPanel
               names={names}
+              vaultOf={(id) => records.find((one) => one.id === id)?.vault_id}
               onOpenRecord={(id) => {
                 const record = records.find((one) => one.id === id)
                 if (record) openRecord(record)
@@ -268,14 +308,19 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
           }}
           onCreate={(name, aws, icon) => {
             setAskingVault(false)
+            setPendingVault(true)
             void api
               .createVault(name, 'default', aws, icon)
-              .then(async (made) => {
-                await refresh()
+              .then((made) => {
+                // Straight to the new vault: its page loads itself, and the rest of the
+                // workspace catches up behind it.
+                setVaults((current) => [...current.filter((one) => one.id !== made.vault.id), made.vault])
                 toast('Cofre criado', aws ? `${name}, no AWS Parameter Store` : name)
                 openVault(made.vault.id)
+                void refresh()
               })
               .catch((cause) => toastError(cause, 'Não criei o cofre'))
+              .finally(() => setPendingVault(false))
           }}
           onCancel={() => setAskingVault(false)}
         />

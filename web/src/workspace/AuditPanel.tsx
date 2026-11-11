@@ -4,6 +4,7 @@ import { Bot, CircleCheck, CircleX, ShieldQuestion, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+import { linkProps, TabMenu } from './nav'
 import { api, type AuditEvent, type AuditIntegrity } from '../api'
 
 /**
@@ -73,9 +74,12 @@ const SHORT: Record<string, string> = {
 export function AuditPanel({
   names,
   onOpenRecord,
+  vaultOf,
 }: {
   names: Record<string, string>
   onOpenRecord: (id: string) => void
+  /** The vault a record lives in, for opening it in a new tab. */
+  vaultOf: (id: string) => string | undefined
 }) {
   const [events, setEvents] = useState<AuditEvent[] | null>(null)
   const [integrity, setIntegrity] = useState<AuditIntegrity | null>(null)
@@ -203,9 +207,9 @@ export function AuditPanel({
                     </td>
                     <td className="px-3 py-3 text-muted-foreground">
                       {event.scope && names[event.scope] ? (
-                        <button type="button" className="hover:text-foreground hover:underline" onClick={() => onOpenRecord(event.scope as string)}>
+                        <RecordLink id={event.scope} vault={vaultOf(event.scope)} onOpen={onOpenRecord}>
                           {where}
-                        </button>
+                        </RecordLink>
                       ) : (
                         where || (event.scope ? 'registro que não existe mais' : '')
                       )}
@@ -219,4 +223,28 @@ export function AuditPanel({
       </div>
     </div>
   )
+}
+
+function RecordLink({
+  id,
+  vault,
+  onOpen,
+  children,
+}: {
+  id: string
+  vault: string | undefined
+  onOpen: (id: string) => void
+  children: React.ReactNode
+}) {
+  const button = (
+    <button
+      type="button"
+      className="hover:text-foreground hover:underline"
+      {...(vault ? linkProps({ place: 'vault', vault, record: id }, () => onOpen(id)) : { onClick: () => onOpen(id) })}
+    >
+      {children}
+    </button>
+  )
+
+  return vault ? <TabMenu to={{ place: 'vault', vault, record: id }}>{button}</TabMenu> : button
 }

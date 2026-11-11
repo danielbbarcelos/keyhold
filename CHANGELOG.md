@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (pre-release)
+## 0.3.0
 
 Copying between vaults, local and AWS alike, a vault's own icon, and Keyhold's own logo.
 
@@ -23,6 +23,27 @@ Copying between vaults, local and AWS alike, a vault's own icon, and Keyhold's o
 - **Keyhold's own logo**, in the rail (following the theme), on the unlock screen, and as the app
   and browser icon.
 - A `String` parameter holding a JSON object reads as one password field per key.
+- **Names in AWS, said before they are sent.** An AWS folder takes any name ("Bancos (PJ)"): its
+  path gets a clean segment (`/bancos-pj`) and the name lives on the folder's marker, the way a
+  record's title lives in its description. Under a title or a folder name, "Na AWS: …" shows the
+  parameter name being made, and "Editar nome" lets you write your own, with the field turning red
+  on anything AWS refuses (space, accents, `: ; , + = [ ] ( )`).
+- **Renaming in AWS.** Changing a record's title or a folder's name offers "Mudar o nome na AWS
+  também", and each AWS vault decides whether it starts ticked (Ajustes → Cofres). Without it only
+  the name in Keyhold changes; with it the parameter (or everything in the folder) moves to the new
+  name and loses its history. A folder holding attachments or a `String` parameter keeps its path.
+- **Skeletons while things load**: a vault opening, a new vault, a record being opened. An AWS
+  vault no longer shows "empty" before its parameters arrive.
+- **Abrir em nova guia** on everything that leads somewhere (the rail, vaults, folders, records,
+  the path at the top, Ajustes), on right-click, Ctrl click or the middle button. A reload comes
+  back to the same place.
+
+- **AWS sessions renew themselves.** Keyhold now asks Identity Center for a refresh token and
+  trades it for a new access token before the hour runs out, for as long as Identity Center's own
+  session duration allows and only while Keyhold is unlocked. The rail shows "ativa" instead of a
+  countdown. Logins made before this need one last "Renovar".
+- When the program stops answering, the tab says so plainly and offers **Abrir o Keyhold**
+  (through `keyhold://`, which the installer now registers) and **Tentar de novo**.
 
 ### Changed
 

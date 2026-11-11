@@ -239,6 +239,8 @@ export interface AwsVault {
   connection_id: string
   region: string
   bucket: string
+  /** Whether "Mudar o nome na AWS também" starts ticked when a title or folder name changes. */
+  rename_with_title?: boolean
 }
 
 export interface AwsLogin {
@@ -248,6 +250,8 @@ export interface AwsLogin {
   label: string
   connected: boolean
   expires_at: number | null
+  /** The session renews itself until Identity Center's own session duration ends. */
+  renews?: boolean
 }
 
 export interface AwsConnection {
@@ -372,7 +376,7 @@ export interface AttachmentInfo {
   created_at: string
 }
 
-export type OpenRecord = RecordHeader & { payload: Payload; plaintext?: boolean }
+export type OpenRecord = RecordHeader & { payload: Payload; plaintext?: boolean; /** An AWS record's parameter name. */ parameter?: string }
 
 export interface VersionEntry {
   version: number
@@ -469,7 +473,10 @@ export const api = {
       `/api/aws/vaults/${vaultId}/check`,
     ),
 
-  updateVault: (id: string, meta: { name: string; description: string; colour: string; icon?: RecordIcon | null }) =>
+  updateVault: (
+    id: string,
+    meta: { name: string; description: string; colour: string; icon?: RecordIcon | null; aws?: AwsVault | null },
+  ) =>
     call<{ vault: VaultSummary }>('PUT', `/api/vaults/${id}`, meta),
 
   archiveVault: (id: string, on: boolean) =>
@@ -481,15 +488,22 @@ export const api = {
   folders: (vaultId: string) =>
     call<{ folders: FolderNode[] }>('GET', `/api/vaults/${vaultId}/folders`),
 
-  createFolder: (vaultId: string, name: string, parentId: string | null, colour = 'default') =>
+  /** `segment`: an AWS folder's path segment, as shown in "Na AWS". */
+  createFolder: (vaultId: string, name: string, parentId: string | null, colour = 'default', segment?: string) =>
     call<{ folder: FolderNode }>('POST', `/api/vaults/${vaultId}/folders`, {
       name,
       colour,
       parent_id: parentId,
+      ...(segment ? { segment } : {}),
     }),
 
-  renameFolder: (id: string, name: string, colour: string | null) =>
-    call<{ folder: FolderNode }>('PUT', `/api/folders/${id}`, { name, colour }),
+  /** `segment`: a new path for an AWS folder, which moves everything in it. */
+  renameFolder: (id: string, name: string, colour: string | null, segment?: string) =>
+    call<{ folder: FolderNode; warning?: string }>('PUT', `/api/folders/${id}`, {
+      name,
+      colour,
+      ...(segment ? { segment } : {}),
+    }),
 
   moveFolder: (id: string, parentId: string | null) =>
     call<{ moved: boolean }>('POST', `/api/folders/${id}/move`, { parent_id: parentId }),
@@ -502,10 +516,12 @@ export const api = {
       `/api/vaults/${vaultId}/records?archived=${archived}`,
     ),
 
-  createRecord: (vaultId: string, folderId: string | null, payload: Payload) =>
+  /** `name`: an AWS record's parameter name (its last segment), as shown in "Na AWS". */
+  createRecord: (vaultId: string, folderId: string | null, payload: Payload, name?: string) =>
     call<{ record: RecordHeader }>('POST', `/api/vaults/${vaultId}/records`, {
       folder_id: folderId,
       payload,
+      ...(name ? { name } : {}),
     }),
 
   /** The code a 2FA field gives right now; the secret itself never needs to be shown. */
@@ -528,10 +544,12 @@ export const api = {
    * Move a record. Passing `vaultId` moves it to another vault, which re-encrypts it — the folder
    * then has to be one of that vault's, or nothing.
    */
-  moveRecord: (id: string, folderId: string | null, vaultId?: string) =>
+  /** `name`: a new last segment for an AWS record's parameter (a rename). */
+  moveRecord: (id: string, folderId: string | null, vaultId?: string, name?: string) =>
     call<{ moved: boolean; id?: string; warning?: string; history_lost?: boolean }>('POST', `/api/records/${id}/move`, {
       folder_id: folderId,
       ...(vaultId ? { vault_id: vaultId } : {}),
+      ...(name ? { name } : {}),
     }),
 
   favouriteRecord: (id: string, on: boolean) =>

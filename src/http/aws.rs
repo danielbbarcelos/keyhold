@@ -56,7 +56,7 @@ use crate::aws::{
     SsmClient, SsoToken, Tag,
 };
 use crate::records::{OpenRecord, Payload, RecordHeader, RecordPreview, VersionEntry};
-use crate::vaults::{self, AwsVault};
+use crate::vaults::{self, AwsVault, FolderNode};
 
 /// How many tag requests run at once while a list is drawn. Parameter Store throttles
 /// `ListTagsForResource` at a few per second per account; eight in flight stays under it for any
@@ -222,6 +222,41 @@ fn note(state: &AppState, action: &str, scope: &str, detail: Detail) {
     audit::note(&store, &state.lock, action, Some(scope), detail);
 }
 
+/// How long before an access token runs out Keyhold trades its refresh token for a new one.
+const RENEW_AHEAD_SECONDS: u64 = 10 * 60;
+
+/// Renew, ahead of time, every session about to run out that can be renewed. Called by the
+/// overview the interface reads to draw the rail, so a session lives as long as Identity Center
+/// allows (its own "session duration") while Keyhold is unlocked, and not a second past a lock:
+/// locking drops the tokens, refresh tokens included. A refusal is left alone here: the session
+/// ends when the access token does, and the rail says so.
+async fn renew_ahead(state: &AppState, config: &AwsConfig) {
+    let Some(generation) = state.aws.generation(&state.lock) else { return };
+    let now = now_unix();
+
+    for login in &config.logins {
+        let due = state
+            .aws
+            .with_generation(&state.lock, generation, |inner| {
+                inner
+                    .tokens
+                    .get(&login.id)
+                    .filter(|t| t.renews() && t.expires_at() <= now.saturating_add(RENEW_AHEAD_SECONDS))
+                    .cloned()
+            })
+            .flatten();
+
+        let Some(held) = due else { continue };
+        let Ok(sso) = state.aws.sso(&login.region) else { continue };
+
+        if let Ok(fresh) = sso.refresh(&held).await {
+            state.aws.with_generation(&state.lock, generation, |inner| {
+                inner.tokens.insert(login.id.clone(), fresh);
+            });
+        }
+    }
+}
+
 fn login_json(login: &Login, expires_at: Option<u64>) -> Value {
     let now = now_unix();
 
@@ -273,10 +308,12 @@ async fn overview(State(state): State<Arc<AppState>>) -> Answer {
             .ok_or_else(locked)??
     };
 
-    let sessions: HashMap<String, u64> = state
+    renew_ahead(&state, &config).await;
+
+    let sessions: HashMap<String, (u64, bool)> = state
         .aws
         .with(&state.lock, |inner| {
-            inner.tokens.iter().map(|(id, token)| (id.clone(), token.expires_at())).collect()
+            inner.tokens.iter().map(|(id, token)| (id.clone(), (token.expires_at(), token.renews()))).collect()
         })
         .ok_or_else(locked)?;
 
@@ -284,7 +321,12 @@ async fn overview(State(state): State<Arc<AppState>>) -> Answer {
         "logins": config
             .logins
             .iter()
-            .map(|login| login_json(login, sessions.get(&login.id).copied()))
+            .map(|login| {
+                let session = sessions.get(&login.id).copied();
+                let mut json = login_json(login, session.map(|(at, _)| at));
+                json["renews"] = json!(session.is_some_and(|(_, renews)| renews));
+                json
+            })
             .collect::<Vec<_>>(),
         "connections": config
             .connections
@@ -1142,25 +1184,241 @@ pub(crate) async fn list_folders(state: &AppState, vault_id: &str) -> Answer {
     let place = place(state, vault_id).await?;
     let snapshot = snapshot(state, &place).await?;
 
-    let folders =
-        mapping::folder_nodes(vault_id, snapshot.parameters.iter().map(|p| p.name.as_str()));
+    let folders = mapping::folder_nodes_labelled(
+        vault_id,
+        snapshot.parameters.iter().map(|p| p.name.as_str()),
+        &folder_labels(&snapshot),
+    );
 
     Ok(Json(json!({ "folders": folders })))
+}
+
+/// The names folder markers carry in their descriptions, path → name. Empty when the metadata
+/// could not be read: the tree then shows path segments, which is still the truth.
+fn folder_labels(snapshot: &Snapshot) -> HashMap<String, String> {
+    snapshot
+        .metadata
+        .iter()
+        .filter(|(name, _)| mapping::is_keep(name))
+        .filter_map(|(name, meta)| {
+            let path = mapping::parent_path(name)?;
+            Some((path, mapping::folder_label(meta.description.as_deref())?))
+        })
+        .collect()
+}
+
+/// The segment a folder gets: the one typed in "Editar nome", or one made from its name.
+fn folder_segment(label: &str, segment: Option<&str>) -> Result<String, Failure> {
+    let segment = match segment.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(typed) => typed.to_string(),
+        None => mapping::suggest_name(label),
+    };
+    mapping::validate_segment(&segment).map_err(bad_request)?;
+
+    Ok(segment)
+}
+
+/// A folder's name as its marker's description: one line, no `/`, within what AWS accepts.
+fn folder_description(label: &str) -> Result<String, Failure> {
+    if label.trim().is_empty() {
+        return Err(bad_request("a pasta precisa de um nome"));
+    }
+    if label.contains('/') {
+        return Err(bad_request("o nome da pasta não pode ter '/', porque na AWS isso vira mais uma pasta"));
+    }
+
+    mapping::description_for(label).map_err(bad_request)
+}
+
+/// Write the folder's name on its marker: over the marker when it exists (same key), or as a new
+/// marker under the folder's key otherwise.
+async fn write_folder_label(
+    state: &AppState,
+    place: &Place,
+    snapshot: &Snapshot,
+    path: &str,
+    description: &str,
+    exists: bool,
+) -> Result<(), Failure> {
+    let marker = mapping::join(Some(path), mapping::KEEP);
+
+    let key_id = if exists {
+        let metadata = metadata_of(place, &marker).await?;
+        Some(key_of(&metadata, &marker)?)
+    } else {
+        mapping::inherit_key(Some(path), &known_keys(snapshot)?)
+    };
+
+    let written = place
+        .ssm
+        .put_parameter(&PutParameter {
+            name: marker.clone(),
+            value: mapping::KEEP_VALUE.into(),
+            key_id,
+            description: Some(description.to_string()),
+            overwrite: exists,
+            ..PutParameter::default()
+        })
+        .await;
+
+    state.aws.invalidate(&place.vault_id);
+    written.map(|_| ()).map_err(|e| write_failure(e, &marker))
+}
+
+/// Give a folder that "Copiar para…" created its name in Keyhold, when the path segment could not
+/// carry it ("Bancos (PJ)" at `/bancos-pj`). A marker that already has a name keeps it.
+pub(crate) async fn ensure_folder_label(state: &AppState, vault_id: &str, path: &str, label: &str) -> Result<(), Failure> {
+    let place = place(state, vault_id).await?;
+    let listing = snapshot(state, &place).await?;
+    let marker = mapping::join(Some(path), mapping::KEEP);
+
+    if folder_labels(&listing).contains_key(path) {
+        return Ok(());
+    }
+
+    let exists = listing.parameters.iter().any(|p| mapping::absolute(&p.name) == marker);
+    let description = folder_description(label)?;
+
+    write_folder_label(state, &place, &listing, path, &description, exists).await
+}
+
+/// Rename a folder (F9, A7 revisited): its name in Keyhold always, and its path in AWS only when
+/// `segment` asks for it.
+///
+/// The name lives in the marker's description, so renaming it touches one parameter and nothing
+/// else. A new path is a move of every parameter under the folder (Parameter Store has no rename),
+/// each one losing its history. It is refused before anything is written when a parameter under
+/// the folder is a `String` (never rewritten) or has attachments (they live under the old name):
+/// then only the name changes, and the answer says why the path did not.
+pub(crate) async fn rename_folder(state: &AppState, id: &str, label: &str, segment: Option<&str>) -> Answer {
+    let (vault_id, path) = target_folder(id)?;
+    let label = label.trim();
+    let description = folder_description(label)?;
+    let place = place(state, &vault_id).await?;
+
+    state.aws.invalidate(&vault_id);
+    let listing = snapshot(state, &place).await?;
+    let names: Vec<String> = listing.parameters.iter().map(|p| p.name.clone()).collect();
+    let paths = mapping::folder_paths(names.iter().map(String::as_str));
+
+    if !paths.contains(&path) {
+        return Err(not_found("essa pasta não existe mais"));
+    }
+
+    let mut target = path.clone();
+    let mut warning = None;
+
+    let wanted = segment.map(str::trim).filter(|s| !s.is_empty() && *s != mapping::leaf(&path));
+
+    if let Some(wanted) = wanted {
+        mapping::validate_segment(wanted).map_err(bad_request)?;
+        let new_path = mapping::join(mapping::parent_path(&path).as_deref(), wanted);
+        mapping::validate_name(&new_path).map_err(bad_request)?;
+
+        if paths.contains(&new_path) {
+            return Err(conflict(format!("já existe uma pasta {new_path} na AWS")));
+        }
+
+        let prefix = format!("{}/", path.trim_end_matches('/'));
+        let inside: Vec<&crate::aws::Parameter> = listing
+            .parameters
+            .iter()
+            .filter(|p| mapping::absolute(&p.name).starts_with(&prefix))
+            .collect();
+
+        let mut blocked = Vec::new();
+        for parameter in &inside {
+            if !is_secure(&parameter.kind) {
+                blocked.push(format!("{} (parâmetro String)", mapping::leaf(&parameter.name)));
+                continue;
+            }
+            if mapping::is_keep(&parameter.name) {
+                continue;
+            }
+            match attachments_in(state, &place, &parameter.name).await {
+                Ok(Some((_, _, keys))) if !keys.is_empty() => {
+                    blocked.push(format!("{} (tem anexos)", mapping::leaf(&parameter.name)))
+                }
+                Ok(_) => {}
+                Err(Ok(failure)) => {
+                    return Err(because("não renomeei a pasta porque precisei conferir os anexos", failure))
+                }
+                Err(Err(failure)) => return Err(failure),
+            }
+        }
+
+        if blocked.is_empty() {
+            let mut moved = 0;
+            for parameter in &inside {
+                let old = mapping::absolute(&parameter.name);
+                let new_name = format!("{new_path}{}", &old[path.trim_end_matches('/').len()..]);
+                let old_id = record_id(&vault_id, &parameter.name);
+
+                match move_parameter(state, &place, &old_id, &parameter.name, &new_name).await {
+                    Ok(Json(answer)) => {
+                        moved += 1;
+                        if let Some(text) = answer.get("warning").and_then(Value::as_str) {
+                            warning = Some(text.to_string());
+                        }
+                    }
+                    Err(failure) => {
+                        state.aws.invalidate(&vault_id);
+                        if moved == 0 {
+                            return Err(failure);
+                        }
+                        // Half way: both folders exist now. Say so, and name the new one.
+                        warning = Some(format!(
+                            "movi {moved} de {} parâmetros para {new_path} e parei: {}. O resto                              continua em {path}",
+                            inside.len(),
+                            failure.1
+                        ));
+                        break;
+                    }
+                }
+            }
+            target = new_path;
+            state.aws.invalidate(&vault_id);
+        } else {
+            warning = Some(format!(
+                "só o nome no Keyhold mudou. O caminho na AWS ficou {path}, porque estes não podem                  ser movidos: {}",
+                blocked.join(", ")
+            ));
+        }
+    }
+
+    let fresh = snapshot(state, &place).await?;
+    let exists = fresh
+        .parameters
+        .iter()
+        .any(|p| mapping::absolute(&p.name) == mapping::join(Some(&target), mapping::KEEP));
+    write_folder_label(state, &place, &fresh, &target, &description, exists).await?;
+
+    let node = FolderNode {
+        id: folder_id(&vault_id, &target),
+        vault_id: vault_id.clone(),
+        parent_id: mapping::parent_path(&target).map(|p| folder_id(&vault_id, &p)),
+        name: label.to_string(),
+        colour: None,
+        depth: target.matches('/').count().saturating_sub(1),
+    };
+
+    Ok(Json(with_warning(json!({ "folder": node }), warning)))
 }
 
 /// A new folder is a `.keep` marker under its path (A7).
 pub(crate) async fn create_folder(
     state: &AppState,
     vault_id: &str,
-    name: &str,
+    label: &str,
+    segment: Option<&str>,
     parent_id: Option<&str>,
 ) -> Answer {
-    let name = name.trim();
-    mapping::validate_title(name).map_err(bad_request)?;
-    mapping::validate_segment(name).map_err(bad_request)?;
+    let label = label.trim();
+    let description = folder_description(label)?;
+    let name = folder_segment(label, segment)?;
 
     let parent = folder_path(vault_id, parent_id)?;
-    let path = mapping::join(parent.as_deref(), name);
+    let path = mapping::join(parent.as_deref(), &name);
     let marker = mapping::join(Some(&path), mapping::KEEP);
     mapping::validate_name(&path).map_err(bad_request)?;
 
@@ -1179,7 +1437,7 @@ pub(crate) async fn create_folder(
             name: marker.clone(),
             value: mapping::KEEP_VALUE.into(),
             key_id,
-            description: Some("Pasta criada pelo Keyhold".into()),
+            description: Some(description),
             overwrite: false,
             ..PutParameter::default()
         })
@@ -1188,7 +1446,8 @@ pub(crate) async fn create_folder(
     state.aws.invalidate(vault_id);
     written.map_err(|e| write_failure(e, &marker))?;
 
-    let node = mapping::folder_nodes(vault_id, [marker.as_str()])
+    let labels = HashMap::from([(path.clone(), label.to_string())]);
+    let node = mapping::folder_nodes_labelled(vault_id, [marker.as_str()], &labels)
         .into_iter()
         .find(|n| n.id == folder_id(vault_id, &path))
         .ok_or_else(|| bad_request("a pasta não foi criada"))?;
@@ -1396,8 +1655,13 @@ pub(crate) async fn open_record(state: &AppState, id: &str) -> Answer {
     let (vault_id, name) = target_record(id)?;
     let place = place(state, &vault_id).await?;
     let (opened, kind) = open_parameter(state, &place, &name).await?;
+    let mut record = with_plaintext(opened, &kind);
+    if let Some(object) = record.as_object_mut() {
+        // The parameter's name, for "Na AWS: …" and for copying into an application's config.
+        object.insert("parameter".into(), json!(mapping::absolute(&name)));
+    }
 
-    Ok(Json(json!({ "record": with_plaintext(opened, &kind) })))
+    Ok(Json(json!({ "record": record })))
 }
 
 /// What a write over an existing parameter produced: the new header, and a sentence for the person
@@ -1596,6 +1860,7 @@ pub(crate) async fn move_record(
     id: &str,
     folder_id: Option<&str>,
     to_vault: Option<&str>,
+    leaf: Option<&str>,
 ) -> Answer {
     let (vault_id, name) = target_record(id)?;
 
@@ -1607,7 +1872,15 @@ pub(crate) async fn move_record(
     }
 
     let folder = folder_path(&vault_id, folder_id)?;
-    let new_name = mapping::join(folder.as_deref(), mapping::leaf(&name));
+    // A new last segment renames as well as moves: "Mudar o nome na AWS também".
+    let leaf = match leaf.map(str::trim).filter(|l| !l.is_empty()) {
+        Some(typed) => {
+            mapping::validate_segment(typed).map_err(bad_request)?;
+            typed.to_string()
+        }
+        None => mapping::leaf(&name).to_string(),
+    };
+    let new_name = mapping::join(folder.as_deref(), &leaf);
     mapping::validate_name(&new_name).map_err(bad_request)?;
 
     if mapping::absolute(&new_name) == mapping::absolute(&name) {

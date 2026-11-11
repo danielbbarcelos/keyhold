@@ -44,8 +44,11 @@ import type { MenuEntry } from '../menu'
 import { MoveToVaultDialog } from '../MoveToVaultDialog'
 import { CopyDialog, type CopySource } from '../CopyDialog'
 import { NameDialog } from '../NameDialog'
+import { newTabEntry } from '../nav'
+import { RecordSkeleton, TreeSkeleton } from '../Skeletons'
 import { NewRecordDialog } from '../record/NewRecordDialog'
-import { RecordEdit, type EditDraft } from '../record/RecordEdit'
+import { RecordEdit, renameOf, type EditDraft } from '../record/RecordEdit'
+import { awsPathOf, nameProblem, titleProblem } from '../awsName'
 import { RecordView } from '../record/RecordView'
 import { Crumb, TopBar, VaultSwitcher } from '../shell'
 import { toast, toastError } from '../toast'
@@ -104,6 +107,9 @@ export function VaultPage({
   const [saving, setSaving] = useState(false)
   const [movingAws, setMovingAws] = useState<{ id: string; folderId: string | null } | null>(null)
   const [unavailable, setUnavailable] = useState<{ message: string; code?: string } | null>(null)
+  // False until the first read of this vault answers: until then the tree and the panel are skeletons
+  // rather than an "empty vault" that is not empty.
+  const [loaded, setLoaded] = useState(false)
   const aws = vault.kind === 'aws'
   const [origin, setOrigin] = useState('')
   const [leaving, setLeaving] = useState<(() => void) | null>(null)
@@ -118,9 +124,19 @@ export function VaultPage({
   const select = (next: Selection) => guard(() => onSelect(next))
 
   const startEditing = (draft: EditDraft) => {
-    setOrigin(JSON.stringify(draft))
-    setEditing(draft)
+    // In AWS the vault decides whether a new title starts by moving the name too.
+    const ready = aws ? { ...draft, rename: vault.aws?.rename_with_title ?? false, leaf: null } : draft
+    setOrigin(JSON.stringify(ready))
+    setEditing(ready)
   }
+
+  /** Why "Salvar" cannot go to AWS as it is: a title with "/", or a name AWS would refuse. */
+  const editProblem = (() => {
+    if (!aws || !editing || !open) return null
+    const leaf = renameOf(editing, open.payload.title)
+
+    return titleProblem(editing.payload.title) ?? (leaf !== null ? nameProblem(awsPathOf(editing.folderId), leaf) : null)
+  })()
 
   const refresh = useCallback(async () => {
     try {
@@ -130,6 +146,7 @@ export function VaultPage({
       setRecords(list.records.filter((record) => !record.archived))
       setTrash(bin.records)
       setUnavailable(null)
+      setLoaded(true)
 
       // Atenção: what the file already knows (compromised, rotation passed) plus the health report,
       // which opens every record to judge weak and repeated passwords.
@@ -149,6 +166,7 @@ export function VaultPage({
         .then((report) => setAttention(new Set([...flagged, ...report.health.findings.map((one) => one.record_id)])))
         .catch(() => {})
     } catch (cause) {
+      setLoaded(true)
       if (cause instanceof ApiError && cause.aws && editingRef.current) {
         // Never swap an open editor for an error page: the draft would have no way back.
         toastError(cause, 'O cofre na AWS não respondeu')
@@ -164,6 +182,7 @@ export function VaultPage({
     setOpen(null)
     setEditing(null)
     setFilter('all')
+    setLoaded(false)
     void refresh()
   }, [refresh])
 
@@ -242,8 +261,9 @@ export function VaultPage({
         if (saved.warning) toast('Salvo, com um aviso', saved.warning, 'error')
         wrote = true
       }
-      if (editing.folderId !== open.folder_id) {
-        const moved = await api.moveRecord(id, editing.folderId)
+      const newLeaf = aws ? renameOf(editing, before.payload.title) : null
+      if (editing.folderId !== open.folder_id || newLeaf !== null) {
+        const moved = await api.moveRecord(id, editing.folderId, undefined, newLeaf ?? undefined)
         if (moved.id) id = moved.id
         if (moved.warning) toast('Movido, com um aviso', moved.warning, 'error')
         wrote = true
@@ -284,11 +304,11 @@ export function VaultPage({
     }
   }
 
-  async function create(payload: Payload) {
+  async function create(payload: Payload, name?: string) {
     if (!creating) return
 
     try {
-      const made = await api.createRecord(vault.id, creating.folderId, payload)
+      const made = await api.createRecord(vault.id, creating.folderId, payload, name)
       setCreating(null)
       await refresh()
       onSelect({ kind: 'record', id: made.record.id })
@@ -348,7 +368,13 @@ export function VaultPage({
     }
   }
 
-  const folderEntries = (folder: FolderNode): MenuEntry[] => aws ? awsFolderEntries(folder) : [
+  const folderTab = (folder: FolderNode): MenuEntry[] => [
+    newTabEntry({ place: 'vault', vault: vault.id, folder: folder.id }),
+    { kind: 'separator' },
+  ]
+
+  const folderEntries = (folder: FolderNode): MenuEntry[] => aws ? [...folderTab(folder), ...awsFolderEntries(folder)] : [
+    ...folderTab(folder),
     {
       kind: 'item',
       label: 'Registro novo aqui',
@@ -382,12 +408,15 @@ export function VaultPage({
       onSelect: () => setCreating({ payload: emptyPayload(), folderId: folder.id }),
     },
     { kind: 'item', label: 'Subpasta', icon: FolderPlus, onSelect: () => setAsking({ parentId: folder.id }) },
+    { kind: 'item', label: 'Renomear', icon: Pencil, onSelect: () => setFolderAction({ what: 'rename', folder }) },
     { kind: 'item', label: 'Copiar para…', icon: Copy, onSelect: () => setCopying({ vaultId: vault.id, folderId: folder.id, what: `a pasta ${folder.name}` }) },
     { kind: 'separator' },
     { kind: 'item', label: 'Excluir a pasta vazia', icon: Trash2, destructive: true, onSelect: () => setFolderAction({ what: 'delete', folder }) },
   ]
 
   const recordEntries = (record: RecordPreview): MenuEntry[] => [
+    newTabEntry({ place: 'vault', vault: vault.id, record: record.id }),
+    { kind: 'separator' },
     {
       kind: 'item',
       label: record.favourite ? 'Tirar dos favoritos' : 'Favoritar',
@@ -445,7 +474,11 @@ export function VaultPage({
             <Button variant="outline" onClick={() => guard(() => setEditing(null))}>
               Cancelar
             </Button>
-            <Button disabled={saving || !editing.payload.title.trim()} onClick={() => void save()}>
+            <Button
+              disabled={saving || !editing.payload.title.trim() || editProblem !== null}
+              title={editProblem ?? undefined}
+              onClick={() => void save()}
+            >
               Salvar alterações
             </Button>
           </>
@@ -469,13 +502,18 @@ export function VaultPage({
         <Crumb
           key={folder.id}
           last={index === chain.length - 1 && !openId}
+          to={{ place: 'vault', vault: vault.id, folder: folder.id }}
           onClick={() => select({ kind: 'folder', id: folder.id })}
         >
           {folder.name}
         </Crumb>
       ))}
       {open && openId && (
-        <Crumb last={!editing} onClick={() => guard(() => setEditing(null))}>
+        <Crumb
+          last={!editing}
+          to={{ place: 'vault', vault: vault.id, record: open.id }}
+          onClick={() => guard(() => setEditing(null))}
+        >
           {open.payload.title}
         </Crumb>
       )}
@@ -504,6 +542,10 @@ export function VaultPage({
       )
     }
 
+    if (!loaded) {
+      return openId ? <RecordSkeleton /> : <div className="h-full rounded-[14px] border border-dashed" />
+    }
+
     if (selection?.kind === 'trash') {
       return (
         <TrashPanel
@@ -519,6 +561,7 @@ export function VaultPage({
     if (currentFolder) {
       return (
         <FolderView
+          vaultId={vault.id}
           folder={currentFolder}
           folders={folders}
           records={records}
@@ -531,11 +574,24 @@ export function VaultPage({
       )
     }
 
+    // Another record was picked and is on its way: its shape, not the previous record.
+    if (openId && open?.id !== openId) {
+      return <RecordSkeleton />
+    }
+
     if (open && openId) {
       if (editing) {
         return (
           <div className="h-full min-h-0 overflow-auto">
-            <RecordEdit draft={editing} kind={open.kind} aws={aws} folders={folders} onChange={setEditing} />
+            <RecordEdit
+              draft={editing}
+              kind={open.kind}
+              aws={aws}
+              parameter={open.parameter}
+              originalTitle={open.payload.title}
+              folders={folders}
+              onChange={setEditing}
+            />
           </div>
         )
       }
@@ -586,7 +642,9 @@ export function VaultPage({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {bar}
       <div className="kh-wide grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6 max-xl:grid-cols-[260px_minmax(0,1fr)]">
+        {loaded ? (
         <TreeCard
+          vaultId={vault.id}
           folders={folders}
           records={records}
           attention={attention}
@@ -604,6 +662,9 @@ export function VaultPage({
           folderEntries={folderEntries}
           recordEntries={recordEntries}
         />
+        ) : (
+          <TreeSkeleton />
+        )}
         <div className="min-h-0 min-w-0">{main()}</div>
       </div>
 
@@ -622,6 +683,7 @@ export function VaultPage({
         <NewRecordDialog
           initial={creating.payload}
           cloning={creating.cloning}
+          awsParent={aws ? awsPathOf(creating.folderId) : undefined}
           where={`Em ${vault.name}, ${folderPath(folders, creating.folderId) ? `em ${folderPath(folders, creating.folderId)}` : 'na raiz'}`}
           onCreate={create}
           onCancel={() => setCreating(null)}
@@ -632,12 +694,13 @@ export function VaultPage({
         <NameDialog
           title={asking.parentId ? 'Nova subpasta' : 'Nova pasta'}
           hint={asking.parentId ? `Dentro de ${folderPath(folders, asking.parentId)}.` : 'Na raiz do cofre.'}
-          withColour
-          onConfirm={(name, colour) => {
+          withColour={!aws}
+          awsParent={aws ? awsPathOf(asking.parentId) : undefined}
+          onConfirm={(name, colour, segment) => {
             const parentId = asking.parentId
             setAsking(null)
             void api
-              .createFolder(vault.id, name, parentId, colour)
+              .createFolder(vault.id, name, parentId, colour, segment)
               .then(refresh)
               .then(() => toast('Pasta criada', name))
               .catch((cause) => toastError(cause, 'Não criei a pasta'))
@@ -649,8 +712,15 @@ export function VaultPage({
       {folderAction?.what === 'rename' && (
         <RenameFolderDialog
           folder={folderAction.folder}
-          onDone={() => {
+          aws={aws ? { renameDefault: vault.aws?.rename_with_title ?? false } : undefined}
+          onDone={(renamed) => {
+            const before = folderAction.folder.id
             setFolderAction(null)
+            // An AWS path that moved is a new id, and so is every record under it.
+            if (renamed && renamed.id !== before) {
+              if (selection?.kind === 'folder' && selection.id === before) onSelect({ kind: 'folder', id: renamed.id })
+              else if (selection?.kind === 'record') onSelect(null)
+            }
             void refresh()
           }}
           onCancel={() => setFolderAction(null)}

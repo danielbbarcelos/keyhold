@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 
+import { AwsNameField, nameProblem, suggestName, titleProblem } from './awsName'
 import { ColourPicker } from './ColourPicker'
 
 /**
@@ -28,7 +29,9 @@ interface NameDialogProps {
   confirmLabel?: string
   /** Offer a colour alongside the name. Absent means this thing has no colour to pick. */
   withColour?: boolean
-  onConfirm: (name: string, colour: string) => void
+  /** An AWS folder: its parent's path, for "Na AWS: …". `undefined` anywhere else. */
+  awsParent?: string | null
+  onConfirm: (name: string, colour: string, segment?: string) => void
   onCancel: () => void
 }
 
@@ -38,11 +41,16 @@ export function NameDialog({
   initial = '',
   confirmLabel = 'Criar',
   withColour = false,
+  awsParent,
   onConfirm,
   onCancel,
 }: NameDialogProps) {
   const [name, setName] = useState(initial)
   const [colour, setColour] = useState('default')
+  const aws = awsParent !== undefined
+  const [typed, setTyped] = useState<string | null>(null)
+  const segment = typed ?? suggestName(name, 'pasta')
+  const wrong = aws ? titleProblem(name, 'O nome da pasta') ?? (name.trim() ? nameProblem(awsParent ?? null, segment) : null) : null
 
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
@@ -51,8 +59,8 @@ export function NameDialog({
           onSubmit={(event) => {
             event.preventDefault()
 
-            if (name.trim()) {
-              onConfirm(name.trim(), colour)
+            if (name.trim() && !wrong) {
+              onConfirm(name.trim(), colour, aws ? segment : undefined)
             }
           }}
         >
@@ -62,7 +70,18 @@ export function NameDialog({
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            <Input value={name} autoFocus onChange={(event) => setName(event.target.value)} />
+            <Input
+              value={name}
+              autoFocus
+              aria-invalid={aws ? titleProblem(name) !== null : undefined}
+              onChange={(event) => setName(event.target.value)}
+            />
+            {aws && titleProblem(name) && <p className="-mt-2 text-xs text-destructive">{titleProblem(name, 'O nome da pasta')}</p>}
+            {aws && name.trim() && !titleProblem(name) && (
+              <div className="-mt-2">
+                <AwsNameField parent={awsParent ?? null} from={name} value={typed} onChange={setTyped} fallback="pasta" />
+              </div>
+            )}
             {withColour && <ColourPicker value={colour} onChange={setColour} />}
           </div>
 
@@ -70,7 +89,7 @@ export function NameDialog({
             <Button type="button" variant="ghost" onClick={onCancel}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={!name.trim()}>
+            <Button type="submit" disabled={!name.trim() || wrong !== null}>
               {confirmLabel}
             </Button>
           </DialogFooter>

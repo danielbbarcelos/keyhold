@@ -8,6 +8,7 @@ import type { FolderNode, RecordPreview } from '../../api'
 import { colourOf } from '../colours'
 import { RecordTile } from '../icons'
 import { MenuButton, RowMenu, type MenuEntry } from '../menu'
+import { linkProps, TabMenu } from '../nav'
 import { folderPath } from './paths'
 
 /**
@@ -23,6 +24,7 @@ export type TreeFilter = 'all' | 'favourites' | 'attention'
 export type Selection = { kind: 'record' | 'folder'; id: string } | { kind: 'trash' } | null
 
 export function TreeCard({
+  vaultId,
   folders,
   records,
   attention,
@@ -50,6 +52,8 @@ export function TreeCard({
   showTrash?: boolean
   onMode: (mode: TreeMode) => void
   onFilter: (filter: TreeFilter) => void
+  /** For Ctrl click and the middle button, which open the row in a new tab. */
+  vaultId: string
   onRecord: (id: string) => void
   onFolder: (id: string) => void
   onTrash: () => void
@@ -123,7 +127,7 @@ export function TreeCard({
             event.dataTransfer.setData('text/keyhold-record', record.id)
             event.dataTransfer.effectAllowed = 'move'
           }}
-          onClick={() => onRecord(record.id)}
+          {...linkProps({ place: 'vault', vault: vaultId, record: record.id }, () => onRecord(record.id))}
           onKeyDown={(event) => event.key === 'Enter' && onRecord(record.id)}
           style={flat ? undefined : { paddingLeft: 8 + depth * 22 + (depth > 0 ? 0 : 0) }}
           className={cn(
@@ -191,7 +195,7 @@ export function TreeCard({
             </button>
             <button
               type="button"
-              onClick={() => onFolder(folder.id)}
+              {...linkProps({ place: 'vault', vault: vaultId, folder: folder.id }, () => onFolder(folder.id))}
               className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium"
             >
               <Icon className={cn('size-4 shrink-0', folder.colour && folder.colour !== 'default' ? colourOf(folder.colour).text : 'text-faint')} />
@@ -283,9 +287,10 @@ export function TreeCard({
       </div>
 
       {showTrash ? (
+      <TabMenu to={{ place: 'vault', vault: vaultId, trash: true }}>
       <button
         type="button"
-        onClick={onTrash}
+        {...linkProps({ place: 'vault', vault: vaultId, trash: true }, onTrash)}
         className={cn(
           'flex h-11 shrink-0 items-center gap-2.5 rounded-b-[14px] border-t px-4 text-sm text-muted-foreground hover:bg-hover hover:text-foreground',
           selection?.kind === 'trash' && 'bg-primary-soft text-foreground hover:bg-primary-soft',
@@ -295,6 +300,7 @@ export function TreeCard({
         Lixeira
         <span className="ml-auto text-xs text-faint">{trashCount}</span>
       </button>
+      </TabMenu>
       ) : (
         <p className="flex h-11 shrink-0 items-center gap-2 border-t px-4 text-xs text-faint">
           Na AWS não há lixeira: apagar é de vez.

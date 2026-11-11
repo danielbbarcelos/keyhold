@@ -184,6 +184,11 @@ impl SsoToken {
         &self.access_token
     }
 
+    /// Whether this token can be renewed without asking the person again.
+    pub fn renews(&self) -> bool {
+        self.refresh_token.is_some()
+    }
+
     pub fn refresh_token(&self) -> Option<&SecretString> {
         self.refresh_token.as_ref()
     }
@@ -302,10 +307,13 @@ impl SsoClient {
             client_secret_expires_at: u64,
         }
 
+        // The refresh grant is what makes a session last past the first access token (an hour):
+        // without it Identity Center hands out no refresh token, and every hour is a new login.
         let body = json!({
             "clientName": "keyhold",
             "clientType": "public",
             "scopes": [SCOPE],
+            "grantTypes": [DEVICE_GRANT, "refresh_token"],
         });
         let response = self.oidc("/client/register", &body).await?;
         let output: Output = parse(&response, "RegisterClient")?;
@@ -721,7 +729,12 @@ mod tests {
         assert_eq!(requests[0].uri, "/client/register");
         assert_eq!(
             requests[0].json(),
-            json!({ "clientName": "keyhold", "clientType": "public", "scopes": ["sso:account:access"] })
+            json!({
+                "clientName": "keyhold",
+                "clientType": "public",
+                "scopes": ["sso:account:access"],
+                "grantTypes": ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"]
+            })
         );
         assert_eq!(requests[1].uri, "/device_authorization");
         assert_eq!(

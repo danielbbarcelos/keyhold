@@ -19,6 +19,7 @@ import type { Payload } from '../../api'
 import { fieldsOf, TEMPLATES } from '../fields'
 import { IconPicker } from '../IconPicker'
 import { DiscardDialog } from '../DiscardDialog'
+import { AwsNameField, nameProblem, suggestName, titleProblem } from '../awsName'
 import { FieldEditor } from './FieldEditor'
 
 /**
@@ -39,16 +40,24 @@ export function NewRecordDialog({
   initial,
   where,
   cloning,
+  awsParent,
   onCreate,
   onCancel,
 }: {
   initial: Payload
   where: string
   cloning?: boolean
-  onCreate: (payload: Payload) => Promise<void>
+  /** In an AWS vault: the folder's path, for "Na AWS: …". `undefined` in a local vault. */
+  awsParent?: string | null
+  onCreate: (payload: Payload, name?: string) => Promise<void>
   onCancel: () => void
 }) {
   const [payload, setPayload] = useState<Payload>(initial)
+  const aws = awsParent !== undefined
+  const [typedName, setTypedName] = useState<string | null>(null)
+  const leaf = typedName ?? suggestName(payload.title)
+  const titleWrong = aws ? titleProblem(payload.title) : null
+  const nameWrong = aws && payload.title.trim() ? nameProblem(awsParent ?? null, leaf) : null
   const [template, setTemplate] = useState<string>(cloning ? '' : 'branco')
   const [busy, setBusy] = useState(false)
   const [asking, setAsking] = useState(false)
@@ -94,10 +103,17 @@ export function NewRecordDialog({
                 autoFocus
                 value={payload.title}
                 placeholder="Ex.: GitHub"
+                aria-invalid={titleWrong !== null}
                 onChange={(event) => setPayload({ ...payload, title: event.target.value })}
               />
             </label>
           </div>
+          {titleWrong && <p className="-mt-3 text-xs text-destructive">{titleWrong}</p>}
+          {aws && payload.title.trim() && !titleWrong && (
+            <div className="-mt-3">
+              <AwsNameField parent={awsParent ?? null} from={payload.title} value={typedName} onChange={setTypedName} />
+            </div>
+          )}
 
           {!cloning && (
             <div className="grid gap-1.5">
@@ -141,7 +157,7 @@ export function NewRecordDialog({
             Cancelar
           </Button>
           <Button
-            disabled={!payload.title.trim() || busy}
+            disabled={!payload.title.trim() || busy || titleWrong !== null || nameWrong !== null}
             onClick={() => {
               setBusy(true)
               void onCreate({
@@ -149,7 +165,7 @@ export function NewRecordDialog({
                 fields: payload.fields.filter(
                   (field) => field.value.trim() !== '' || Object.values(field.extra ?? {}).some((part) => part.trim() !== ''),
                 ),
-              }).finally(() => setBusy(false))
+              }, aws ? leaf : undefined).finally(() => setBusy(false))
             }}
           >
             Criar registro

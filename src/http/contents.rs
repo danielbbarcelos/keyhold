@@ -554,6 +554,9 @@ struct NewFolder {
     meta: FolderMeta,
     #[serde(default)]
     parent_id: Option<String>,
+    /// AWS vaults only: the path segment, when the person edited it. Made from the name otherwise.
+    #[serde(default)]
+    segment: Option<String>,
 }
 
 async fn create_folder(
@@ -562,7 +565,14 @@ async fn create_folder(
     Json(body): Json<NewFolder>,
 ) -> Answer {
     if aws::is_aws_vault(&state, &id) {
-        return aws::create_folder(&state, &id, &body.meta.name, body.parent_id.as_deref()).await;
+        return aws::create_folder(
+            &state,
+            &id,
+            &body.meta.name,
+            body.segment.as_deref(),
+            body.parent_id.as_deref(),
+        )
+        .await;
     }
 
     let store = state.store.lock().unwrap();
@@ -579,14 +589,25 @@ async fn create_folder(
     Ok(Json(json!({ "folder": made })))
 }
 
+#[derive(Deserialize)]
+struct RenameFolder {
+    #[serde(flatten)]
+    meta: FolderMeta,
+    /// AWS vaults only: a new path segment, which moves everything under the folder. Absent keeps
+    /// the path and changes only the name Keyhold shows.
+    #[serde(default)]
+    segment: Option<String>,
+}
+
 async fn update_folder(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(meta): Json<FolderMeta>,
+    Json(body): Json<RenameFolder>,
 ) -> Answer {
     if is_aws_id(&id) {
-        return Err(not_yet_for_aws_folders());
+        return aws::rename_folder(&state, &id, &body.meta.name, body.segment.as_deref()).await;
     }
+    let meta = body.meta;
 
     let store = state.store.lock().unwrap();
 
@@ -631,10 +652,10 @@ async fn delete_folder(State(state): State<Arc<AppState>>, Path(id): Path<String
     Ok(Json(json!({ "deleted": true })))
 }
 
-/// Parameter Store has no rename: renaming a folder means rewriting every parameter under it, and
-/// that is a bigger operation than a click should start without its own confirmation.
+/// Parameter Store has no rename: moving a folder means rewriting every parameter under it, and
+/// that is a bigger operation than a drag should start without its own confirmation.
 fn not_yet_for_aws_folders() -> super::Failure {
-    bad_request("renomear ou mover pastas de um cofre AWS ainda não é possível")
+    bad_request("mover pastas de um cofre AWS para outro lugar ainda não é possível. Renomear é")
 }
 
 // ── records ─────────────────────────────────────────────────────────────────────────────────────
@@ -820,6 +841,9 @@ struct MoveRecord {
     /// Absent means "wherever it already is". Present and different means a re-encryption.
     #[serde(default)]
     vault_id: Option<String>,
+    /// AWS vaults only: a new last segment for the parameter's name (a rename).
+    #[serde(default)]
+    name: Option<String>,
 }
 
 /// Move a record: to another folder, or to another vault entirely.
@@ -833,8 +857,14 @@ async fn move_record(
     Json(body): Json<MoveRecord>,
 ) -> Answer {
     if is_aws_id(&id) {
-        return aws::move_record(&state, &id, body.folder_id.as_deref(), body.vault_id.as_deref())
-            .await;
+        return aws::move_record(
+            &state,
+            &id,
+            body.folder_id.as_deref(),
+            body.vault_id.as_deref(),
+            body.name.as_deref(),
+        )
+        .await;
     }
 
     // A17 is not done: a local record does not go into an AWS vault by being dragged there.

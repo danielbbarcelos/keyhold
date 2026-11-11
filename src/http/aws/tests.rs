@@ -430,7 +430,7 @@ async fn start(seed: impl FnOnce(&mut Ssm), bucket: Option<String>, s3: Option<S
         VaultMeta {
             name: "Produção".into(),
             kind: "aws".into(),
-            aws: Some(AwsVault { connection_id: "CONN".into(), region: "sa-east-1".into(), bucket }),
+            aws: Some(AwsVault { connection_id: "CONN".into(), region: "sa-east-1".into(), bucket, rename_with_title: false }),
             ..Default::default()
         },
     )
@@ -733,8 +733,112 @@ async fn folders_are_markers_and_a_full_one_is_not_deleted() {
     assert_eq!(empty.status, 200, "{}", empty.body);
     assert!(h.parameter("/app/novo/.keep").is_none());
 
-    let rename = h.put(&format!("/folders/{}", h.folder("/app/dev")), json!({ "name": "x" })).await;
-    assert_eq!(rename.status, 400);
+    let moved = h.post(&format!("/folders/{}/move", h.folder("/app/dev")), json!({ "parent_id": null })).await;
+    assert_eq!(moved.status, 400, "moving an AWS folder elsewhere is still refused");
+}
+
+#[tokio::test]
+async fn a_folder_has_a_free_name_and_a_clean_path() {
+    let h = start(account, None, None).await;
+
+    let made = h
+        .post(&format!("/vaults/{}/folders", h.vault), json!({ "name": "Bancos (PJ)", "parent_id": h.folder("/app") }))
+        .await;
+    assert_eq!(made.status, 200, "{}", made.body);
+    assert_eq!(made.body["folder"]["id"], h.folder("/app/bancos-pj"));
+    assert_eq!(made.body["folder"]["name"], "Bancos (PJ)");
+    assert_eq!(h.parameter("/app/bancos-pj/.keep").unwrap().description.as_deref(), Some("Bancos (PJ)"));
+
+    let typed = h
+        .post(&format!("/vaults/{}/folders", h.vault), json!({ "name": "Cartões", "segment": "Cards", "parent_id": h.folder("/app") }))
+        .await;
+    assert_eq!(typed.status, 200, "{}", typed.body);
+    assert!(h.parameter("/app/Cards/.keep").is_some(), "a segment typed by hand is kept as typed");
+
+    let bad = h
+        .post(&format!("/vaults/{}/folders", h.vault), json!({ "name": "X", "segment": "com espaço", "parent_id": null }))
+        .await;
+    assert_eq!(bad.status, 400);
+
+    let tree = h.get(&format!("/vaults/{}/folders", h.vault)).await;
+    let names: Vec<&str> = tree.body["folders"].as_array().unwrap().iter().filter_map(|f| f["name"].as_str()).collect();
+    assert!(names.contains(&"Bancos (PJ)"));
+    assert!(names.contains(&"dev"), "the old marker sentence is never a name");
+}
+
+#[tokio::test]
+async fn renaming_a_folder_changes_its_name_and_moves_its_path_only_when_asked() {
+    let h = start(account, None, None).await;
+
+    let named = h.put(&format!("/folders/{}", h.folder("/app/prod")), json!({ "name": "Produção" })).await;
+    assert_eq!(named.status, 200, "{}", named.body);
+    assert_eq!(named.body["folder"]["id"], h.folder("/app/prod"));
+    assert_eq!(h.parameter("/app/prod/.keep").unwrap().description.as_deref(), Some("Produção"));
+    assert_eq!(h.parameter("/app/prod/.keep").unwrap().key_id, "alias/prod", "a new marker takes the folder's key");
+    assert!(h.parameter("/app/prod/db").is_some(), "a name alone moves nothing");
+
+    let moved = h
+        .put(&format!("/folders/{}", h.folder("/app/prod")), json!({ "name": "Produção", "segment": "producao" }))
+        .await;
+    assert_eq!(moved.status, 200, "{}", moved.body);
+    assert_eq!(moved.body["folder"]["id"], h.folder("/app/producao"));
+    assert!(h.parameter("/app/prod/db").is_none());
+    assert_eq!(h.parameter("/app/producao/db").unwrap().value, "hunter2");
+    assert_eq!(h.parameter("/app/producao/api").unwrap().key_id, "alias/prod");
+    assert_eq!(h.parameter("/app/producao/.keep").unwrap().description.as_deref(), Some("Produção"));
+    assert!(h.parameter("/app/prod/.keep").is_none());
+
+    let taken = h
+        .put(&format!("/folders/{}", h.folder("/app/producao")), json!({ "name": "Dev", "segment": "dev" }))
+        .await;
+    assert_eq!(taken.status, 409, "a path already there is refused");
+
+    let slash = h.put(&format!("/folders/{}", h.folder("/app/dev")), json!({ "name": "a/b" })).await;
+    assert_eq!(slash.status, 400);
+}
+
+#[tokio::test]
+async fn a_folder_with_a_string_parameter_keeps_its_path_and_says_why() {
+    let h = start(
+        |ssm| {
+            account(ssm);
+            ssm.seed("/app/dev/legado", "texto", Some("Legado"), "", &[]);
+            ssm.parameters.get_mut("/app/dev/legado").unwrap().kind = "String".into();
+        },
+        None,
+        None,
+    )
+    .await;
+
+    let renamed = h
+        .put(&format!("/folders/{}", h.folder("/app/dev")), json!({ "name": "Desenvolvimento", "segment": "desenvolvimento" }))
+        .await;
+    assert_eq!(renamed.status, 200, "{}", renamed.body);
+    assert_eq!(renamed.body["folder"]["id"], h.folder("/app/dev"));
+    assert!(renamed.body["warning"].as_str().unwrap().contains("legado"));
+    assert!(h.parameter("/app/dev/legado").is_some());
+    assert_eq!(h.parameter("/app/dev/.keep").unwrap().description.as_deref(), Some("Desenvolvimento"));
+}
+
+#[tokio::test]
+async fn a_record_is_renamed_in_aws_only_with_a_new_name() {
+    let h = start(account, None, None).await;
+    let id = h.id("/app/prod/db");
+
+    let opened = h.get(&format!("/records/{id}")).await;
+    assert_eq!(opened.body["record"]["parameter"], "/app/prod/db");
+
+    let renamed = h
+        .post(&format!("/records/{id}/move"), json!({ "folder_id": h.folder("/app/prod"), "name": "banco-principal" }))
+        .await;
+    assert_eq!(renamed.status, 200, "{}", renamed.body);
+    assert_eq!(renamed.body["id"], h.id("/app/prod/banco-principal"));
+    assert!(h.parameter("/app/prod/db").is_none());
+
+    let bad = h
+        .post(&format!("/records/{}/move", h.id("/app/prod/banco-principal")), json!({ "folder_id": h.folder("/app/prod"), "name": "com espaço" }))
+        .await;
+    assert_eq!(bad.status, 400);
 }
 
 #[tokio::test]
@@ -889,6 +993,49 @@ async fn attachments_go_to_the_bucket_under_the_parameter_name_with_its_key() {
     for request in &requests {
         assert_eq!(request.header("x-amz-expected-bucket-owner"), Some("123456789012"), "M5");
     }
+}
+
+#[tokio::test]
+async fn a_session_about_to_end_is_renewed_with_its_refresh_token() {
+    let sso = FakeAws::start(vec![
+        Canned::json(200, json!({
+            "clientId": "client", "clientSecret": "client-secret", "clientSecretExpiresAt": 4_000_000_000u64
+        })),
+        Canned::json(200, json!({
+            "deviceCode": "device", "userCode": "ABCD-EFGH",
+            "verificationUri": "https://device.sso.sa-east-1.amazonaws.com/",
+            "verificationUriComplete": "https://device.sso.sa-east-1.amazonaws.com/?user_code=ABCD-EFGH",
+            "expiresIn": 600, "interval": 5
+        })),
+        Canned::json(200, json!({ "accessToken": "access", "expiresIn": 300, "refreshToken": "refresh" })),
+        Canned::json(200, json!({ "accessToken": "access-2", "expiresIn": 3600 })),
+    ])
+    .await;
+    let h = start(account, None, None).await;
+    h.state.aws.set_endpoints(Endpoints {
+        oidc: Some(sso.base.clone()),
+        portal: Some(sso.base.clone()),
+        ..Endpoints::default()
+    });
+
+    let started = h
+        .post("/aws/logins", json!({ "start_url": "https://outra.awsapps.com/start", "region": "us-east-1", "label": "Outra" }))
+        .await;
+    let id = started.body["login"]["id"].as_str().unwrap().to_string();
+    let done = h.post(&format!("/aws/logins/{id}/poll"), json!({})).await;
+    assert_eq!(done.body["state"], "done", "{}", done.body);
+
+    // Five minutes left: reading the overview trades the refresh token for a new hour.
+    let overview = h.get("/aws").await;
+    let login = overview.body["logins"].as_array().unwrap().iter().find(|l| l["id"] == id.as_str()).cloned().unwrap();
+    assert_eq!(login["renews"], true);
+    assert!(login["expires_at"].as_u64().unwrap() > crate::aws::now_unix() + 3000, "{login}");
+
+    let requests = sso.requests();
+    assert_eq!(requests[0].json()["grantTypes"][1], "refresh_token");
+    let last = requests.last().unwrap().json();
+    assert_eq!(last["grantType"], "refresh_token");
+    assert_eq!(last["refreshToken"], "refresh");
 }
 
 #[tokio::test]
@@ -1717,7 +1864,7 @@ fn alias_vault(h: &Harness) -> String {
                 VaultMeta {
                     name: "Produção de novo".into(),
                     kind: "aws".into(),
-                    aws: Some(AwsVault { connection_id: "CONN".into(), region: "sa-east-1".into(), bucket: None }),
+                    aws: Some(AwsVault { connection_id: "CONN".into(), region: "sa-east-1".into(), bucket: None, rename_with_title: false }),
                     ..Default::default()
                 },
             )

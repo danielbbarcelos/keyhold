@@ -46,6 +46,17 @@ pub const KEEP: &str = ".keep";
 /// What the marker holds. Parameter Store refuses an empty value.
 pub const KEEP_VALUE: &str = "keyhold";
 
+/// The description markers were written with before a folder's name lived there. Never a name.
+pub const KEEP_LEGACY_DESCRIPTION: &str = "Pasta criada pelo Keyhold";
+
+/// The name a folder's marker carries in its description, or `None` when it carries none (a
+/// marker written before names, or one somebody described by hand as empty).
+pub fn folder_label(description: Option<&str>) -> Option<String> {
+    let label = description?.lines().next()?.trim();
+
+    (!label.is_empty() && label != KEEP_LEGACY_DESCRIPTION).then(|| label.to_string())
+}
+
 pub const TAG_FORMAT: &str = "keyhold:formato";
 pub const TAG_FORMAT_JSON: &str = "json";
 pub const TAG_COMPROMISED: &str = "keyhold:comprometido";
@@ -536,13 +547,23 @@ pub fn folder_paths<'a>(names: impl IntoIterator<Item = &'a str>) -> BTreeSet<St
 
 /// The folder tree a vault shows, in the same shape local folders have.
 pub fn folder_nodes<'a>(vault_id: &str, names: impl IntoIterator<Item = &'a str>) -> Vec<FolderNode> {
+    folder_nodes_labelled(vault_id, names, &std::collections::HashMap::new())
+}
+
+/// The tree, with each folder named by its marker's label (path → name) where it has one, and by
+/// its path segment otherwise: "Bancos (PJ)" for `/app/bancos-pj`.
+pub fn folder_nodes_labelled<'a>(
+    vault_id: &str,
+    names: impl IntoIterator<Item = &'a str>,
+    labels: &std::collections::HashMap<String, String>,
+) -> Vec<FolderNode> {
     folder_paths(names)
         .into_iter()
         .map(|path| FolderNode {
             id: folder_id(vault_id, &path),
             vault_id: vault_id.to_string(),
             parent_id: parent_path(&path).map(|parent| folder_id(vault_id, &parent)),
-            name: leaf(&path).to_string(),
+            name: labels.get(&path).cloned().unwrap_or_else(|| leaf(&path).to_string()),
             colour: None,
             depth: path.matches('/').count().saturating_sub(1),
         })
@@ -914,5 +935,18 @@ mod tests {
         assert_eq!(rotation_date("2026-12-01").unwrap(), "2026-12-01");
         assert_eq!(rotation_date("2026-12-01T00:00:00Z").unwrap(), "2026-12-01");
         assert!(rotation_date("amanhã").is_err());
+    }
+
+    #[test]
+    fn a_folder_marker_names_its_folder_unless_it_holds_the_old_sentence() {
+        assert_eq!(folder_label(Some("Bancos (PJ)")), Some("Bancos (PJ)".into()));
+        assert_eq!(folder_label(Some(KEEP_LEGACY_DESCRIPTION)), None);
+        assert_eq!(folder_label(Some("  ")), None);
+        assert_eq!(folder_label(None), None);
+
+        let labels = std::collections::HashMap::from([("/app/bancos-pj".to_string(), "Bancos (PJ)".to_string())]);
+        let nodes = folder_nodes_labelled("v", ["/app/bancos-pj/inter"], &labels);
+        let names: Vec<&str> = nodes.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, ["app", "Bancos (PJ)"]);
     }
 }

@@ -11,6 +11,8 @@ import {
 
 import type { FolderNode, Payload } from '../../api'
 import { IconPicker } from '../IconPicker'
+import { Checkbox } from '@/components/ui/checkbox'
+import { awsPathOf, AwsNameField, join, leafOf, suggestName, titleProblem } from '../awsName'
 import { FieldEditor } from './FieldEditor'
 
 /**
@@ -22,6 +24,18 @@ export interface EditDraft {
   payload: Payload
   folderId: string | null
   rotation: string | null
+  /** AWS: "Mudar o nome na AWS também", ticked by the vault's default. */
+  rename?: boolean
+  /** AWS: the name typed in "Editar nome", or `null` while it follows the title. */
+  leaf?: string | null
+}
+
+/** The AWS rename a draft asks for, or `null`: only when the title changed or a name was typed. */
+export function renameOf(draft: EditDraft, originalTitle: string): string | null {
+  const asked = draft.leaf != null || draft.payload.title !== originalTitle
+  if (!draft.rename || !asked) return null
+
+  return draft.leaf ?? suggestName(draft.payload.title)
 }
 
 const ROOT = '__root__'
@@ -32,10 +46,15 @@ export function RecordEdit({
   folders,
   onChange,
   aws = false,
+  parameter,
+  originalTitle = '',
 }: {
   draft: EditDraft
   kind?: string
   aws?: boolean
+  /** AWS: the parameter's name now. */
+  parameter?: string
+  originalTitle?: string
   folders: FolderNode[]
   onChange: (draft: EditDraft) => void
 }) {
@@ -55,6 +74,7 @@ export function RecordEdit({
               autoFocus
               value={draft.payload.title}
               placeholder="Ex.: GitHub"
+              aria-invalid={aws && titleProblem(draft.payload.title) !== null}
               onChange={(event) => setPayload({ title: event.target.value })}
             />
           </label>
@@ -87,6 +107,7 @@ export function RecordEdit({
             />
           </div>
         </div>
+        {aws && parameter && <AwsName draft={draft} parameter={parameter} originalTitle={originalTitle} onChange={onChange} />}
       </Card>
 
       <Card title="Campos" hint="Arraste para reordenar">
@@ -116,5 +137,75 @@ function Card({ title, hint, children }: { title: string; hint?: string; childre
       </div>
       {children}
     </section>
+  )
+}
+
+/**
+ * The parameter's name under the title. It stays as it is unless asked: a changed title offers
+ * "Mudar o nome na AWS também" (ticked or not by the vault's default), and "Editar nome" asks
+ * directly. Moving it is a new parameter, so the old one goes with its history.
+ */
+function AwsName({
+  draft,
+  parameter,
+  originalTitle,
+  onChange,
+}: {
+  draft: EditDraft
+  parameter: string
+  originalTitle: string
+  onChange: (draft: EditDraft) => void
+}) {
+  const titleWrong = titleProblem(draft.payload.title)
+  const asked = draft.leaf != null || draft.payload.title !== originalTitle
+  const parent = awsPathOf(draft.folderId)
+  const now = join(parent, leafOf(parameter))
+
+  return (
+    <div className="grid gap-2 border-t px-5 py-3.5">
+      {titleWrong && <p className="text-xs text-destructive">{titleWrong}</p>}
+      {!asked ? (
+        <span className="flex flex-wrap items-center gap-x-2 text-xs text-faint">
+          <span>
+            Na AWS: <code className="font-mono text-muted-foreground">{now}</code>
+          </span>
+          <button
+            type="button"
+            className="text-primary hover:underline"
+            onClick={() => onChange({ ...draft, rename: true, leaf: leafOf(parameter) })}
+          >
+            Editar nome
+          </button>
+        </span>
+      ) : (
+        <>
+          <label className="flex items-center gap-2 text-[13px]">
+            <Checkbox
+              checked={draft.rename ?? false}
+              onCheckedChange={(on) => onChange({ ...draft, rename: on === true })}
+            />
+            Mudar o nome na AWS também
+          </label>
+          {draft.rename ? (
+            <>
+              <AwsNameField
+                parent={parent}
+                from={draft.payload.title}
+                value={draft.leaf ?? null}
+                onChange={(leaf) => onChange({ ...draft, leaf })}
+              />
+              <span className="text-xs text-amber">
+                O Keyhold grava um parâmetro novo e apaga {parameter}, com o histórico dele. Quem lê o nome
+                antigo para de achar.
+              </span>
+            </>
+          ) : (
+            <span className="text-xs text-faint">
+              Na AWS continua <code className="font-mono text-muted-foreground">{now}</code>. Só o título muda.
+            </span>
+          )}
+        </>
+      )}
+    </div>
   )
 }

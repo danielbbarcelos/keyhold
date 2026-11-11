@@ -103,6 +103,10 @@ pub struct AwsVault {
     pub region: String,
     #[serde(default)]
     pub bucket: Option<String>,
+    /// Whether "Mudar o nome na AWS também" starts ticked when a title or folder name changes.
+    /// Off by default: a name an application reads is not something a retitle should move.
+    #[serde(default)]
+    pub rename_with_title: bool,
 }
 
 pub const KIND_LOCAL: &str = "local";

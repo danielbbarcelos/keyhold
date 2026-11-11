@@ -21,6 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils'
 
 import { api, type AwsLogin, type RecordIcon, type Status, type VaultSummary } from '../api'
+import { linkProps, TabMenu, type Destination } from './nav'
 import { AWS_CHANGED, useAwsRenew } from './AwsAccounts'
 import { AwsMark } from './AwsMark'
 import { colourOf } from './colours'
@@ -66,11 +67,11 @@ export function Rail({
       </span>
 
       {RAIL.map(({ id, label, icon: Icon }) => (
+        <TabMenu key={id} to={{ place: id }}>
         <button
-          key={id}
           type="button"
           aria-current={place === id}
-          onClick={() => onGo(id)}
+          {...linkProps({ place: id }, () => onGo(id))}
           className={cn(
             'relative flex w-16 flex-col items-center gap-1 rounded-[10px] pt-2.5 pb-2 text-[11px] font-medium text-faint hover:bg-hover hover:text-foreground',
             place === id &&
@@ -80,6 +81,7 @@ export function Rail({
           <Icon className="size-[18px]" />
           {label}
         </button>
+        </TabMenu>
       ))}
 
       <span className="flex-1" />
@@ -154,6 +156,10 @@ function AwsSession({ onAccounts }: { onAccounts: () => void }) {
 
   const left = timed[0].expires_at - now
   const urgent = left <= 600
+  // A session that renews itself is only a countdown once renewing stopped working (the last ten
+  // minutes, which Keyhold would otherwise have spent renewing it).
+  const quiet = !urgent && timed.every((login) => login.renews)
+  const shown = quiet ? 'ativa' : remaining(left)
 
   return (
     <>
@@ -162,7 +168,7 @@ function AwsSession({ onAccounts }: { onAccounts: () => void }) {
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={`Sessão AWS: ${remaining(left)}`}
+          aria-label={`Sessão AWS: ${shown}`}
           className={cn(
             'mb-1 flex w-16 flex-col items-center gap-1 rounded-[10px] py-2 text-[11px] text-muted-foreground hover:bg-hover',
             urgent && 'text-rose',
@@ -171,7 +177,7 @@ function AwsSession({ onAccounts }: { onAccounts: () => void }) {
           <AwsMark
             className={cn('size-[26px]', urgent && 'ring-2 ring-rose ring-offset-2 ring-offset-sidebar')}
           />
-          <span className="tabular-nums">{remaining(left)}</span>
+          <span className="tabular-nums">{shown}</span>
         </button>
       </PopoverTrigger>
 
@@ -194,7 +200,11 @@ function AwsSession({ onAccounts }: { onAccounts: () => void }) {
                       gone ? 'text-rose' : login.expires_at - now <= 600 ? 'text-rose' : 'text-faint',
                     )}
                   >
-                    {gone ? `expirou às ${clock(login.expires_at)}` : `expira às ${clock(login.expires_at)}`}
+                    {gone
+                      ? `expirou às ${clock(login.expires_at)}`
+                      : login.renews && login.expires_at - now > 600
+                        ? 'renova sozinha enquanto o Keyhold estiver aberto'
+                        : `expira às ${clock(login.expires_at)}`}
                   </span>
                 </span>
                 <Button
@@ -335,17 +345,34 @@ export function TopBar({
   )
 }
 
-export function Crumb({ children, last, onClick }: { children: React.ReactNode; last?: boolean; onClick?: () => void }) {
+export function Crumb({
+  children,
+  last,
+  onClick,
+  to,
+}: {
+  children: React.ReactNode
+  last?: boolean
+  onClick?: () => void
+  /** Where the crumb leads, for "Abrir em nova guia" and Ctrl click. */
+  to?: Destination
+}) {
+  const shown = last ? (
+    <b className="truncate text-[15px] font-semibold text-foreground">{children}</b>
+  ) : (
+    <button
+      type="button"
+      {...(to ? linkProps(to, () => onClick?.()) : { onClick })}
+      className="truncate rounded px-0.5 hover:text-foreground"
+    >
+      {children}
+    </button>
+  )
+
   return (
     <>
       <ChevronRight className="size-3.5 shrink-0" />
-      {last ? (
-        <b className="truncate text-[15px] font-semibold text-foreground">{children}</b>
-      ) : (
-        <button type="button" onClick={onClick} className="truncate rounded px-0.5 hover:text-foreground">
-          {children}
-        </button>
-      )}
+      {to ? <TabMenu to={to}>{shown}</TabMenu> : shown}
     </>
   )
 }
@@ -418,6 +445,7 @@ export function VaultSwitcher({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
+      <TabMenu to={{ place: 'vault', vault: current.id }}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -429,6 +457,7 @@ export function VaultSwitcher({
           <ChevronDown className="size-3.5 text-faint" />
         </button>
       </PopoverTrigger>
+      </TabMenu>
       <PopoverContent className="w-[280px] p-1.5">
         <Input
           autoFocus
@@ -439,14 +468,14 @@ export function VaultSwitcher({
         />
         <div className="max-h-72 overflow-y-auto">
           {shown.map((vault) => (
+            <TabMenu key={vault.id} to={{ place: 'vault', vault: vault.id }}>
             <button
-              key={vault.id}
               type="button"
-              onClick={() => {
+              {...linkProps({ place: 'vault', vault: vault.id }, () => {
                 setOpen(false)
                 setQuery('')
                 onPick(vault.id)
-              }}
+              })}
               className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-left text-sm hover:bg-hover"
             >
               <VaultInitial vault={vault} />
@@ -454,6 +483,7 @@ export function VaultSwitcher({
               {vault.kind === 'aws' && <AwsMark className="size-4" title="Cofre AWS" />}
               {vault.id === current.id && <Check className="size-4 text-primary" />}
             </button>
+            </TabMenu>
           ))}
           {shown.length === 0 && <p className="px-2 py-3 text-xs text-faint">Nenhum cofre com esse nome.</p>}
         </div>

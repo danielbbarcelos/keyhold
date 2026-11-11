@@ -42,3 +42,15 @@ export function hasToken(): boolean {
 export function authHeaders(): Record<string, string> {
   return token ? { 'X-Keyhold-Token': token } : {}
 }
+
+/**
+ * This page's own address with the token and `extra` in the fragment, for a second tab of the
+ * same session. The fragment never leaves the browser, and the token is already in this tab's
+ * address bar, so a new tab learns nothing this one did not already show.
+ */
+export function tabAddress(extra: URLSearchParams): string {
+  const fragment = new URLSearchParams({ token })
+  extra.forEach((value, key) => fragment.set(key, value))
+
+  return `${window.location.origin}${window.location.pathname}#${fragment.toString()}`
+}

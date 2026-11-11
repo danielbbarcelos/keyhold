@@ -110,6 +110,11 @@ export function RecordView({
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             <Pill icon={Folder}>{folderPath(folders, record.folder_id) || 'Raiz do cofre'}</Pill>
             <Pill icon={Clock}>alterado {when(record.updated_at)}</Pill>
+            {record.parameter && (
+              <span title="O nome do parâmetro na AWS" className="inline-flex max-w-full items-center truncate rounded-full border px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
+                {record.parameter}
+              </span>
+            )}
             {record.compromised_at && (
               <Pill icon={ShieldAlert} tone="rose">
                 comprometido desde {record.compromised_at.slice(0, 10).split('-').reverse().join('/')}

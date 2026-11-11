@@ -923,7 +923,24 @@ async fn write_aws(
             }
         };
 
-        (made["record"]["id"].as_str().unwrap_or_default().to_string(), (Some(name), None))
+        // Folders made on the way keep the names they had: the path carries a segment, the
+        // marker carries "Bancos (PJ)". Only when the segment changed it, and never fatal.
+        let mut folder_warning = None;
+        let mut path = base.clone();
+        let full = run.item.rel.iter().fold(base.clone(), |at, folder| Some(mapping::join(at.as_deref(), &segment(folder))));
+        // A name typed by hand may live elsewhere: then these folders were never made.
+        let under = full.as_deref().is_some_and(|f| mapping::absolute(&name).starts_with(&format!("{}/", f.trim_end_matches('/'))));
+        for folder in run.item.rel.iter().filter(|_| under) {
+            let piece = segment(folder);
+            path = Some(mapping::join(path.as_deref(), &piece));
+            if piece != *folder {
+                if let Err(failure) = aws::ensure_folder_label(state, &run.dest_vault, path.as_deref().unwrap_or_default(), folder).await {
+                    folder_warning = Some(format!("a pasta “{folder}” ficou com o nome {piece}: {}", failure.1));
+                }
+            }
+        }
+
+        (made["record"]["id"].as_str().unwrap_or_default().to_string(), (Some(name), folder_warning))
     };
     let (name, warning) = name;
 

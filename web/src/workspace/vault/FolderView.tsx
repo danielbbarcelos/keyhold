@@ -8,11 +8,13 @@ import type { FolderNode, RecordPreview } from '../../api'
 import { colourOf } from '../colours'
 import { RecordTile } from '../icons'
 import { MenuButton, type MenuEntry } from '../menu'
+import { linkProps, TabMenu } from '../nav'
 import { Pill } from '../record/RecordView'
 import { folderPath, when } from './paths'
 
 /** A folder opened from the tree: what is in it, and what can be done to it. */
 export function FolderView({
+  vaultId,
   folder,
   folders,
   records,
@@ -22,6 +24,7 @@ export function FolderView({
   onFolder,
   onSubfolder,
 }: {
+  vaultId: string
   folder: FolderNode
   folders: FolderNode[]
   records: RecordPreview[]
@@ -96,7 +99,12 @@ export function FolderView({
             {inside.map((record) => (
               <tr key={record.id} className="border-b last:border-b-0 hover:bg-hover">
                 <td className="px-5 py-2.5">
-                  <button type="button" onClick={() => onRecord(record.id)} className="flex items-center gap-3 text-left">
+                  <TabMenu to={{ place: 'vault', vault: vaultId, record: record.id }}>
+                  <button
+                    type="button"
+                    {...linkProps({ place: 'vault', vault: vaultId, record: record.id }, () => onRecord(record.id))}
+                    className="flex items-center gap-3 text-left"
+                  >
                     <RecordTile icon={record.icon} kind={record.kind} />
                     <span className="min-w-0">
                       <b className="flex items-center gap-1.5 font-medium">
@@ -106,6 +114,7 @@ export function FolderView({
                       {record.subtitle && <span className="block text-xs text-faint">{record.subtitle}</span>}
                     </span>
                   </button>
+                  </TabMenu>
                 </td>
                 <td className="px-3 py-2.5 text-muted-foreground">{when(record.updated_at)}</td>
                 <td className="px-5 py-2.5 text-right">
@@ -120,10 +129,10 @@ export function FolderView({
       ) : (
         <div className="p-2">
           {children.map((child) => (
+            <TabMenu key={child.id} to={{ place: 'vault', vault: vaultId, folder: child.id }}>
             <button
-              key={child.id}
               type="button"
-              onClick={() => onFolder(child.id)}
+              {...linkProps({ place: 'vault', vault: vaultId, folder: child.id }, () => onFolder(child.id))}
               className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-hover"
             >
               <Folder className={cn('size-4', colourOf(child.colour).text)} />
@@ -132,6 +141,7 @@ export function FolderView({
                 {records.filter((record) => record.folder_id === child.id).length} registros
               </span>
             </button>
+            </TabMenu>
           ))}
         </div>
       )}
