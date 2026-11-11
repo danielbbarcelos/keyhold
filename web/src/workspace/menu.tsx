@@ -1,4 +1,4 @@
-import { Check, MoreHorizontal } from 'lucide-react'
+import { Check, ChevronDown, MoreHorizontal } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -143,19 +143,29 @@ export function MenuButton({
   size = 'icon-xs',
   variant = 'ghost',
   align = 'start',
+  text,
 }: {
   entries: MenuEntry[]
   label: string
   size?: 'icon-xs' | 'icon' | 'icon-lg'
   variant?: 'ghost' | 'outline'
   align?: 'start' | 'end'
+  /** A word on the button ("Ações") instead of the `⋯`. */
+  text?: string
 }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant={variant} size={size} aria-label={label}>
-          <MoreHorizontal />
-        </Button>
+        {text ? (
+          <Button variant={variant} size="xs" aria-label={label}>
+            {text}
+            <ChevronDown />
+          </Button>
+        ) : (
+          <Button variant={variant} size={size} aria-label={label}>
+            <MoreHorizontal />
+          </Button>
+        )}
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align={align} className="w-60">

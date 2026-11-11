@@ -110,6 +110,8 @@ export function VaultPage({
   const [copying, setCopying] = useState<CopySource | null>(null)
   const [saving, setSaving] = useState(false)
   const [askingJson, setAskingJson] = useState(false)
+  // "Excluir…" on the picked items: every record they reach, and the folders, deepest first.
+  const [bulkDeleting, setBulkDeleting] = useState<{ records: string[]; folders: string[] } | null>(null)
   const [movingAws, setMovingAws] = useState<{ ids: string[]; folderId: string | null } | null>(null)
   const [unavailable, setUnavailable] = useState<{ message: string; code?: string } | null>(null)
   // False until the first read of this vault answers: until then the tree and the panel are skeletons
@@ -518,6 +520,133 @@ export function VaultPage({
     if (failed) toast(`${failed} ${failed === 1 ? 'item não foi movido' : 'itens não foram movidos'}`, 'Tente de novo, um de cada vez, para ver o motivo.', 'error')
   }
 
+  /** Every folder under `folderId`, at any depth. */
+  const descendants = (folderId: string): string[] =>
+    folders.filter((folder) => folder.parent_id === folderId).flatMap((child) => [child.id, ...descendants(child.id)])
+
+  /**
+   * The "Ações" menu of the tree's selection. An item inside a picked folder goes with that folder,
+   * so it is never moved twice or deleted on its own.
+   */
+  const pickedEntries = (items: string[], clear: () => void): MenuEntry[] => {
+    const pickedFolders = items.filter((item) => item.startsWith('f:')).map((item) => item.slice(2))
+    const reached = new Set(pickedFolders.flatMap((id) => [id, ...descendants(id)]))
+    const top = items.filter((item) => {
+      const folderOf = item.startsWith('r:')
+        ? records.find((record) => record.id === item.slice(2))?.folder_id ?? null
+        : folders.find((folder) => folder.id === item.slice(2))?.parent_id ?? null
+      return !(folderOf && reached.has(folderOf))
+    })
+    const pickedRecords = items.filter((item) => item.startsWith('r:')).map((item) => item.slice(2))
+    const allRecords = [
+      ...new Set([
+        ...pickedRecords,
+        ...records.filter((record) => record.folder_id && reached.has(record.folder_id)).map((record) => record.id),
+      ]),
+    ]
+    const onlyRecords = pickedFolders.length === 0
+    const run = (go: () => void) => () => {
+      go()
+      clear()
+    }
+
+    const entries: MenuEntry[] = [
+      {
+        kind: 'sub',
+        label: aws && !onlyRecords ? 'Mover para (só os registros)' : 'Mover para',
+        icon: FolderInput,
+        items: [
+          { label: 'Raiz do cofre', onSelect: run(() => void moveMany(top, null)) },
+          ...folders
+            .filter((folder) => !reached.has(folder.id))
+            .map((folder) => ({
+              label: `${'  '.repeat(folder.depth)}${folder.name}`,
+              onSelect: run(() => void moveMany(top, folder.id)),
+            })),
+        ],
+      },
+    ]
+
+    if (onlyRecords) {
+      entries.push({
+        kind: 'item',
+        label: 'Copiar para…',
+        icon: Copy,
+        onSelect: run(() =>
+          setCopying({
+            vaultId: vault.id,
+            recordIds: pickedRecords,
+            what: pickedRecords.length === 1 ? 'o registro' : `${pickedRecords.length} registros`,
+          }),
+        ),
+      })
+      entries.push({
+        kind: 'item',
+        label: 'Favoritar',
+        icon: Star,
+        onSelect: run(
+          () =>
+            void Promise.all(pickedRecords.map((id) => api.favouriteRecord(id, true)))
+              .then(refresh)
+              .then(() => toast('Favoritados', `${pickedRecords.length} ${pickedRecords.length === 1 ? 'registro' : 'registros'}`))
+              .catch((cause) => toastError(cause)),
+        ),
+      })
+    } else if (pickedFolders.length === 1 && items.length === 1) {
+      const folder = folders.find((one) => one.id === pickedFolders[0])
+      entries.push({
+        kind: 'item',
+        label: 'Copiar para…',
+        icon: Copy,
+        onSelect: run(() => setCopying({ vaultId: vault.id, folderId: pickedFolders[0], what: `a pasta ${folder?.name ?? ''}` })),
+      })
+    }
+
+    entries.push({ kind: 'separator' })
+    entries.push({
+      kind: 'item',
+      label: 'Excluir…',
+      icon: Trash2,
+      destructive: true,
+      onSelect: run(() => {
+        // Deepest first, so a folder is always empty of folders by the time its turn comes.
+        const depth = (id: string) => folders.find((folder) => folder.id === id)?.depth ?? 0
+        setBulkDeleting({ records: allRecords, folders: [...reached].sort((a, b) => depth(b) - depth(a)) })
+      }),
+    })
+
+    return entries
+  }
+
+  async function deleteMany(target: { records: string[]; folders: string[] }) {
+    let failed = 0
+    for (const id of target.records) {
+      try {
+        await api.archiveRecord(id, true)
+      } catch {
+        failed++
+      }
+    }
+    for (const id of target.folders) {
+      try {
+        await api.deleteFolder(id)
+      } catch {
+        failed++
+      }
+    }
+
+    if (open && target.records.includes(open.id)) onSelect(null)
+    if (selection?.kind === 'folder' && target.folders.includes(selection.id)) onSelect(null)
+    await refresh()
+
+    const parts = [
+      target.records.length && `${target.records.length} ${target.records.length === 1 ? 'registro' : 'registros'}`,
+      target.folders.length && `${target.folders.length} ${target.folders.length === 1 ? 'pasta' : 'pastas'}`,
+    ].filter(Boolean)
+    toast(aws ? 'Apagados da AWS' : 'Excluídos', parts.join(' e '))
+    if (failed) toast(`${failed} ${failed === 1 ? 'item não foi excluído' : 'itens não foram excluídos'}`, 'Tente de novo, um de cada vez, para ver o motivo.', 'error')
+  }
+
   async function sendToTrash(id: string) {
     try {
       await api.archiveRecord(id, true)
@@ -851,6 +980,7 @@ export function VaultPage({
           onTrash={() => select({ kind: 'trash' })}
           onDrop={(items, folderId) => void moveMany(items, folderId)}
           canMoveFolders={!aws}
+          pickedEntries={pickedEntries}
           folderEntries={folderEntries}
           recordEntries={recordEntries}
           rootEntries={[
@@ -962,6 +1092,44 @@ export function VaultPage({
                 }}
               >
                 {aws ? 'Apagar de vez' : 'Mandar para a lixeira'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {bulkDeleting && (
+        <AlertDialog open onOpenChange={(isOpen) => !isOpen && setBulkDeleting(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {(() => {
+                  const parts = [
+                    bulkDeleting.records.length &&
+                      `${bulkDeleting.records.length} ${bulkDeleting.records.length === 1 ? 'registro' : 'registros'}`,
+                    bulkDeleting.folders.length &&
+                      `${bulkDeleting.folders.length} ${bulkDeleting.folders.length === 1 ? 'pasta' : 'pastas'}`,
+                  ].filter(Boolean)
+                  return `Excluir ${parts.join(' e ')}?`
+                })()}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {aws
+                  ? 'Um cofre na AWS não tem lixeira: os parâmetros são apagados da conta agora, para todo mundo que tem acesso a eles. As pastas selecionadas vão junto com tudo o que está dentro delas.'
+                  : 'Os registros vão para a lixeira, de onde dá para restaurar enquanto o prazo não vencer. As pastas selecionadas são excluídas, com as subpastas.'}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-white hover:bg-destructive/90"
+                onClick={() => {
+                  const target = bulkDeleting
+                  setBulkDeleting(null)
+                  void deleteMany(target)
+                }}
+              >
+                {aws ? 'Apagar de vez' : 'Excluir'}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

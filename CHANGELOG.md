@@ -29,6 +29,8 @@
   and dragging them drops all of them on a folder or on the root. Folders can be dragged now too
   (in a local vault; in AWS a folder is part of every name under it, and "Renomear" moves it).
   In the tree, Ctrl click picks instead of opening a new tab; the middle button still does that.
+  The selection has an "Ações" menu: move to the root or a folder, copy, favourite, and delete
+  (a picked folder goes with everything inside it, shown a shade lighter while picked).
 - **Nova pasta** in the top bar (at the root, or inside the folder being shown), and a right-click on
   the tree's empty space to make a folder or a record at the root. A folder at the root could not
   be made at all before.

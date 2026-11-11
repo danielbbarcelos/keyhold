@@ -44,6 +44,7 @@ export function TreeCard({
   onTrash,
   onDrop,
   canMoveFolders = true,
+  pickedEntries,
   folderEntries,
   recordEntries,
   rootEntries,
@@ -71,6 +72,8 @@ export function TreeCard({
   onDrop: (items: string[], folderId: string | null) => void
   /** Folders can be dragged too (not in AWS, where a folder is part of every name under it). */
   canMoveFolders?: boolean
+  /** What the "Ações" menu offers for the picked items; `clear` empties the selection afterwards. */
+  pickedEntries: (items: string[], clear: () => void) => MenuEntry[]
   /** Right-click on the empty space of the tree: what can be made at the root. */
   rootEntries: MenuEntry[]
   folderEntries: (folder: FolderNode) => MenuEntry[]
@@ -83,6 +86,22 @@ export function TreeCard({
   // Items picked with Ctrl/⌘ or Shift click, to drag together: `r:<id>` and `f:<id>`.
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [anchor, setAnchor] = useState<string | null>(null)
+
+  // Everything inside a picked folder goes with it: its subfolders and records are shown as
+  // picked too, a shade lighter.
+  const within = useMemo(() => {
+    const inside = new Set<string>()
+    const add = (parentId: string) => {
+      for (const child of folders.filter((folder) => folder.parent_id === parentId)) {
+        inside.add(`f:${child.id}`)
+        add(child.id)
+      }
+    }
+    for (const item of picked) if (item.startsWith('f:')) add(item.slice(2))
+    const folderIds = new Set([...picked, ...inside].filter((item) => item.startsWith('f:')).map((item) => item.slice(2)))
+    for (const record of records) if (record.folder_id && folderIds.has(record.folder_id)) inside.add(`r:${record.id}`)
+    return inside
+  }, [picked, folders, records])
 
   useEffect(() => {
     if (picked.size === 0) return
@@ -242,6 +261,7 @@ export function TreeCard({
             flat ? 'h-14 px-2.5' : 'h-[34px]',
             on && 'bg-primary-soft hover:bg-primary-soft',
             picked.has(key) && 'bg-primary-soft/70 ring-1 ring-primary/50 ring-inset',
+            !picked.has(key) && within.has(key) && 'bg-primary-soft/35',
           )}
         >
           {!flat && <span className="w-4 shrink-0" />}
@@ -295,6 +315,7 @@ export function TreeCard({
               'group flex h-[34px] items-center gap-1.5 rounded-lg pr-1.5 hover:bg-hover',
               on && 'bg-primary-soft hover:bg-primary-soft',
               picked.has(key) && 'bg-primary-soft/70 ring-1 ring-primary/50 ring-inset',
+              !picked.has(key) && within.has(key) && 'bg-primary-soft/35',
               dropping === folder.id && 'ring-2 ring-primary',
             )}
           >
@@ -393,10 +414,16 @@ export function TreeCard({
 
       {picked.size > 0 && (
         <div className="flex items-center gap-2 border-b bg-primary-soft/50 px-3 py-2 text-xs">
-          <span className="min-w-0 flex-1">
-            <b className="font-semibold">{picked.size} {picked.size === 1 ? 'item selecionado' : 'itens selecionados'}.</b>{' '}
-            Arraste para uma pasta ou para a raiz.
-          </span>
+          <b className="min-w-0 flex-1 truncate font-semibold">
+            {picked.size} {picked.size === 1 ? 'selecionado' : 'selecionados'}
+          </b>
+          <MenuButton
+            text="Ações"
+            label="Ações para os itens selecionados"
+            variant="outline"
+            align="end"
+            entries={pickedEntries([...picked], () => setPicked(new Set()))}
+          />
           <button type="button" className="shrink-0 text-primary-text hover:underline" onClick={() => setPicked(new Set())}>
             Limpar
           </button>
