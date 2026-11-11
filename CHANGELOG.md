@@ -15,6 +15,22 @@
   passed, weak, repeated or old password) and what to do, with Editar and "Não está mais
   comprometido" right there.
 - **Collapse or expand every folder** of a vault's tree with one button.
+- **Alerts on a record.** A coloured band with an icon, a title and a line of text at the top of
+  the record ("Não compartilhar com terceiros"), as many as needed, each with an × to take it off.
+  Standard alerts live in Ajustes → Alertas, sealed under the master key; changing one changes
+  every record using it, and a record keeps a copy for anywhere the standard one is unknown.
+- **A password generator dialog.** Type (password or PIN), length, the four kinds of character,
+  which symbols exactly, and avoiding look-alikes; the value can be edited by hand before it is
+  used. Its default lives in Ajustes → Gerador de senhas, or "Salvar como padrão" in the dialog.
+- **Widths you drag**: the vault's tree, and the column of field names in a record, kept by
+  Keyhold across restarts. Double-click a handle to go back to the default.
+- Text cut short in the tree and in field names shows whole in a tooltip.
+
+### Changed
+
+- In an AWS vault, saving something that turns a lone password's plain value into Keyhold's JSON
+  (an alert, an icon, notes, another field) asks first: applications reading the value stop
+  understanding it.
 
 ### Fixed
 

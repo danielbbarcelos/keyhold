@@ -19,6 +19,7 @@ import { fieldsOf, TEMPLATES } from '../fields'
 import { IconPicker } from '../IconPicker'
 import { Checkbox } from '@/components/ui/checkbox'
 import { awsPathOf, AwsNameField, join, leafOf, suggestName, titleProblem } from '../awsName'
+import { AlertsEditor } from './Alerts'
 import { FieldEditor } from './FieldEditor'
 
 /**
@@ -178,6 +179,10 @@ export function RecordEdit({
         {aws && parameter && !creating && (
           <AwsName draft={draft} parameter={parameter} originalTitle={originalTitle} onChange={onChange} />
         )}
+      </Card>
+
+      <Card title="Alertas" hint="Aparecem no topo do registro">
+        <AlertsEditor alerts={draft.payload.alerts ?? []} onChange={(alerts) => setPayload({ alerts })} />
       </Card>
 
       <Card title="Campos" hint="Arraste para reordenar">

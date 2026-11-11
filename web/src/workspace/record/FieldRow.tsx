@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
+import { Clip, Splitter } from '../Splitter'
+
 import { api, type Field } from '../../api'
 import { copyForSeconds } from '../../clipboard'
 import { CARD_PARTS, fieldType } from '../fields'
@@ -37,10 +39,10 @@ export function FieldRow({ field, index, recordId, badge, live = true }: FieldRo
   const Icon = type.icon
 
   return (
-    <div className="group/field relative grid grid-cols-[minmax(150px,210px)_minmax(0,1fr)_auto] items-center gap-4 border-t px-5 py-3 first:border-t-0">
-      <span className="flex min-w-0 items-center gap-2 text-[13px] text-muted-foreground">
+    <div className="group/field relative grid grid-cols-[var(--kh-label,180px)_minmax(0,1fr)_auto] items-center gap-4 border-t px-5 py-3 first:border-t-0">
+      <span className="relative flex min-w-0 items-center gap-2 self-stretch text-[13px] text-muted-foreground">
         <Icon className="size-[15px] shrink-0 text-faint" />
-        <span className="truncate">{field.label || type.label}</span>
+        <Clip>{field.label || type.label}</Clip>
         {badge && (
           <span
             className={cn(
@@ -51,6 +53,7 @@ export function FieldRow({ field, index, recordId, badge, live = true }: FieldRo
             {badge === 'primary' ? 'principal' : 'na lista'}
           </span>
         )}
+        <Splitter which="label" className="-right-3.5 -my-3 opacity-0 group-hover/field:opacity-100" />
       </span>
 
       <Value field={field} index={index} recordId={recordId} live={live} />

@@ -8,6 +8,7 @@ import { clearNow } from './clipboard'
 import { hasToken } from './session'
 import { applyAppearance } from './theme'
 import { LogoLockup } from './workspace/Logo'
+import { applyLayout } from './workspace/Splitter'
 import { useStatus } from './useStatus'
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
@@ -35,6 +36,12 @@ export function App() {
   useEffect(() => {
     if (unlocked === false) clearNow()
   }, [unlocked])
+
+  const tree = status?.layout?.tree
+  const label = status?.layout?.label
+  useEffect(() => {
+    applyLayout(tree && label ? { tree, label } : undefined)
+  }, [tree, label])
 
   useEffect(() => {
     if (theme && accent) {

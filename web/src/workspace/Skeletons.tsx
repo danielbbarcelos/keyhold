@@ -80,7 +80,7 @@ export function VaultSkeleton() {
         <Skeleton className="size-6 rounded-md" />
         <Skeleton className="h-4 w-36" />
       </TopBar>
-      <div className="kh-wide grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6 max-xl:grid-cols-[260px_minmax(0,1fr)]">
+      <div className="kh-wide grid min-h-0 flex-1 grid-cols-[var(--kh-tree,300px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6">
         <TreeSkeleton />
         <RecordSkeleton />
       </div>

@@ -9,6 +9,7 @@ import { colourOf } from '../colours'
 import { RecordTile } from '../icons'
 import { MenuButton, RowMenu, type MenuEntry } from '../menu'
 import { linkProps, TabMenu } from '../nav'
+import { Clip } from '../Splitter'
 import { AttentionDot, type Attention } from './Attention'
 import { folderPath } from './paths'
 
@@ -147,7 +148,7 @@ export function TreeCard({
           {!flat && <span className="w-4 shrink-0" />}
           <RecordTile icon={record.icon} kind={record.kind} size={flat ? 'sm' : 'xs'} />
           <span className="min-w-0 flex-1">
-            <span className={cn('block truncate text-sm', flat && 'font-medium')}>{record.title}</span>
+            <Clip className={cn('text-sm', flat && 'font-medium')}>{record.title}</Clip>
             {flat && (
               <span className="flex items-center gap-1 truncate text-xs text-faint">
                 <Folder className="size-3 shrink-0" />
@@ -213,7 +214,7 @@ export function TreeCard({
               className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium"
             >
               <Icon className={cn('size-4 shrink-0', folder.colour && folder.colour !== 'default' ? colourOf(folder.colour).text : 'text-faint')} />
-              <span className="truncate">{folder.name}</span>
+              <Clip>{folder.name}</Clip>
             </button>
             <span className="text-xs text-faint group-hover:hidden group-has-aria-expanded:hidden">{countIn(folder.id)}</span>
             <span className="hidden group-hover:block group-has-aria-expanded:block">

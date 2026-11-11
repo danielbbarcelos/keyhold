@@ -98,6 +98,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/settings/appearance", put(set_appearance))
         .route("/settings/retention", put(set_retention))
         .route("/settings/log-reads", put(set_log_reads))
+        .route("/settings/generator", put(set_generator))
+        .route("/settings/layout", put(set_layout))
+        .route("/alerts", get(alert_presets))
+        .route("/alerts", put(set_alert_presets))
         .route("/audit", get(read_audit))
         .route("/audit/integrity", get(audit_integrity))
         .route("/agent", get(agent_status))
@@ -277,6 +281,8 @@ async fn status(State(state): State<Arc<AppState>>) -> Answer {
         "retention_days": settings::retention_days(&store),
         "log_reads": settings::log_reads(&store),
         "appearance": settings::appearance(&store),
+        "generator": settings::generator(&store),
+        "layout": settings::layout(&store),
         "attemptsLeft": MAX_FAILURES.saturating_sub(*state.failures.lock().unwrap()),
     })))
 }
@@ -1047,6 +1053,48 @@ async fn disable_second_factor(
 }
 
 /// Make up a password. Available while locked: the setup screen needs one before there is a vault.
+async fn set_generator(State(state): State<Arc<AppState>>, Json(recipe): Json<Recipe>) -> Answer {
+    let store = state.store.lock().unwrap();
+    let saved = settings::set_generator(&store, recipe).map_err(bad_request)?;
+
+    Ok(Json(json!({ "generator": saved })))
+}
+
+async fn set_layout(State(state): State<Arc<AppState>>, Json(layout): Json<settings::Layout>) -> Answer {
+    let store = state.store.lock().unwrap();
+    let saved = settings::set_layout(&store, layout).map_err(bad_request)?;
+
+    Ok(Json(json!({ "layout": saved })))
+}
+
+/// The standard alerts. Sealed, so only while unlocked.
+async fn alert_presets(State(state): State<Arc<AppState>>) -> Answer {
+    let store = state.store.lock().unwrap();
+    let presets = state
+        .lock
+        .with_key(|key| crate::alerts::load(&store, key))
+        .ok_or_else(locked)?
+        .map_err(bad_request)?;
+
+    Ok(Json(json!({ "presets": presets })))
+}
+
+#[derive(Deserialize)]
+struct AlertPresets {
+    presets: Vec<crate::alerts::Preset>,
+}
+
+async fn set_alert_presets(State(state): State<Arc<AppState>>, Json(body): Json<AlertPresets>) -> Answer {
+    let store = state.store.lock().unwrap();
+    let presets = state
+        .lock
+        .with_key(|key| crate::alerts::save(&store, key, body.presets))
+        .ok_or_else(locked)?
+        .map_err(bad_request)?;
+
+    Ok(Json(json!({ "presets": presets })))
+}
+
 async fn make_password(Json(recipe): Json<Recipe>) -> Answer {
     let generated = generator::generate(recipe);
 

@@ -179,6 +179,61 @@ pub fn set_appearance(vault: &Store, appearance: Appearance) -> Result<Appearanc
     Ok(sanitised)
 }
 
+const GENERATOR: &str = "generator_recipe";
+
+/// What "Gerar senha" starts from: the person's own default recipe, or the built-in one.
+pub fn generator(vault: &Store) -> crate::generator::Recipe {
+    read(vault, GENERATOR)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+pub fn set_generator(vault: &Store, recipe: crate::generator::Recipe) -> Result<crate::generator::Recipe> {
+    write(vault, GENERATOR, &serde_json::to_string(&recipe)?)?;
+
+    Ok(recipe)
+}
+
+const LAYOUT: &str = "layout";
+
+/// Widths the person dragged: the vault's tree, and the column of field names in a record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Layout {
+    pub tree: u32,
+    pub label: u32,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self { tree: 300, label: 180 }
+    }
+}
+
+impl Layout {
+    fn sanitised(self) -> Self {
+        Self { tree: self.tree.clamp(220, 640), label: self.label.clamp(110, 480) }
+    }
+}
+
+pub fn layout(vault: &Store) -> Layout {
+    read(vault, LAYOUT)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<Layout>(&raw).ok())
+        .map(Layout::sanitised)
+        .unwrap_or_default()
+}
+
+pub fn set_layout(vault: &Store, layout: Layout) -> Result<Layout> {
+    let layout = layout.sanitised();
+    write(vault, LAYOUT, &serde_json::to_string(&layout)?)?;
+
+    Ok(layout)
+}
+
 fn read(vault: &Store, key: &str) -> Result<Option<String>> {
     Ok(vault
         .conn()

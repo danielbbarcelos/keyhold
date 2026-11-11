@@ -34,7 +34,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::encoding::{base64url, from_base64url};
-use crate::records::{Field, Icon, Payload};
+use crate::records::{Alert, Field, Icon, Payload};
 use crate::vaults::FolderNode;
 
 /// What every AWS id starts with. A local id is base32, which never contains `~`.
@@ -402,6 +402,8 @@ struct Stored {
     /// Absent in values written before notes moved here, and when there are none.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     notes: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    alerts: Vec<Alert>,
 }
 
 /// What a value holds: the fields, the icon, and the notes when it is Keyhold's JSON with notes.
@@ -410,6 +412,7 @@ pub struct Decoded {
     pub fields: Vec<Field>,
     pub icon: Option<Icon>,
     pub notes: String,
+    pub alerts: Vec<Alert>,
 }
 
 /// What a record's value becomes, and whether that is Keyhold's JSON.
@@ -430,6 +433,7 @@ pub fn encode_value(payload: &Payload) -> Result<(String, bool), String> {
                 && !only.primary
                 && !only.value.is_empty()
                 && payload.icon.is_none()
+                && payload.alerts.is_empty()
                 && notes.is_empty()
         }
         _ => false,
@@ -443,6 +447,7 @@ pub fn encode_value(payload: &Payload) -> Result<(String, bool), String> {
             fields: payload.fields.clone(),
             icon: payload.icon.clone(),
             notes: notes.to_string(),
+            alerts: payload.alerts.clone(),
         })
         .map_err(|e| e.to_string())?
     };
@@ -469,7 +474,7 @@ pub fn decode_value(value: &str, tagged_json: Option<bool>) -> Decoded {
     if tagged_json != Some(false) {
         if let Ok(stored) = serde_json::from_str::<Stored>(value) {
             if stored.keyhold == 1 {
-                return Decoded { fields: stored.fields, icon: stored.icon, notes: stored.notes };
+                return Decoded { fields: stored.fields, icon: stored.icon, notes: stored.notes, alerts: stored.alerts };
             }
         }
     }
@@ -478,6 +483,7 @@ pub fn decode_value(value: &str, tagged_json: Option<bool>) -> Decoded {
         fields: vec![Field::new(PLAIN_LABEL, PLAIN_KIND, value)],
         icon: None,
         notes: String::new(),
+        alerts: Vec::new(),
     }
 }
 
@@ -524,7 +530,7 @@ pub fn payload_from(
     let decoded = decode_value(value, tagged_json);
     let notes = if decoded.notes.is_empty() { legacy_notes } else { decoded.notes };
 
-    Payload { title, notes, fields: decoded.fields, icon: decoded.icon, ..Payload::default() }
+    Payload { title, notes, fields: decoded.fields, icon: decoded.icon, alerts: decoded.alerts, ..Payload::default() }
 }
 
 // ── folders ─────────────────────────────────────────────────────────────────────────────────────
@@ -948,5 +954,28 @@ mod tests {
         let nodes = folder_nodes_labelled("v", ["/app/bancos-pj/inter"], &labels);
         let names: Vec<&str> = nodes.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(names, ["app", "Bancos (PJ)"]);
+    }
+
+    #[test]
+    fn an_alert_makes_a_single_password_json_and_comes_back() {
+        let mut payload = Payload {
+            title: "Banco".into(),
+            fields: vec![Field::new("Senha", "password", "s3nha")],
+            ..Payload::default()
+        };
+        assert!(!encode_value(&payload).unwrap().1, "a lone password is a plain value");
+
+        payload.alerts.push(Alert {
+            preset: Some("nao-compartilhar".into()),
+            colour: "rose".into(),
+            icon: "shield-alert".into(),
+            title: "Não compartilhar".into(),
+            text: String::new(),
+        });
+        let (value, json) = encode_value(&payload).unwrap();
+        assert!(json, "an alert has to live somewhere: the value becomes Keyhold's JSON");
+
+        let back = decode_value(&value, Some(true));
+        assert_eq!(back.alerts, payload.alerts);
     }
 }

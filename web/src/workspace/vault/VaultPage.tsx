@@ -46,6 +46,7 @@ import { CopyDialog, type CopySource } from '../CopyDialog'
 import { NameDialog } from '../NameDialog'
 import { newTabEntry } from '../nav'
 import { RecordSkeleton, TreeSkeleton } from '../Skeletons'
+import { Splitter } from '../Splitter'
 import { RecordEdit, renameOf, type EditDraft } from '../record/RecordEdit'
 import { awsPathOf, nameProblem, suggestName, titleProblem } from '../awsName'
 import { RecordView } from '../record/RecordView'
@@ -108,6 +109,7 @@ export function VaultPage({
   const [movingToVault, setMovingToVault] = useState<{ id: string; title: string } | null>(null)
   const [copying, setCopying] = useState<CopySource | null>(null)
   const [saving, setSaving] = useState(false)
+  const [askingJson, setAskingJson] = useState(false)
   const [movingAws, setMovingAws] = useState<{ id: string; folderId: string | null } | null>(null)
   const [unavailable, setUnavailable] = useState<{ message: string; code?: string } | null>(null)
   // False until the first read of this vault answers: until then the tree and the panel are skeletons
@@ -301,12 +303,21 @@ export function VaultPage({
    * after it use the new id. A failure after the payload is written says so rather than
    * "não salvei".
    */
-  async function save() {
+  async function save(jsonAgreed = false) {
     if (!open || !editing) return
-    setSaving(true)
 
     const before = JSON.parse(origin) as EditDraft
     const payloadChanged = JSON.stringify(editing.payload) !== JSON.stringify(before.payload)
+
+    // In AWS a lone password is stored as the plain value applications read. Anything more (an
+    // alert, an icon, notes, another field) turns it into Keyhold's JSON, and those applications
+    // stop reading it. That is said before it happens, not discovered after.
+    if (aws && payloadChanged && !jsonAgreed && isPlainValue(before.payload) && !isPlainValue(editing.payload)) {
+      setAskingJson(true)
+      return
+    }
+
+    setSaving(true)
     let id = open.id
     let wrote = false
 
@@ -383,6 +394,21 @@ export function VaultPage({
       toastError(cause, 'Não criei o registro')
     } finally {
       setSaving(false)
+    }
+  }
+
+  /** "×" on an alert: the record without it, as a new version. */
+  async function removeAlert(index: number) {
+    if (!open) return
+    const payload = { ...open.payload, alerts: (open.payload.alerts ?? []).filter((_, at) => at !== index) }
+
+    try {
+      const saved = await api.saveRecord(open.id, payload, aws ? open.version : undefined)
+      if (saved.warning) toast('Salvo, com um aviso', saved.warning, 'error')
+      await reloadOpen()
+      toast('Alerta retirado', open.payload.title)
+    } catch (cause) {
+      toastError(cause, 'Não tirei o alerta')
     }
   }
 
@@ -690,6 +716,7 @@ export function VaultPage({
           onMoveToVault={() => setMovingToVault({ id: open.id, title: open.payload.title })}
           onCopy={() => setCopying({ vaultId: vault.id, recordIds: [open.id], what: `“${open.payload.title}”` })}
           onTrash={() => setDeleting({ id: open.id, title: open.payload.title })}
+          onRemoveAlert={(index) => void removeAlert(index)}
           permanent={aws}
         />
       )
@@ -717,7 +744,8 @@ export function VaultPage({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {bar}
-      <div className="kh-wide grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6 max-xl:grid-cols-[260px_minmax(0,1fr)]">
+      <div className="kh-wide grid min-h-0 flex-1 grid-cols-[var(--kh-tree,300px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6">
+        <div className="relative grid min-h-0">
         {loaded ? (
         <TreeCard
           vaultId={vault.id}
@@ -752,6 +780,8 @@ export function VaultPage({
         ) : (
           <TreeSkeleton />
         )}
+          <Splitter which="tree" className="-right-4" />
+        </div>
         <div className="min-h-0 min-w-0">{main()}</div>
       </div>
 
@@ -857,6 +887,34 @@ export function VaultPage({
         </AlertDialog>
       )}
 
+      {askingJson && (
+        <AlertDialog open onOpenChange={(isOpen) => !isOpen && setAskingJson(false)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>O parâmetro vai virar JSON</AlertDialogTitle>
+              <AlertDialogDescription>
+                Hoje este registro é só uma senha, gravada na AWS como o valor puro do parâmetro, que é o que os
+                aplicativos leem. Com o que você acrescentou (alerta, ícone, observação ou outro campo), o Keyhold
+                precisa gravar o valor no formato JSON dele, e quem lê esse parâmetro esperando só a senha deixa de
+                funcionar.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Voltar e ajustar</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-white hover:bg-destructive/90"
+                onClick={() => {
+                  setAskingJson(false)
+                  void save(true)
+                }}
+              >
+                Gravar como JSON
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
       {movingAws && (
         <AlertDialog open onOpenChange={(isOpen) => !isOpen && setMovingAws(null)}>
           <AlertDialogContent>
@@ -912,5 +970,22 @@ export function VaultPage({
         />
       )}
     </div>
+  )
+}
+
+/** Whether AWS would store this payload as the plain value (see `mapping::encode_value`). */
+function isPlainValue(payload: Payload): boolean {
+  const [only, ...rest] = payload.fields
+  return (
+    !!only &&
+    rest.length === 0 &&
+    only.kind === 'password' &&
+    Object.keys(only.extra ?? {}).length === 0 &&
+    !only.list &&
+    !only.primary &&
+    only.value !== '' &&
+    !payload.icon &&
+    (payload.alerts?.length ?? 0) === 0 &&
+    payload.notes.trim() === ''
   )
 }

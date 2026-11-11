@@ -290,6 +290,7 @@ pub fn from_csv(text: &str) -> Result<Vec<ExportedRecord>> {
                 notes: cell(notes),
                 fields,
                 icon: None,
+                alerts: Vec::new(),
             }
             .normalise(),
         });

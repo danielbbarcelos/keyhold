@@ -13,6 +13,7 @@
 //! second implementation that agrees with it on a good day.
 
 pub mod agent;
+pub mod alerts;
 pub mod attachments;
 pub mod audit;
 pub mod aws;

@@ -26,6 +26,7 @@ import { RecordTile } from '../icons'
 import { MenuButton } from '../menu'
 import { toast, toastError } from '../toast'
 import { VersionDialog } from '../VersionDialog'
+import { RecordAlerts } from './Alerts'
 import { FieldRow } from './FieldRow'
 import { folderPath, when } from '../vault/paths'
 
@@ -49,6 +50,7 @@ export function RecordView({
   onCopy,
   onTrash,
   permanent = false,
+  onRemoveAlert,
 }: {
   record: OpenRecord
   folders: FolderNode[]
@@ -62,6 +64,8 @@ export function RecordView({
   onTrash: () => void
   /** AWS vaults have no trash: deleting is for good, and the menu says so. */
   permanent?: boolean
+  /** Take one alert off the record (a new version). */
+  onRemoveAlert?: (index: number) => void
 }) {
   const [tab, setTab] = useState<'campos' | 'arquivos' | 'historico'>('campos')
   const [versions, setVersions] = useState<VersionEntry[]>([])
@@ -128,6 +132,12 @@ export function RecordView({
           </div>
         </div>
       </div>
+
+      {(payload.alerts?.length ?? 0) > 0 && (
+        <div className="px-5 pt-4">
+          <RecordAlerts alerts={payload.alerts ?? []} onRemove={record.plaintext ? undefined : onRemoveAlert} />
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-4">
         {primary ? (

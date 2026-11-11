@@ -142,6 +142,25 @@ pub struct Payload {
     pub fields: Vec<Field>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<Icon>,
+    /// Shown at the top of the record. See [`crate::alerts`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alerts: Vec<Alert>,
+}
+
+/// An alert on a record: the preset it came from, when it came from one, and a copy of what it
+/// says, which is what shows wherever that preset is unknown.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Alert {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
+    #[serde(default)]
+    pub colour: String,
+    #[serde(default)]
+    pub icon: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub text: String,
 }
 
 impl Payload {

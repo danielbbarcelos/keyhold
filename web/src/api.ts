@@ -36,7 +36,54 @@ export interface Status {
   retention_days: number
   log_reads: boolean
   appearance: Appearance
+  /** What "Gerar senha" starts from. */
+  generator?: Recipe
+  /** Widths the person dragged, in px. */
+  layout?: Layout
   attemptsLeft: number
+}
+
+export interface Recipe {
+  length: number
+  lowercase: boolean
+  uppercase: boolean
+  digits: boolean
+  symbols: boolean
+  avoid_ambiguous: boolean
+  /** Only these symbols; `null` is the usual set. */
+  symbol_set: string | null
+}
+
+export const DEFAULT_RECIPE: Recipe = {
+  length: 20,
+  lowercase: true,
+  uppercase: true,
+  digits: true,
+  symbols: true,
+  avoid_ambiguous: false,
+  symbol_set: null,
+}
+
+export interface Layout {
+  tree: number
+  label: number
+}
+
+/** An alert on a record. `preset` links it to a standard alert, whose current words win here. */
+export interface Alert {
+  preset?: string | null
+  colour: string
+  icon: string
+  title: string
+  text: string
+}
+
+export interface AlertPreset {
+  id: string
+  colour: string
+  icon: string
+  title: string
+  text: string
 }
 
 export type Theme = 'grafite' | 'claro' | 'sistema'
@@ -355,6 +402,7 @@ export interface Payload {
   notes: string
   fields: Field[]
   icon?: RecordIcon | null
+  alerts?: Alert[]
 }
 
 /** A row in the list: named, and carrying nothing secret. */
@@ -709,14 +757,17 @@ export const api = {
     }),
 
   generatePassword: (length = 20) =>
-    call<{ password: string; entropyBits: number }>('POST', '/api/password', {
-      length,
-      lowercase: true,
-      uppercase: true,
-      digits: true,
-      symbols: true,
-      avoid_ambiguous: false,
-    }),
+    call<{ password: string; entropyBits: number }>('POST', '/api/password', { ...DEFAULT_RECIPE, length }),
+
+  generate: (recipe: Recipe) => call<{ password: string; entropyBits: number }>('POST', '/api/password', recipe),
+
+  saveGenerator: (recipe: Recipe) => call<{ generator: Recipe }>('PUT', '/api/settings/generator', recipe),
+
+  saveLayout: (layout: Layout) => call<{ layout: Layout }>('PUT', '/api/settings/layout', layout),
+
+  alertPresets: () => call<{ presets: AlertPreset[] }>('GET', '/api/alerts'),
+
+  saveAlertPresets: (presets: AlertPreset[]) => call<{ presets: AlertPreset[] }>('PUT', '/api/alerts', { presets }),
 
   copyPlan: (scope: CopyScope) => call<CopyPlan>('POST', '/api/copy/plan', scope),
 

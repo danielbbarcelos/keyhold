@@ -21,10 +21,10 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
-import { api, type Field, type FieldKind } from '../../api'
+import type { Field, FieldKind } from '../../api'
 import { CARD_PARTS, FIELD_TYPES, fieldType, hasParts, isSecret, newField, primaryField, subtitleField } from '../fields'
 import { MenuButton } from '../menu'
-import { toastError } from '../toast'
+import { PasswordGenerator } from '../PasswordGenerator'
 
 /**
  * The fields of a record being written: each with a handle to drag, the icon of its kind, its
@@ -390,6 +390,7 @@ function SecretInput({
   onChange: (value: string) => void
 }) {
   const [showing, setShowing] = useState(false)
+  const [generating, setGenerating] = useState(false)
 
   return (
     <div className="relative">
@@ -413,21 +414,23 @@ function SecretInput({
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Gerar uma senha"
-                onClick={() =>
-                  void api
-                    .generatePassword(20)
-                    .then((made) => {
-                      onChange(made.password)
-                      setShowing(true)
-                    })
-                    .catch((cause) => toastError(cause, 'Não gerei a senha'))
-                }
+                onClick={() => setGenerating(true)}
               >
                 <WandSparkles />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Gerar uma senha de 20 caracteres</TooltipContent>
+            <TooltipContent>Gerar senha</TooltipContent>
           </Tooltip>
+        )}
+        {generating && (
+          <PasswordGenerator
+            onCancel={() => setGenerating(false)}
+            onUse={(made) => {
+              setGenerating(false)
+              onChange(made)
+              setShowing(true)
+            }}
+          />
         )}
         <Button
           variant="ghost"

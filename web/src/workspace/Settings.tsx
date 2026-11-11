@@ -16,6 +16,8 @@ import {
   Trash2,
   Vault,
   Wand2,
+  ShieldAlert,
+  WandSparkles,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -65,9 +67,14 @@ import {
   type Theme,
   type Status,
   type VaultSummary,
+  type Recipe,
+  DEFAULT_RECIPE,
 } from '../api'
 import { askToNotify, notifyState, type NotifyState } from '../notify'
 import { AwsAccounts } from './AwsAccounts'
+import { toastError } from './toast'
+import { AlertPresetsPanel } from './record/Alerts'
+import { GeneratorControls, StrengthBar } from './PasswordGenerator'
 import { AwsMark } from './AwsMark'
 import { linkProps, TabMenu } from './nav'
 import { TransferPanel } from './TransferPanel'
@@ -105,6 +112,8 @@ const SECTIONS: Array<{ id: string; label: string; icon: LucideIcon | typeof Aws
   { id: 'segundo-fator', label: 'Segundo fator', icon: ShieldCheck },
   { id: 'senha', label: 'Senha-mestra', icon: KeyRound },
   { id: 'cofres', label: 'Cofres', icon: Vault },
+  { id: 'alertas', label: 'Alertas', icon: ShieldAlert },
+  { id: 'gerador', label: 'Gerador de senhas', icon: WandSparkles },
   { id: 'aws', label: 'Contas AWS', icon: AwsNavMark },
   { id: 'chaves', label: 'Trocar a chave', icon: RefreshCw },
   { id: 'lixeira', label: 'Lixeira', icon: Trash2 },
@@ -152,6 +161,8 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
     'segundo-fator': <SecondFactor status={status} onChanged={onChanged} />,
     senha: <MasterPassword status={status} onChanged={onChanged} />,
     cofres: <VaultsPanel vaults={vaults} onChanged={onVaultsChanged} />,
+    alertas: <AlertPresetsPanel />,
+    gerador: <GeneratorSettings recipe={status.generator} onChanged={onChanged} />,
     aws: <AwsAccounts vaults={vaults} />,
     chaves: <Rotation vaults={vaults} onChanged={onVaultsChanged} />,
     lixeira: <Retention days={status.retention_days} onChanged={onChanged} />,
@@ -1175,5 +1186,54 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
         )}
       </CardContent>
     </Card>
+  )
+}
+
+/** Ajustes → Gerador de senhas: what "Gerar senha" starts from, with a sample of what it makes. */
+function GeneratorSettings({ recipe, onChanged }: { recipe?: Recipe; onChanged: () => void }) {
+  const [draft, setDraft] = useState<Recipe>({ ...DEFAULT_RECIPE, ...(recipe ?? {}) })
+  const [sample, setSample] = useState('')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    setSaved(false)
+    void api.generate(draft).then((made) => setSample(made.password)).catch(() => undefined)
+  }, [draft])
+
+  return (
+    <section className="rounded-[14px] border bg-card">
+      <div className="border-b px-5 py-4">
+        <h3 className="text-[15px] font-semibold">Gerador de senhas</h3>
+        <p className="mt-1 max-w-2xl text-[13px] text-muted-foreground">
+          O ponto de partida do gerador. Dá para ajustar a cada senha, no próprio diálogo.
+        </p>
+      </div>
+      <div className="grid max-w-xl gap-5 p-5">
+        <div className="grid gap-2">
+          <code className="block truncate rounded-lg border bg-field px-3 py-2 font-mono text-[13px]">{sample}</code>
+          <StrengthBar value={sample} />
+        </div>
+        <GeneratorControls recipe={draft} onChange={setDraft} />
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={() =>
+              void api
+                .saveGenerator(draft)
+                .then(() => {
+                  setSaved(true)
+                  onChanged()
+                })
+                .catch((cause) => toastError(cause))
+            }
+          >
+            Salvar como padrão
+          </Button>
+          <Button variant="ghost" onClick={() => setDraft(DEFAULT_RECIPE)}>
+            Voltar ao do Keyhold
+          </Button>
+          {saved && <span className="text-[13px] text-mint">Salvo</span>}
+        </div>
+      </div>
+    </section>
   )
 }
