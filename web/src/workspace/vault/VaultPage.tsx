@@ -745,7 +745,7 @@ export function VaultPage({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {bar}
       <div className="kh-wide grid min-h-0 flex-1 grid-cols-[var(--kh-tree,300px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6">
-        <div className="relative grid min-h-0">
+        <div className="relative grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
         {loaded ? (
         <TreeCard
           vaultId={vault.id}

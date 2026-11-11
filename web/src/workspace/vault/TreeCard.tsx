@@ -236,7 +236,7 @@ export function TreeCard({
   const loose = sortRecords(shown.filter((record) => record.folder_id === null))
 
   return (
-    <aside className="flex min-h-0 flex-col rounded-[14px] border bg-card">
+    <aside className="flex min-h-0 min-w-0 flex-col rounded-[14px] border bg-card">
       <div className="flex items-center gap-2 px-3 pt-3 pb-2.5">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-faint" />
@@ -268,7 +268,7 @@ export function TreeCard({
         )}
       </div>
 
-      <div className="flex gap-1.5 border-b px-3 pb-2.5">
+      <div className="flex flex-wrap gap-1.5 border-b px-3 pb-2.5">
         <FilterChip on={filter === 'all'} count={counts.all} onClick={() => onFilter('all')}>
           Tudo
         </FilterChip>
