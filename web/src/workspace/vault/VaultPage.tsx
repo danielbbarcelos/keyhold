@@ -577,10 +577,16 @@ export function VaultPage({
             </Button>
           </>
         ) : (
-          <Button onClick={() => startCreating(emptyPayload(), newHere)}>
-            <Plus />
-            Novo registro
-          </Button>
+          <>
+            <Button variant="outline" onClick={() => setAsking({ parentId: currentFolder?.id ?? null })}>
+              <FolderPlus />
+              Nova pasta
+            </Button>
+            <Button onClick={() => startCreating(emptyPayload(), newHere)}>
+              <Plus />
+              Novo registro
+            </Button>
+          </>
         )
       }
     >
@@ -776,6 +782,10 @@ export function VaultPage({
           onDrop={(id, folderId) => void moveTo(id, folderId)}
           folderEntries={folderEntries}
           recordEntries={recordEntries}
+          rootEntries={[
+            { kind: 'item', label: 'Nova pasta na raiz', icon: FolderPlus, onSelect: () => setAsking({ parentId: null }) },
+            { kind: 'item', label: 'Novo registro na raiz', icon: Plus, onSelect: () => startCreating(emptyPayload(), null) },
+          ]}
         />
         ) : (
           <TreeSkeleton />

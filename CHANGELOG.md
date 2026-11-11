@@ -25,6 +25,9 @@
 - **Widths you drag**: the vault's tree, and the column of field names in a record, kept by
   Keyhold across restarts. Double-click a handle to go back to the default.
 - Text cut short in the tree and in field names shows whole in a tooltip.
+- **Nova pasta** in the top bar (at the root, or inside the folder being shown), and a right-click on
+  the tree's empty space to make a folder or a record at the root. A folder at the root could not
+  be made at all before.
 
 ### Changed
 

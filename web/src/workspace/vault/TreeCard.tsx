@@ -45,6 +45,7 @@ export function TreeCard({
   onDrop,
   folderEntries,
   recordEntries,
+  rootEntries,
 }: {
   folders: FolderNode[]
   records: RecordPreview[]
@@ -66,6 +67,8 @@ export function TreeCard({
   onFolder: (id: string) => void
   onTrash: () => void
   onDrop: (recordId: string, folderId: string | null) => void
+  /** Right-click on the empty space of the tree: what can be made at the root. */
+  rootEntries: MenuEntry[]
   folderEntries: (folder: FolderNode) => MenuEntry[]
   recordEntries: (record: RecordPreview) => MenuEntry[]
 }) {
@@ -282,7 +285,7 @@ export function TreeCard({
       </div>
 
       <div
-        className={cn('min-h-0 flex-1 overflow-y-auto px-1.5 py-2', dropping === null && 'bg-primary-soft/40')}
+        className={cn('flex min-h-0 flex-1 flex-col overflow-y-auto px-1.5 py-2', dropping === null && 'bg-primary-soft/40')}
         {...dropProps(null)}
       >
         {mode === 'tree' ? (
@@ -311,6 +314,10 @@ export function TreeCard({
                   : 'Nada com esse nome.'}
           </p>
         )}
+        {/* The empty space under the rows is the vault's root: right-click there to make something in it. */}
+        <RowMenu entries={rootEntries}>
+          <div className="min-h-10 flex-1" aria-hidden="true" />
+        </RowMenu>
       </div>
 
       {showTrash ? (
