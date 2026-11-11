@@ -54,7 +54,7 @@ export function NameDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={aws ? 'sm:max-w-lg' : 'sm:max-w-md'}>
         <form
           onSubmit={(event) => {
             event.preventDefault()

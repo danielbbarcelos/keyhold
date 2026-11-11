@@ -115,13 +115,15 @@ export function AwsNameField({
 
   if (!editing) {
     return (
-      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-faint">
-        <span className="min-w-0 truncate">
+      // The path breaks wherever it has to, and "Editar nome" keeps its place on the right: a path
+      // five folders deep is still one readable line or two, never a field pushed off the dialog.
+      <span className="flex min-w-0 items-start gap-3 text-xs text-faint">
+        <span className="min-w-0 flex-1 break-all">
           Na AWS: <code className="font-mono text-muted-foreground">{join(parent, leaf)}</code>
         </span>
         <button
           type="button"
-          className="text-primary hover:underline"
+          className="shrink-0 text-primary hover:underline"
           onClick={() => {
             setEditing(true)
             onChange(leaf)
@@ -134,9 +136,9 @@ export function AwsNameField({
   }
 
   return (
-    <span className="grid gap-1">
+    <span className="grid min-w-0 gap-1">
+      <span className="break-all font-mono text-xs text-faint">{join(parent, '')}</span>
       <span className="flex items-center gap-2">
-        <span className="shrink-0 font-mono text-xs text-faint">{join(parent, '')}</span>
         <Input
           className="h-8 font-mono text-[13px]"
           value={leaf}
