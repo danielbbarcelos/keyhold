@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.0.0
+
+Keyhold on Linux, macOS and Windows with downloads ready to install, names in AWS said before they
+are sent, sessions that renew themselves, alerts on records, a password generator, and a tree
+that moves and deletes several things at once.
 
 ### New
 
