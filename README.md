@@ -95,9 +95,11 @@ keyhold where        # show where the vault file lives
 - **Trilha** is the trail of what happened: unlocks, changes, and (if you turn it on) every reveal
   and copy. Each line carries the fingerprint of the one before, so editing the trail breaks it.
 - **The lock** at the bottom of the rail shows how long until Keyhold locks itself. Locking forgets
-  the key and clears the clipboard.
+  the key and clears the clipboard. With an AWS sign-in active, the rail also shows when it expires.
+- **Each vault** can wear an icon or a picture of your own, like a record.
 
-Grafite (dark) and Claro (light) themes, with four accent colours, are in **Ajustes → Aparência**.
+Grafite (dark) and Claro (light) themes, four accent colours and the content width (whole window or
+centred) are in **Ajustes → Aparência**.
 
 <img src="docs/screenshots/edit.png" alt="Editing a record: icon, title, folder, the fields with their kinds, notes" width="900">
 
@@ -140,6 +142,15 @@ shows what it can read and says so when a save is refused.
 
 Good to know: parameter **names, folder paths and titles** are metadata AWS keeps unencrypted, and
 anyone allowed to describe parameters in the account can see them. Values and notes are encrypted.
+
+### Moving things between vaults
+
+**Copiar para…** (on a vault, a folder or a record) copies into any other vault and folder,
+local or AWS, in either direction. The original stays where it is until you choose, at the end,
+to delete it. Going to AWS, Keyhold first shows the parameter names it will create; a name already
+taken asks you whether to rename, overwrite or skip; and a copy interrupted by an expired session
+continues from where it stopped. Only the current version is copied: the history stays with the
+original.
 
 ## Letting Claude Code use a secret
 

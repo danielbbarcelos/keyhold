@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.3.0 (pre-release)
+
+Copying between vaults, local and AWS alike, a vault's own icon, and Keyhold's own logo.
+
+### New
+
+- **Copiar para…** copies a whole vault, a folder or a few records into any vault and folder,
+  including from a local vault to AWS Parameter Store and back. It never moves: the original stays
+  until you decide, at the end, to delete it (a local original goes to the trash; an AWS original
+  only after you type the vault's name, and only what arrived whole). Before writing, Keyhold
+  checks the AWS session, the destination's keys and the attachments bucket; going to AWS, it lists
+  the parameter names it will create and reminds you they are visible as metadata. A name already
+  taken asks you, one by one, whether to rename, overwrite or skip. If something fails half way,
+  "Continuar de onde parou" picks up without writing anything twice. Only the current version
+  travels; the history stays with the original.
+- **A vault's icon**: a lucide icon in a soft colour or a picture of your own, sealed with the
+  vault's name, picked when creating the vault or in Ajustes → Cofres.
+- **The AWS session in the rail**: when a sign-in is active, the rail shows how long until it
+  expires, and renewing (with its code) happens right there.
+- **Content width** in Ajustes → Aparência: the whole window, or centred at up to 1280 px.
+- **Keyhold's own logo**, in the rail (following the theme), on the unlock screen, and as the app
+  and browser icon.
+- A `String` parameter holding a JSON object reads as one password field per key.
+
+### Changed
+
+- Ajustes shows one section at a time.
+- A new AWS vault picks its account from cards, and says how to connect one when there is none.
+- The rail has more room.
+
+### Fixed
+
+- **Auto-lock while the window is open.** Background checks the interface makes (for agent
+  requests, and now the AWS session) counted as activity, so a visible window never locked from
+  idleness. Only your own clicks and keys count now. As a consequence, an agent's request on its own
+  no longer keeps the vault open.
+
 ## 0.2.0
 
 A new interface, records without a type, and vaults that can live in AWS Parameter Store.
