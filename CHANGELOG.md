@@ -11,8 +11,14 @@
 - **A new record is written on the page**, like an edit, with the templates (Login, Cartão…) on
   top and, in an AWS vault, the parameter name as you type.
 
+- **"Pede atenção" explains itself**: the red dot opens what was found (compromised, change date
+  passed, weak, repeated or old password) and what to do, with Editar and "Não está mais
+  comprometido" right there.
+- **Collapse or expand every folder** of a vault's tree with one button.
+
 ### Fixed
 
+- An AWS vault without a session shows as "Indisponível" on Início instead of "0 registros".
 - The title in the record editor lines up with Pasta and Trocar até again; a hint under one field
   no longer pushes its neighbours down.
 

@@ -55,6 +55,7 @@ import { TrashPanel } from '../TrashPanel'
 import { FolderView } from './FolderView'
 import { folderChain, folderPath } from './paths'
 import { TreeCard, type Selection, type TreeFilter, type TreeMode } from './TreeCard'
+import type { Attention, Concern } from './Attention'
 
 /**
  * Inside a vault: the tree on the left, always, and on the right whatever was picked in it (a
@@ -92,7 +93,9 @@ export function VaultPage({
   const [folders, setFolders] = useState<FolderNode[]>([])
   const [records, setRecords] = useState<RecordPreview[]>([])
   const [trash, setTrash] = useState<RecordPreview[]>([])
-  const [attention, setAttention] = useState<Set<string>>(new Set())
+  const [attention, setAttention] = useState<Attention>(new Map())
+  // "Editar" from the attention popover: the record opens, then its editor.
+  const [editWhenOpen, setEditWhenOpen] = useState<string | null>(null)
   const [mode, setMode] = useState<TreeMode>('tree')
   const [filter, setFilter] = useState<TreeFilter>('all')
   const [open, setOpen] = useState<OpenRecord | null>(null)
@@ -178,20 +181,32 @@ export function VaultPage({
 
       // Atenção: what the file already knows (compromised, rotation passed) plus the health report,
       // which opens every record to judge weak and repeated passwords.
-      const flagged = new Set(
-        list.records
-          .filter(
-            (record) =>
-              record.compromised_at !== null ||
-              (record.rotation_due_at !== null && new Date(record.rotation_due_at) <= new Date()),
-          )
-          .map((record) => record.id),
-      )
+      const day = (iso: string) => iso.slice(0, 10).split('-').reverse().join('/')
+      const flagged: Attention = new Map()
+      for (const record of list.records) {
+        const concern: Concern = { issues: [], reasons: [] }
+        if (record.compromised_at !== null) {
+          concern.issues.push('compromised')
+          concern.reasons.push(`Marcado como comprometido em ${day(record.compromised_at)}.`)
+        }
+        if (record.rotation_due_at !== null && new Date(record.rotation_due_at) <= new Date()) {
+          concern.issues.push('rotation')
+          concern.reasons.push(`A data de troca, ${day(record.rotation_due_at)}, já passou.`)
+        }
+        if (concern.issues.length) flagged.set(record.id, concern)
+      }
       setAttention(flagged)
 
+      // The health report opens every record to judge the passwords; its words win where it has some.
       void api
         .health(vault.id)
-        .then((report) => setAttention(new Set([...flagged, ...report.health.findings.map((one) => one.record_id)])))
+        .then((report) => {
+          const merged: Attention = new Map(flagged)
+          for (const finding of report.health.findings) {
+            merged.set(finding.record_id, { issues: finding.issues, reasons: finding.reasons })
+          }
+          setAttention(merged)
+        })
         .catch(() => {})
     } catch (cause) {
       setLoaded(true)
@@ -250,6 +265,18 @@ export function VaultPage({
       setOpen(null)
     }
   }, [openId, loadRecord])
+
+  useEffect(() => {
+    if (open && editWhenOpen === open.id && !editing) {
+      setEditWhenOpen(null)
+      startEditing({
+        payload: structuredClone(open.payload),
+        folderId: open.folder_id,
+        rotation: open.rotation_due_at?.slice(0, 10) ?? null,
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editWhenOpen])
 
   useEffect(() => {
     if (open) {
@@ -697,6 +724,17 @@ export function VaultPage({
           folders={folders}
           records={records}
           attention={attention}
+          onEditRecord={(id) => {
+            setEditWhenOpen(id)
+            select({ kind: 'record', id })
+          }}
+          onClearCompromised={(id) =>
+            void api
+              .setCompromised(id, false)
+              .then(() => (open?.id === id ? reloadOpen() : refresh()))
+              .then(() => toast('Marca de comprometido retirada'))
+              .catch((cause) => toastError(cause))
+          }
           selection={selection}
           mode={mode}
           filter={filter}

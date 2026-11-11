@@ -41,6 +41,7 @@ export function Home({
   vaults,
   records,
   seen,
+  unreadable,
   onOpen,
   onVault,
   onNewVault,
@@ -53,6 +54,8 @@ export function Home({
   vaults: VaultSummary[]
   records: RecordPreview[]
   seen: Seen[]
+  /** Vaults that could not be read just now: shown as unavailable, never as empty. */
+  unreadable: Set<string>
   onOpen: (record: RecordPreview) => void
   onVault: (id: string) => void
   onNewVault: () => void
@@ -145,6 +148,14 @@ export function Home({
                     </span>
                   </span>
                 </span>
+                {unreadable.has(vault.id) ? (
+                  <span className="mt-4 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]">
+                    <b className="font-semibold text-amber">Indisponível</b>
+                    <span className="text-faint">
+                      {vault.kind === 'aws' ? 'sem sessão na AWS. Abra o cofre para renovar' : 'não consegui ler este cofre'}
+                    </span>
+                  </span>
+                ) : (
                 <span className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
                   <span>
                     <b className="font-semibold text-foreground">{inside.length}</b> registros
@@ -154,6 +165,7 @@ export function Home({
                   </span>
                   <span>{vault.agent_access ? 'agente ligado' : 'agente desligado'}</span>
                 </span>
+                )}
               </button>
               </TabMenu>
             )

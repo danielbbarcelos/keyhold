@@ -36,6 +36,8 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   const [vaults, setVaults] = useState<VaultSummary[]>([])
   const [vaultsLoaded, setVaultsLoaded] = useState(false)
   const [records, setRecords] = useState<RecordPreview[]>([])
+  // Vaults whose records could not be read (an AWS vault without a session): unknown, not empty.
+  const [unreadable, setUnreadable] = useState<Set<string>>(new Set())
   const [place, setPlace] = useState<Place>(start.place)
   const [vaultId, setVaultId] = useState<string | null>(start.place === 'vault' ? start.vault : null)
   const [selection, setSelection] = useState<Selection>(() => {
@@ -96,10 +98,10 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       setVaults(found.vaults)
       setVaultsLoaded(true)
 
-      const lists = await Promise.all(
-        found.vaults.filter((vault) => !vault.archived).map((vault) => api.records(vault.id).catch(() => null)),
-      )
+      const open = found.vaults.filter((vault) => !vault.archived)
+      const lists = await Promise.all(open.map((vault) => api.records(vault.id).catch(() => null)))
       setRecords(lists.flatMap((list) => list?.records ?? []).filter((record) => !record.archived))
+      setUnreadable(new Set(open.filter((_, index) => lists[index] === null).map((vault) => vault.id)))
     } catch (cause) {
       setVaultsLoaded(true)
       toastError(cause, 'Não consegui ler os cofres')
@@ -275,6 +277,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
         status={status}
         vaults={vaults}
         records={records}
+        unreadable={unreadable}
         seen={seen}
         onOpen={openRecord}
         onVault={(id) => openVault(id)}

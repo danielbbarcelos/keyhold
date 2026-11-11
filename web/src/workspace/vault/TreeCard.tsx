@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Folder, FolderOpen, List, ListTree, Search, Star, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Folder, FolderOpen, List, ListTree, Search, Star, Trash2 } from 'lucide-react'
 
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -9,6 +9,7 @@ import { colourOf } from '../colours'
 import { RecordTile } from '../icons'
 import { MenuButton, RowMenu, type MenuEntry } from '../menu'
 import { linkProps, TabMenu } from '../nav'
+import { AttentionDot, type Attention } from './Attention'
 import { folderPath } from './paths'
 
 /**
@@ -28,6 +29,8 @@ export function TreeCard({
   folders,
   records,
   attention,
+  onEditRecord,
+  onClearCompromised,
   selection,
   mode,
   filter,
@@ -44,7 +47,11 @@ export function TreeCard({
 }: {
   folders: FolderNode[]
   records: RecordPreview[]
-  attention: Set<string>
+  attention: Attention
+  /** The attention popover's "Editar". */
+  onEditRecord: (id: string) => void
+  /** The attention popover's "Não está mais comprometido". */
+  onClearCompromised: (id: string) => void
   selection: Selection
   mode: TreeMode
   filter: TreeFilter
@@ -63,6 +70,7 @@ export function TreeCard({
 }) {
   const [query, setQuery] = useState('')
   const [closed, setClosed] = useState<Set<string>>(new Set())
+  const allClosed = folders.length > 0 && folders.every((folder) => closed.has(folder.id))
   const [dropping, setDropping] = useState<string | null | undefined>(undefined)
 
   const term = query.trim().toLowerCase()
@@ -150,7 +158,13 @@ export function TreeCard({
               </span>
             )}
           </span>
-          {attention.has(record.id) && <span className="size-1.5 shrink-0 rounded-full bg-rose" title="Pede atenção" />}
+          {attention.has(record.id) && (
+            <AttentionDot
+              concern={attention.get(record.id)!}
+              onEdit={() => onEditRecord(record.id)}
+              onClearCompromised={() => onClearCompromised(record.id)}
+            />
+          )}
           {record.favourite && <Star className="size-[13px] shrink-0 fill-primary text-primary" />}
         </div>
       </RowMenu>
@@ -223,7 +237,7 @@ export function TreeCard({
   return (
     <aside className="flex min-h-0 flex-col rounded-[14px] border bg-card">
       <div className="flex items-center gap-2 px-3 pt-3 pb-2.5">
-        <div className="relative flex-1">
+        <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-faint" />
           <Input
             className="h-8 pl-8"
@@ -240,6 +254,17 @@ export function TreeCard({
             <List className="size-[15px]" />
           </ModeButton>
         </div>
+        {mode === 'tree' && folders.length > 0 && (
+          <button
+            type="button"
+            title={allClosed ? 'Expandir todas as pastas' : 'Recolher todas as pastas'}
+            aria-label={allClosed ? 'Expandir todas as pastas' : 'Recolher todas as pastas'}
+            onClick={() => setClosed(allClosed ? new Set() : new Set(folders.map((folder) => folder.id)))}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border bg-raised text-faint hover:text-foreground"
+          >
+            {allClosed ? <ChevronsUpDown className="size-[15px]" /> : <ChevronsDownUp className="size-[15px]" />}
+          </button>
+        )}
       </div>
 
       <div className="flex gap-1.5 border-b px-3 pb-2.5">
@@ -252,6 +277,7 @@ export function TreeCard({
         <FilterChip on={filter === 'attention'} count={counts.attention} onClick={() => onFilter('attention')}>
           Atenção
         </FilterChip>
+
       </div>
 
       <div
