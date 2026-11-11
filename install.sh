@@ -347,9 +347,17 @@ farewell() {
 }
 
 header
-check_toolchain
-build_frontend
-build_binary
+# A release download carries the program already built, next to this script, and
+# no source tree: then there is nothing to compile, only something to install.
+if [ -x "$SOURCE_DIR/$APP_BIN" ] && [ ! -f "$SOURCE_DIR/Cargo.toml" ]; then
+  mkdir -p "$BIN_DIR"
+  install -m 755 "$SOURCE_DIR/$APP_BIN" "$BIN_DIR/$APP_BIN"
+  ok "installed $BIN_DIR/$APP_BIN"
+else
+  check_toolchain
+  build_frontend
+  build_binary
+fi
 write_launcher
 if [ "$(uname -s)" = "Darwin" ]; then
   install_macos_app

@@ -33,6 +33,11 @@ Write-Host ''
 Write-Host '  Keyhold - installer' -ForegroundColor White
 Write-Host ''
 
+# A release download carries keyhold.exe already built, next to this script, and no
+# source tree: then there is nothing to compile, only something to install.
+$Prebuilt = (Test-Path (Join-Path $Source 'keyhold.exe')) -and -not (Test-Path (Join-Path $Source 'Cargo.toml'))
+
+if (-not $Prebuilt) {
 Info 'Checking the toolchain...'
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { Fail 'cargo not found. Install Rust: rustup.rs' }
 if (-not $SkipBuild) {
@@ -58,6 +63,9 @@ Push-Location $Source
 cargo build --release --quiet
 if ($LASTEXITCODE -ne 0) { Fail 'cargo build failed' }
 Pop-Location
+}
+
+$Built = if ($Prebuilt) { Join-Path $Source 'keyhold.exe' } else { Join-Path $Source 'target\release\keyhold.exe' }
 
 # Windows will not replace a program file that is running. Closing Keyhold locks
 # the vault and forgets the key, so it is asked, never done behind your back.
@@ -70,7 +78,7 @@ if ($running) {
 }
 
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-Copy-Item (Join-Path $Source 'target\release\keyhold.exe') $Exe -Force
+Copy-Item $Built $Exe -Force
 Ok "installed $Exe"
 
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
