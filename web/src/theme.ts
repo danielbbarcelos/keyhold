@@ -1,7 +1,7 @@
 import type { Appearance } from './api'
 
 /**
- * Put the chosen theme and accent on the document.
+ * Put the chosen theme, accent and content width on the document.
  *
  * The choice is kept by the binary (`settings::appearance`), never by the browser: keyhold keeps no
  * persistent storage in the page. "sistema" follows the desktop and keeps following it, so a
@@ -25,6 +25,8 @@ export function applyAppearance(appearance: Appearance) {
   } else {
     root.classList.toggle('dark', appearance.theme !== 'claro')
   }
+
+  root.dataset.width = appearance.width
 
   if (appearance.accent === 'ambar') {
     delete root.dataset.accent

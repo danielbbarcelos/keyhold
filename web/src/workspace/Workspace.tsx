@@ -38,11 +38,33 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [askingVault, setAskingVault] = useState(false)
   const [section, setSection] = useState('')
+  // Which card Ajustes opens on; the counter makes a second "Abrir Contas AWS" land there again.
+  const [settingsAt, setSettingsAt] = useState({ id: 'aparencia', n: 0 })
   const [dirty, setDirty] = useState(false)
   const [leaving, setLeaving] = useState<(() => void) | null>(null)
 
   /** Leaving the vault page with an unsaved edit asks first. */
   const guard = (go: () => void) => (dirty ? setLeaving(() => go) : go())
+
+  // Somebody is here: a key press or a click says so to the binary, at most every 20 s. Reads no
+  // longer count as activity (screens poll with them), so this is what keeps an attended vault open
+  // while a person reads a record without changing anything.
+  useEffect(() => {
+    let last = 0
+    const here = () => {
+      const now = Date.now()
+      if (now - last < 20_000) return
+      last = now
+      void api.heartbeat().catch(() => undefined)
+    }
+    window.addEventListener('pointerdown', here, true)
+    window.addEventListener('keydown', here, true)
+
+    return () => {
+      window.removeEventListener('pointerdown', here, true)
+      window.removeEventListener('keydown', here, true)
+    }
+  }, [])
 
   // Closing the tab or reloading with an unsaved edit gets the browser's own question.
   useEffect(() => {
@@ -110,6 +132,12 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
     setPlace('vault')
   }
 
+  /** Ajustes, on one of its sections (the first one when none is said). */
+  function goSettings(id = 'aparencia') {
+    setSettingsAt((current) => ({ id, n: current.n + 1 }))
+    setPlace('settings')
+  }
+
   function openRecord(record: Pick<RecordPreview, 'id' | 'vault_id'>) {
     openVault(record.vault_id, { kind: 'record', id: record.id })
   }
@@ -141,10 +169,10 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
           onSelect={setSelection}
           onVault={(id) => openVault(id)}
           onNewVault={() => setAskingVault(true)}
-          onManageVaults={() => guard(() => setPlace('settings'))}
+          onManageVaults={() => guard(() => goSettings('cofres'))}
           onSearch={search}
           onSeen={onSeen}
-          onAccounts={() => guard(() => setPlace('settings'))}
+          onAccounts={() => guard(() => goSettings('aws'))}
           onDirty={setDirty}
         />
       )
@@ -190,6 +218,8 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
             {section && <Crumb last>{section}</Crumb>}
           </TopBar>
           <Settings
+            initial={settingsAt.id}
+            request={settingsAt.n}
             status={status}
             vaults={vaults}
             onChanged={onChanged}
@@ -210,7 +240,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
         onVault={(id) => openVault(id)}
         onNewVault={() => setAskingVault(true)}
         onTrail={() => setPlace('trail')}
-        onSettings={() => setPlace('settings')}
+        onSettings={() => goSettings('agentes')}
         onLock={lock}
         onSearch={search}
       />
@@ -218,11 +248,12 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   }
 
   return (
-    <div className="grid h-screen grid-cols-[76px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden bg-background">
+    <div className="grid h-screen grid-cols-[88px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden bg-background">
       <Rail
         place={place === 'vault' && !vault ? 'home' : place}
         status={status}
-        onGo={(next) => guard(() => setPlace(next))}
+        onGo={(next) => guard(() => (next === 'settings' ? goSettings() : setPlace(next)))}
+        onSettings={(id) => guard(() => goSettings(id))}
         onLock={lock}
         onChanged={onChanged}
       />
@@ -233,12 +264,12 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
         <NewVaultDialog
           onAccounts={() => {
             setAskingVault(false)
-            setPlace('settings')
+            guard(() => goSettings('aws'))
           }}
-          onCreate={(name, aws) => {
+          onCreate={(name, aws, icon) => {
             setAskingVault(false)
             void api
-              .createVault(name, 'default', aws)
+              .createVault(name, 'default', aws, icon)
               .then(async (made) => {
                 await refresh()
                 toast('Cofre criado', aws ? `${name}, no AWS Parameter Store` : name)

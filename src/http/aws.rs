@@ -955,6 +955,17 @@ fn key_of(metadata: &ParameterMetadata, name: &str) -> Result<String, Failure> {
 }
 
 /// Whether Parameter Store keeps this type encrypted.
+/// A `String` parameter holding a JSON object reads as one password field per key (read only, so
+/// nothing is ever written back in that shape). See [`mapping::plaintext_fields`].
+fn split_plaintext(payload: &mut Payload, kind: &str, value: &str) {
+    if is_secure(kind) {
+        return;
+    }
+    if let Some(fields) = mapping::plaintext_fields(value) {
+        payload.fields = fields;
+    }
+}
+
 fn is_secure(kind: &str) -> bool {
     kind == "SecureString"
 }
@@ -1105,12 +1116,13 @@ async fn open_parameter(
     let tags = tags_of(state, place, name).await;
     let config = load(state)?;
 
-    let payload = mapping::payload_from(
+    let mut payload = mapping::payload_from(
         name,
         metadata.as_ref().and_then(|m| m.description.as_deref()),
         parameter.value.expose(),
         tagged_json(tags.as_deref()),
     );
+    split_plaintext(&mut payload, &parameter.kind, parameter.value.expose());
 
     let header = header_for(
         place,
@@ -1213,7 +1225,7 @@ pub(crate) async fn delete_folder(state: &AppState, id: &str) -> Answer {
     Ok(Json(json!({ "deleted": true })))
 }
 
-fn folder_path(vault_id: &str, id: Option<&str>) -> Result<Option<String>, Failure> {
+pub(crate) fn folder_path(vault_id: &str, id: Option<&str>) -> Result<Option<String>, Failure> {
     let Some(id) = id else { return Ok(None) };
     let (owner, path) = target_folder(id)?;
 
@@ -1283,12 +1295,13 @@ pub(crate) async fn list_records(state: &AppState, vault_id: &str) -> Answer {
         .into_iter()
         .map(|parameter| {
             let tags = tags.get(&parameter.name).cloned().flatten();
-            let payload = mapping::payload_from(
+            let mut payload = mapping::payload_from(
                 &parameter.name,
                 snapshot.metadata.get(&parameter.name).and_then(|m| m.description.as_deref()),
                 parameter.value.expose(),
                 tagged_json(tags.as_deref()),
             );
+            split_plaintext(&mut payload, &parameter.kind, parameter.value.expose());
 
             let preview = RecordPreview {
                 header: header_for(
@@ -1588,8 +1601,8 @@ pub(crate) async fn move_record(
 
     if to_vault.is_some_and(|to| to != vault_id) {
         return Err(bad_request(
-            "mover registros entre cofres AWS e locais ainda não é possível. Crie o registro no \
-             outro cofre e apague este",
+            "um registro não muda de cofre AWS por um arraste. Use \"Copiar para…\": ele copia \
+             para o outro cofre e, no fim, oferece apagar o original",
         ));
     }
 
@@ -2068,6 +2081,92 @@ pub(crate) async fn delete_attachment(state: &AppState, id: &str) -> Answer {
         .map_err(|e| s3_failure(e, &bucket, &place.vault.region))?;
 
     Ok(Json(json!({ "deleted": true })))
+}
+
+// ── copying between vaults (§9.1) ───────────────────────────────────────────────────────────────
+
+/// What a copy into an AWS vault needs to know before writing anything (C5): the names already
+/// there (and whether each is a `SecureString`), what would stop the copy, and when the session
+/// ends.
+pub(crate) struct CopyTarget {
+    /// Each name already there: whether it is a `SecureString`, and its version.
+    pub names: HashMap<String, (bool, i64)>,
+    pub problems: Vec<String>,
+    pub session_expires_at: Option<u64>,
+}
+
+/// When the SSO session behind a vault ends, if Keyhold holds one.
+fn session_expiry(state: &AppState, place: &Place) -> Option<u64> {
+    state
+        .aws
+        .with(&state.lock, |inner| inner.tokens.get(&place.connection.login_id).map(|t| t.expires_at()))
+        .flatten()
+}
+
+/// The checks before copying into `vault_id`. A vault whose keys cannot be read is a problem, not
+/// an error: nothing would be created there (`known_keys` fails closed), and the person should hear
+/// it before the first record rather than at it.
+pub(crate) async fn copy_target(state: &AppState, vault_id: &str, need_bucket: bool) -> Result<CopyTarget, Failure> {
+    let place = place(state, vault_id).await?;
+    let snapshot = snapshot(state, &place).await?;
+    let mut problems = Vec::new();
+
+    if let Err(failure) = known_keys(&snapshot) {
+        problems.push(failure.1);
+    }
+
+    let names = snapshot
+        .parameters
+        .iter()
+        .filter(|p| !mapping::is_keep(&p.name))
+        .map(|p| (p.name.clone(), (is_secure(&p.kind), p.version)))
+        .collect();
+
+    if need_bucket {
+        match place.vault.bucket.as_deref() {
+            None => problems.push(
+                "há anexos para copiar, e o cofre de destino não tem bucket. Defina um bucket nas \
+                 configurações do cofre ou tire esses registros da cópia"
+                    .to_string(),
+            ),
+            Some(bucket) => {
+                let s3 = s3_of(state, &place)?;
+                if let Err(error) = s3.head_bucket(bucket).await {
+                    problems.push(s3_failure(error, bucket, &place.vault.region).1);
+                }
+            }
+        }
+    }
+
+    Ok(CopyTarget { names, problems, session_expires_at: session_expiry(state, &place) })
+}
+
+/// Which parameter an AWS record id stands for, across vault entries: the account, the region and
+/// the name. Two vaults on connections to the same account and region see the same parameters, so
+/// a copy between them can land on its own source. `None` for anything that is not an AWS record.
+pub(crate) fn parameter_identity(state: &AppState, id: &str) -> Option<String> {
+    let (IdKind::Record, vault_id, name) = mapping::decode_id(id)? else { return None };
+    let vault = aws_vault_of(state, &vault_id).ok()??;
+    let config = load(state).ok()?;
+    let connection = config.connections.iter().find(|c| c.id == vault.connection_id)?;
+
+    Some(format!("{}|{}|{}", connection.account_id, vault.region, mapping::absolute(&name)))
+}
+
+/// The names of a record's attachments in an AWS vault, to finish a copy that stopped halfway.
+pub(crate) async fn attachment_names(state: &AppState, record_id: &str) -> Result<Vec<String>, Failure> {
+    let Json(listed) = list_attachments(state, record_id).await?;
+
+    Ok(listed["attachments"]
+        .as_array()
+        .map(|all| all.iter().filter_map(|a| a["name"].as_str().map(str::to_string)).collect())
+        .unwrap_or_default())
+}
+
+/// When the session of a vault being copied from ends. Fails as any read of the vault would.
+pub(crate) async fn copy_source(state: &AppState, vault_id: &str) -> Result<Option<u64>, Failure> {
+    let place = place(state, vault_id).await?;
+    Ok(session_expiry(state, &place))
 }
 
 // ── health check ────────────────────────────────────────────────────────────────────────────────

@@ -18,13 +18,14 @@
 
 mod aws;
 mod contents;
+mod copy;
 
 use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::State;
 use axum::extract::Path;
-use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode, Uri};
+use axum::http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
@@ -66,6 +67,9 @@ pub struct AppState {
     /// AWS sessions, credentials and caches for Parameter Store vaults (F9). Memory only, and
     /// dropped when the vault locks.
     pub aws: crate::aws::state::AwsState,
+    /// What "Copiar para…" wrote in this unlock, so deleting originals only ever touches records
+    /// that really arrived somewhere else (§9.1, C7). Memory only.
+    pub copies: copy::Ledger,
 }
 
 /// How often the AWS state is swept for a lock that happened on its own (see `start_aws_sweeper`).
@@ -113,6 +117,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/password", post(make_password))
         .merge(contents::routes())
         .merge(aws::routes())
+        .merge(copy::routes())
         .route_layer(middleware::from_fn_with_state(state.clone(), require_token));
 
     Router::new()
@@ -1083,7 +1088,17 @@ async fn require_token(
         .unwrap_or_default();
 
     if state.token.matches(presented) {
-        return next.run(request).await;
+        // Activity is a request that changes something. Reads are what screens poll with, and a
+        // poll must not keep an idle vault open (`Lock::with_key` no longer counts either). The
+        // interface sends a heartbeat on key presses and clicks for the rest.
+        let changes = !matches!(*request.method(), Method::GET | Method::HEAD | Method::OPTIONS);
+        let response = next.run(request).await;
+
+        if changes && response.status().is_success() {
+            state.lock.touch();
+        }
+
+        return response;
     }
 
     // No detail, no hint about which part was wrong, and the same answer whether the header was

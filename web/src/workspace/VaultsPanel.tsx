@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Archive, ArchiveRestore, Pencil, Trash2, Vault } from 'lucide-react'
+import { Archive, ArchiveRestore, Copy, Pencil, Trash2, Vault } from 'lucide-react'
 
 import {
   AlertDialog,
@@ -21,11 +21,13 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { cn } from '@/lib/utils'
 
-import { api, ApiError, type VaultSummary } from '../api'
+import { api, ApiError, type RecordIcon, type VaultSummary } from '../api'
+import { AwsMark } from './AwsMark'
+import { IconPicker } from './IconPicker'
+import { VaultInitial } from './shell'
 import { ColourPicker } from './ColourPicker'
-import { colourOf } from './colours'
+import { CopyDialog } from './CopyDialog'
 
 /**
  * Renaming, putting away and deleting a vault.
@@ -47,6 +49,7 @@ interface VaultsPanelProps {
 export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
   const [renaming, setRenaming] = useState<VaultSummary | null>(null)
   const [deleting, setDeleting] = useState<VaultSummary | null>(null)
+  const [copying, setCopying] = useState<VaultSummary | null>(null)
 
   return (
     <Card className="py-6">
@@ -65,8 +68,9 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
         {vaults.map((vault) => (
           <div key={vault.id} className="flex items-center justify-between gap-3">
             <span className="flex min-w-0 items-center gap-2">
-              <Vault className={cn('size-3.5 shrink-0', colourOf(vault.colour).text)} />
+              <VaultInitial vault={vault} />
               <span className="truncate text-sm">{vault.name}</span>
+              {vault.kind === 'aws' && <AwsMark className="size-4" title="Cofre AWS" />}
               {vault.archived && <Badge variant="secondary">guardado</Badge>}
             </span>
 
@@ -74,10 +78,20 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Renomear"
+                aria-label="Editar o cofre"
                 onClick={() => setRenaming(vault)}
               >
                 <Pencil />
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Copiar o cofre para…"
+                title="Copiar para outro cofre, local ou AWS"
+                onClick={() => setCopying(vault)}
+              >
+                <Copy />
               </Button>
 
               <Button
@@ -113,6 +127,18 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
         />
       )}
 
+      {copying && (
+        <CopyDialog
+          source={{ vaultId: copying.id, what: `o cofre ${copying.name}` }}
+          vaults={vaults}
+          onCancel={() => setCopying(null)}
+          onDone={() => {
+            setCopying(null)
+            onChanged()
+          }}
+        />
+      )}
+
       {deleting && (
         <DeleteDialog
           vault={deleting}
@@ -138,20 +164,31 @@ function RenameDialog({
 }) {
   const [name, setName] = useState(vault.name)
   const [colour, setColour] = useState(vault.colour)
+  const [icon, setIcon] = useState<RecordIcon | null>(vault.icon ?? null)
   const [error, setError] = useState('')
 
   return (
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Renomear o cofre</AlertDialogTitle>
+          <AlertDialogTitle>Editar o cofre</AlertDialogTitle>
           <AlertDialogDescription>
-            O nome fica cifrado como o resto: quem ler o arquivo não vê nem isto.
+            O nome e o ícone ficam cifrados como o resto: quem ler o arquivo não vê nem isto.
           </AlertDialogDescription>
         </AlertDialogHeader>
 
         <div className="space-y-4">
-          <Input value={name} autoFocus onChange={(event) => setName(event.target.value)} />
+          <div className="flex items-center gap-3">
+            <IconPicker
+              icon={icon}
+              label="Escolher o ícone do cofre"
+              onChange={setIcon}
+              onClear={() => setIcon(null)}
+              clearLabel="Voltar às iniciais"
+              trigger={icon ? undefined : <VaultInitial vault={{ name: name || '?', colour }} size="lg" />}
+            />
+            <Input value={name} autoFocus aria-label="Nome" onChange={(event) => setName(event.target.value)} />
+          </div>
           <ColourPicker value={colour} onChange={setColour} />
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
@@ -166,12 +203,13 @@ function RenameDialog({
                   name: name.trim(),
                   description: vault.description,
                   colour,
+                  icon,
                 })
                 .then(onDone)
                 .catch((cause) => setError(describe(cause)))
             }
           >
-            Renomear
+            Salvar
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -18,6 +18,7 @@ struct Running {
     /// The very store the server is using, so a test can age a row the way a month of calendar
     /// would — without a second connection that would see its own snapshot.
     store: std::sync::Arc<std::sync::Mutex<Store>>,
+    state: Arc<AppState>,
     _dir: tempfile::TempDir,
 }
 
@@ -37,16 +38,18 @@ async fn start() -> Running {
         lock: Lock::new(LockPolicy::default()),
         failures: std::sync::Mutex::new(0),
         aws: Default::default(),
+        copies: Default::default(),
     });
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
 
+    let served = state.clone();
     tokio::spawn(async move {
-        axum::serve(listener, router(state)).await.unwrap();
+        axum::serve(listener, router(served)).await.unwrap();
     });
 
-    Running { base, token: exposed, store: shared, _dir: dir }
+    Running { base, token: exposed, store: shared, state, _dir: dir }
 }
 
 impl Running {
@@ -398,6 +401,26 @@ async fn the_lock_policy_can_be_changed_and_switched_off() {
     .await;
 
     assert_eq!(off.json()["lock"]["locks_in"], serde_json::Value::Null);
+}
+
+#[tokio::test]
+async fn polling_does_not_keep_an_idle_vault_open() {
+    let app = start().await;
+    app.post("/api/setup", serde_json::json!({ "password": "the master password" })).await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+
+    // What screens poll with: the status, the vaults, the agent's questions, the AWS sessions.
+    for path in ["/api/status", "/api/vaults", "/api/agent/requests", "/api/aws"] {
+        app.get(path).await;
+    }
+
+    let idle = app.state.lock.idle_for().unwrap();
+    assert!(idle >= 2, "a background read counted as somebody being there ({idle}s idle)");
+
+    // A heartbeat (a key press or a click in the interface) does.
+    app.post("/api/heartbeat", serde_json::json!({})).await;
+    assert!(app.state.lock.idle_for().unwrap() < 2);
 }
 
 #[tokio::test]

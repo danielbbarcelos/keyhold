@@ -131,6 +131,11 @@ impl Lock {
     ///
     /// Every read goes through here, which is what makes the deadline real rather than advisory:
     /// there is no path that reaches the key without passing the clock first.
+    ///
+    /// Using the key is not activity. A screen that polls (the agent's questions every second, the
+    /// AWS sessions every 30 s) would otherwise keep a vault open forever in front of nobody. What
+    /// counts as somebody being there is decided by the HTTP layer: a request that changes
+    /// something, or the interface's own heartbeat on a key press or a click (see [`Lock::touch`]).
     pub fn with_key<T>(&self, f: impl FnOnce(&SecretKey) -> T) -> Option<T> {
         let mut guard = self.state.lock().unwrap();
 
@@ -147,13 +152,19 @@ impl Lock {
             self.generation.fetch_add(1, Ordering::SeqCst);
         }
 
-        let open = guard.as_mut()?;
-        open.last_activity = now;
+        let open = guard.as_ref()?;
 
         Some(f(&open.key))
     }
 
-    /// Say the person is still here. Called by the interface, and by every successful API call.
+    /// Seconds since the last activity, or `None` while locked.
+    pub fn idle_for(&self) -> Option<u64> {
+        let guard = self.state.lock().unwrap();
+        guard.as_ref().map(|open| now_seconds().saturating_sub(open.last_activity))
+    }
+
+    /// Say the person is still here: the interface's heartbeat, and every request that changes
+    /// something. Never a background read.
     pub fn touch(&self) {
         if let Some(open) = self.state.lock().unwrap().as_mut() {
             open.last_activity = now_seconds();
@@ -261,6 +272,19 @@ mod tests {
 
         let remaining = lock.status().locks_in.unwrap();
         assert!(remaining > 50, "touching left only {remaining}s");
+    }
+
+    #[test]
+    fn using_the_key_is_not_activity() {
+        let lock = open_lock(LockPolicy { idle_seconds: Some(60), hidden_seconds: None });
+
+        lock.state.lock().unwrap().as_mut().unwrap().last_activity = now_seconds() - 50;
+        assert!(lock.with_key(|_| ()).is_some());
+
+        assert!(lock.idle_for().unwrap() >= 50, "reading with the key pushed the deadline back");
+
+        lock.state.lock().unwrap().as_mut().unwrap().last_activity = now_seconds() - 61;
+        assert!(lock.with_key(|_| ()).is_none(), "polling kept an idle vault open");
     }
 
     #[test]

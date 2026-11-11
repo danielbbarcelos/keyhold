@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Cloud, HardDrive } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { Check, HardDrive } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -12,16 +11,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
-import { api, type AwsConnection, type AwsVault } from '../api'
+import { api, type AwsConnection, type AwsLogin, type AwsVault, type RecordIcon } from '../api'
+import { AwsMark } from './AwsMark'
+import { IconPicker } from './IconPicker'
+import { VaultInitial } from './shell'
 
 /**
  * A new vault: kept in the local file, or in an AWS account's Parameter Store.
@@ -29,19 +24,24 @@ import { api, type AwsConnection, type AwsVault } from '../api'
  * An AWS vault is a whole account from `/`; what IAM lets the chosen role read is what shows. The
  * bucket is where attachments go, and Keyhold never creates it: the suggestion follows the name
  * the infrastructure is expected to give it.
+ *
+ * The icon works like a record's: a lucide icon in a soft colour, or a picture of one's own, sealed
+ * with the vault's name. Without one the vault shows its initials, as it always did.
  */
 export function NewVaultDialog({
   onCreate,
   onCancel,
   onAccounts,
 }: {
-  onCreate: (name: string, aws?: AwsVault) => void
+  onCreate: (name: string, aws?: AwsVault, icon?: RecordIcon | null) => void
   onCancel: () => void
   onAccounts: () => void
 }) {
   const [name, setName] = useState('')
+  const [icon, setIcon] = useState<RecordIcon | null>(null)
   const [kind, setKind] = useState<'local' | 'aws'>('local')
   const [connections, setConnections] = useState<AwsConnection[] | null>(null)
+  const [logins, setLogins] = useState<AwsLogin[]>([])
   const [connection, setConnection] = useState('')
   const [region, setRegion] = useState('us-east-2')
   const [bucket, setBucket] = useState('')
@@ -53,6 +53,7 @@ export function NewVaultDialog({
         .aws()
         .then((found) => {
           setConnections(found.connections)
+          setLogins(found.logins)
           setConnection((current) => current || found.connections[0]?.id || '')
         })
         .catch(() => setConnections([]))
@@ -81,16 +82,42 @@ export function NewVaultDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <label className="grid gap-1.5">
-            <span className="text-[13px] font-medium">Nome</span>
-            <Input autoFocus value={name} placeholder="Ex.: Trabalho" onChange={(event) => setName(event.target.value)} />
-          </label>
+          <div className="grid gap-1.5">
+            <span className="text-[13px] font-medium">Ícone e nome</span>
+            <div className="flex items-center gap-3">
+              <IconPicker
+                icon={icon}
+                label="Escolher o ícone do cofre"
+                onChange={setIcon}
+                onClear={() => setIcon(null)}
+                clearLabel="Voltar às iniciais"
+                trigger={
+                  icon ? undefined : (
+                    <VaultInitial vault={{ name: name || '?', colour: 'default' }} size="lg" />
+                  )
+                }
+              />
+              <Input
+                autoFocus
+                aria-label="Nome"
+                value={name}
+                placeholder="Ex.: Trabalho"
+                onChange={(event) => setName(event.target.value)}
+              />
+            </div>
+          </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <Kind on={kind === 'local'} icon={HardDrive} title="Cofre local" detail="No arquivo desta máquina. Nada sai daqui." onClick={() => setKind('local')} />
+            <Kind
+              on={kind === 'local'}
+              mark={<HardDrive className={cn('size-[18px]', kind === 'local' ? 'text-primary-text' : 'text-muted-foreground')} />}
+              title="Cofre local"
+              detail="No arquivo desta máquina. Nada sai daqui."
+              onClick={() => setKind('local')}
+            />
             <Kind
               on={kind === 'aws'}
-              icon={Cloud}
+              mark={<AwsMark className="size-[22px]" />}
               title="AWS Parameter Store"
               detail="Numa conta da AWS. Quem o IAM deixar lê e grava."
               onClick={() => setKind('aws')}
@@ -101,29 +128,60 @@ export function NewVaultDialog({
             (connections === null ? (
               <p className="text-sm text-faint">Lendo as contas AWS…</p>
             ) : connections.length === 0 ? (
-              <div className="rounded-xl border bg-raised p-4 text-sm">
-                <p className="text-muted-foreground">Nenhuma conta AWS conectada ainda. Primeiro, um login SSO e uma conta em Ajustes.</p>
-                <Button variant="outline" size="sm" className="mt-3" onClick={onAccounts}>
-                  Abrir Contas AWS
+              <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line-2 px-6 py-6 text-center">
+                <AwsMark size="md" />
+                <b className="text-sm font-semibold">Nenhuma conta AWS conectada</b>
+                <p className="max-w-xs text-xs text-muted-foreground">
+                  Conecte um login SSO e escolha as contas dele em Ajustes. Depois é só voltar aqui e escolher a conta.
+                </p>
+                <Button size="sm" className="mt-1" onClick={onAccounts}>
+                  Conectar conta AWS
                 </Button>
               </div>
             ) : (
               <div className="space-y-3">
-                <label className="grid gap-1.5">
+                <div className="grid gap-1.5">
                   <span className="text-[13px] font-medium">Conta</span>
-                  <Select value={connection} onValueChange={setConnection}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {connections.map((one) => (
-                        <SelectItem key={one.id} value={one.id}>
-                          {one.title || `${one.account_id} / ${one.role}`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
+                  <div role="radiogroup" aria-label="Conta" className="grid max-h-[208px] gap-1.5 overflow-y-auto">
+                    {connections.map((one) => {
+                      const on = one.id === connection
+                      const live = logins.find((login) => login.id === one.login_id)?.connected ?? false
+
+                      return (
+                        <button
+                          key={one.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={on}
+                          onClick={() => setConnection(one.id)}
+                          className={cn(
+                            'flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left hover:bg-hover',
+                            on && 'border-primary bg-primary-soft hover:bg-primary-soft',
+                          )}
+                        >
+                          <AwsMark size="sm" />
+                          <span className="min-w-0 flex-1">
+                            <b className="block truncate text-sm font-semibold">
+                              {one.title || one.account_name || one.account_id}
+                            </b>
+                            <span className="block truncate text-xs text-faint">
+                              {one.account_id}, papel {one.role}
+                            </span>
+                          </span>
+                          <span
+                            className={cn(
+                              'shrink-0 rounded-full px-2 py-px text-[11px] font-medium',
+                              live ? 'bg-mint-soft text-mint' : 'bg-stone-soft text-muted-foreground',
+                            )}
+                          >
+                            {live ? 'sessão ativa' : 'sem sessão'}
+                          </span>
+                          {on && <Check className="size-4 shrink-0 text-primary-text" />}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="grid gap-1.5">
                     <span className="text-[13px] font-medium">Região</span>
@@ -154,7 +212,13 @@ export function NewVaultDialog({
           </Button>
           <Button
             disabled={!ready}
-            onClick={() => onCreate(name.trim(), kind === 'aws' ? { connection_id: connection, region, bucket: shownBucket } : undefined)}
+            onClick={() =>
+              onCreate(
+                name.trim(),
+                kind === 'aws' ? { connection_id: connection, region, bucket: shownBucket } : undefined,
+                icon,
+              )
+            }
           >
             Criar cofre
           </Button>
@@ -166,13 +230,13 @@ export function NewVaultDialog({
 
 function Kind({
   on,
-  icon: Icon,
+  mark,
   title,
   detail,
   onClick,
 }: {
   on: boolean
-  icon: LucideIcon
+  mark: React.ReactNode
   title: string
   detail: string
   onClick: () => void
@@ -187,7 +251,7 @@ function Kind({
         on && 'border-primary bg-primary-soft hover:bg-primary-soft',
       )}
     >
-      <Icon className={cn('size-[18px]', on ? 'text-primary-text' : 'text-muted-foreground')} />
+      {mark}
       <b className="text-sm font-semibold">{title}</b>
       <span className="text-xs text-muted-foreground">{detail}</span>
     </button>

@@ -273,6 +273,7 @@ async fn serve(cli: Cli) -> Result<()> {
         lock: Lock::new(policy),
         failures: std::sync::Mutex::new(0),
         aws: Default::default(),
+        copies: Default::default(),
     });
 
     // So an auto-lock forgets every AWS session within seconds, with or without a request after it.

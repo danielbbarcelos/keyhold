@@ -72,6 +72,11 @@ pub struct VaultMeta {
     /// Where an `aws` vault lives. `None` for a local one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aws: Option<AwsVault>,
+    /// A lucide icon in one of the interface's colours, or a picture of the person's own; the
+    /// same shape a record's icon has. Sealed with the name, never anywhere weaker. `None` shows
+    /// the vault's initial, which is what every vault made before icons looks like.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<crate::records::Icon>,
 }
 
 impl Default for VaultMeta {
@@ -82,6 +87,7 @@ impl Default for VaultMeta {
             colour: default_colour(),
             kind: local_kind(),
             aws: None,
+            icon: None,
         }
     }
 }
@@ -120,6 +126,8 @@ impl VaultMeta {
     /// An empty bucket is no bucket. Anything but `aws` is local, and a local vault carries no AWS
     /// place even if the interface sent one.
     fn settled(mut self) -> Result<Self> {
+        self.icon = settled_icon(self.icon.take())?;
+
         if self.kind != KIND_AWS {
             self.kind = KIND_LOCAL.into();
             self.aws = None;
@@ -139,6 +147,29 @@ impl VaultMeta {
 
         Ok(self)
     }
+}
+
+/// An icon with nothing in it is no icon, and a picture has to be a small image held in the
+/// address itself: nothing a browser would go and fetch.
+fn settled_icon(icon: Option<crate::records::Icon>) -> Result<Option<crate::records::Icon>> {
+    let Some(mut icon) = icon else { return Ok(None) };
+
+    icon.image = icon.image.filter(|image| !image.is_empty());
+
+    if let Some(image) = icon.image.as_deref() {
+        if !image.starts_with("data:image/") {
+            bail!("a imagem de um cofre tem que ser uma imagem");
+        }
+        if image.len() > crate::records::ICON_IMAGE_LIMIT {
+            bail!("essa imagem é grande demais para o ícone de um cofre");
+        }
+    }
+
+    if icon.image.is_none() && icon.name.trim().is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(icon))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -165,6 +196,8 @@ pub struct VaultSummary {
     pub kind: String,
     /// Where an AWS vault lives; `null` for a local one.
     pub aws: Option<AwsVault>,
+    /// The vault's own icon; `null` shows its initial.
+    pub icon: Option<crate::records::Icon>,
 }
 
 #[derive(Debug, Serialize)]
@@ -261,6 +294,7 @@ pub fn list_vaults(store: &Store, master: &SecretKey) -> Result<Vec<VaultSummary
             key_rotated_at: rotated,
             kind: meta.kind,
             aws: meta.aws,
+            icon: meta.icon,
         });
     }
 
@@ -503,6 +537,7 @@ pub fn rotate_vault(store: &mut Store, master: &SecretKey, id: &str) -> Result<V
             colour: meta.colour,
             kind: meta.kind,
             aws: meta.aws,
+            icon: meta.icon,
         })?,
         &vault_meta_aad(id),
     )?;
@@ -885,6 +920,78 @@ mod tests {
 
         assert_eq!(before.as_bytes(), after.as_bytes());
         assert_eq!(read_vault(&store, &master, &made.id).unwrap().name, "Trabalho antigo");
+    }
+
+    #[test]
+    fn a_vault_keeps_its_icon_sealed_with_its_name() {
+        use crate::records::Icon;
+
+        let (_dir, store, master) = scratch();
+        let made = create_vault(
+            &store,
+            &master,
+            VaultMeta {
+                icon: Some(Icon { name: "briefcase".into(), colour: "lilac".into(), image: None }),
+                ..meta("Trabalho")
+            },
+        )
+        .unwrap();
+
+        assert_eq!(made.icon.as_ref().unwrap().name, "briefcase");
+
+        // Nothing about the icon is readable in the file.
+        let sealed: Vec<u8> = store
+            .conn()
+            .query_row("SELECT sealed_meta FROM vaults WHERE id = ?1", params![made.id], |row| row.get(0))
+            .unwrap();
+        assert!(!sealed.windows(9).any(|w| w == b"briefcase"));
+
+        let picture = "data:image/png;base64,iVBORw0KGgo=".to_string();
+        let updated = update_vault(
+            &store,
+            &master,
+            &made.id,
+            VaultMeta { icon: Some(Icon { image: Some(picture.clone()), ..Default::default() }), ..meta("Trabalho") },
+        )
+        .unwrap();
+        assert_eq!(updated.icon.unwrap().image.as_deref(), Some(picture.as_str()));
+
+        // An empty icon is no icon: the vault goes back to its initial.
+        let cleared = update_vault(
+            &store,
+            &master,
+            &made.id,
+            VaultMeta { icon: Some(Icon::default()), ..meta("Trabalho") },
+        )
+        .unwrap();
+        assert!(cleared.icon.is_none());
+    }
+
+    #[test]
+    fn a_vault_icon_is_never_an_address_to_fetch() {
+        use crate::records::Icon;
+
+        let (_dir, store, master) = scratch();
+        let refused = create_vault(
+            &store,
+            &master,
+            VaultMeta {
+                icon: Some(Icon { image: Some("javascript:alert(1)".into()), ..Default::default() }),
+                ..meta("Trabalho")
+            },
+        );
+        assert!(refused.is_err());
+
+        let made = create_vault(&store, &master, meta("Trabalho")).unwrap();
+        let huge = format!("data:image/png;base64,{}", "A".repeat(crate::records::ICON_IMAGE_LIMIT));
+        let too_big = update_vault(
+            &store,
+            &master,
+            &made.id,
+            VaultMeta { icon: Some(Icon { image: Some(huge), ..Default::default() }), ..meta("Trabalho") },
+        );
+        assert!(too_big.is_err());
+        assert!(read_vault(&store, &master, &made.id).unwrap().icon.is_none());
     }
 
     #[test]

@@ -72,6 +72,7 @@ fn fixture() -> Fixture {
         lock,
         failures: std::sync::Mutex::new(0),
         aws: Default::default(),
+        copies: Default::default(),
     });
 
     Fixture { state, record: record.id, vault: vault.id, _dir: dir }

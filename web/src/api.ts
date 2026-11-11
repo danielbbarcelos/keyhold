@@ -41,10 +41,77 @@ export interface Status {
 
 export type Theme = 'grafite' | 'claro' | 'sistema'
 export type Accent = 'ambar' | 'oceano' | 'floresta' | 'coral'
+export type Width = 'inteira' | 'contida'
 
 export interface Appearance {
   theme: Theme
   accent: Accent
+  width: Width
+}
+
+/** What "Copiar para…" copies: a whole vault, one folder, or chosen records. */
+export interface CopyScope {
+  source_vault: string
+  folder_id?: string | null
+  record_ids?: string[] | null
+  dest_vault: string
+  dest_folder?: string | null
+}
+
+export interface CopyConflict {
+  /** The record that already has the name, or `null` when two copied records would share it. */
+  dest_id: string | null
+  /** An AWS `String` parameter: never overwritten. */
+  read_only: boolean
+  /** `self`: the record already there is the one being copied, so overwriting is never offered. */
+  reason: 'exists' | 'repeated' | 'self'
+  /** The destination's version when the plan was made, for an AWS overwrite. */
+  version?: number
+}
+
+export interface CopyItem {
+  source_id: string
+  title: string
+  rel: string[]
+  /** Where it lands, as the person reads it ("Bancos / Inter" or "/app/bancos/inter"). */
+  path: string
+  /** The parameter name in an AWS destination. */
+  name: string | null
+  conflict: CopyConflict | null
+  attachments: number | null
+  error: string | null
+}
+
+export interface CopyPlan {
+  items: CopyItem[]
+  source: { id: string; name: string; kind: string }
+  dest: { id: string; name: string; kind: string }
+  checks: { ok: boolean; problems: string[]; session_expires_at: number | null; estimated_seconds: number }
+  metadata_visible: boolean
+}
+
+export interface CopyRunItem {
+  source_id: string
+  rel: string[]
+  action: 'create' | 'overwrite' | 'rename'
+  title?: string
+  name?: string | null
+  dest_id?: string | null
+  expected_version?: number | null
+}
+
+export interface CopyRunAnswer {
+  source_id: string
+  dest_id: string
+  /** Every attachment arrived. Only such a record may have its original deleted. */
+  files_ok: boolean
+  /** Sent again after a stop and already there: not written a second time. */
+  already: boolean
+  warning?: string
+  /** The title a rename settled on (local), past names already taken. */
+  title?: string
+  /** The parameter name used (AWS). */
+  name?: string
 }
 
 export interface AgentRequest {
@@ -209,6 +276,8 @@ export interface VaultSummary {
   /** `local`, or `aws` for a vault kept in Parameter Store. */
   kind?: 'local' | 'aws'
   aws?: AwsVault | null
+  /** The vault's own icon; without one it shows its initials. */
+  icon?: RecordIcon | null
   agent_access: boolean
   archived: boolean
   created_at: string
@@ -352,11 +421,12 @@ export const api = {
 
   vaults: () => call<{ vaults: VaultSummary[] }>('GET', '/api/vaults'),
 
-  createVault: (name: string, colour = 'brand', aws?: AwsVault) =>
+  createVault: (name: string, colour = 'brand', aws?: AwsVault, icon?: RecordIcon | null) =>
     call<{ vault: VaultSummary }>('POST', '/api/vaults', {
       name,
       description: '',
       colour,
+      ...(icon ? { icon } : {}),
       ...(aws ? { kind: 'aws', aws } : {}),
     }),
 
@@ -399,7 +469,7 @@ export const api = {
       `/api/aws/vaults/${vaultId}/check`,
     ),
 
-  updateVault: (id: string, meta: { name: string; description: string; colour: string }) =>
+  updateVault: (id: string, meta: { name: string; description: string; colour: string; icon?: RecordIcon | null }) =>
     call<{ vault: VaultSummary }>('PUT', `/api/vaults/${id}`, meta),
 
   archiveVault: (id: string, on: boolean) =>
@@ -629,4 +699,21 @@ export const api = {
       symbols: true,
       avoid_ambiguous: false,
     }),
+
+  copyPlan: (scope: CopyScope) => call<CopyPlan>('POST', '/api/copy/plan', scope),
+
+  copyRun: (scope: CopyScope, item: CopyRunItem) =>
+    call<CopyRunAnswer>('POST', '/api/copy/run', {
+      source_vault: scope.source_vault,
+      dest_vault: scope.dest_vault,
+      dest_folder: scope.dest_folder ?? null,
+      item,
+    }),
+
+  copyOriginals: (sourceVault: string, recordIds: string[], confirmName?: string) =>
+    call<{ removed: number; skipped: number; failed: Array<{ id: string; error: string }>; trash: boolean }>(
+      'POST',
+      '/api/copy/originals',
+      { source_vault: sourceVault, record_ids: recordIds, confirm_name: confirmName ?? null },
+    ),
 }

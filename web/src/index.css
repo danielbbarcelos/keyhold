@@ -269,3 +269,9 @@
   }
   *::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--foreground) 38%, transparent); }
 }
+
+/* Ajustes → Aparência → Largura: "contida" centres the content of every screen in at most 1280px,
+   by padding rather than by a max-width, so the scrollbar stays at the window's edge. */
+:root[data-width='contida'] .kh-wide {
+  padding-inline: max(1.5rem, calc((100% - 1280px) / 2));
+}

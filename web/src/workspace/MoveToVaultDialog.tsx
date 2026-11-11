@@ -47,7 +47,8 @@ export function MoveToVaultDialog({
   onDone: () => void
   onCancel: () => void
 }) {
-  // AWS vaults are not offered: moving between the local file and an AWS account is not done yet.
+  // AWS vaults are not offered here: going between the local file and an AWS account is a copy
+  // ("Copiar para…"), which asks about every name and offers to delete the original at the end.
   const elsewhere = vaults.filter((vault) => vault.id !== fromVaultId && !vault.archived && vault.kind !== 'aws')
 
   const [vaultId, setVaultId] = useState(elsewhere[0]?.id ?? '')
@@ -102,7 +103,8 @@ export function MoveToVaultDialog({
           <AlertDialogTitle>Mover {what} para outro cofre</AlertDialogTitle>
           <AlertDialogDescription>
             O conteúdo é decifrado e cifrado de novo sob a chave do cofre de destino, com o
-            histórico e os anexos junto. Nada sai do arquivo do Keyhold.
+            histórico e os anexos junto. Nada sai do arquivo do Keyhold. Para um cofre AWS, use
+            "Copiar para…".
           </AlertDialogDescription>
         </AlertDialogHeader>
 

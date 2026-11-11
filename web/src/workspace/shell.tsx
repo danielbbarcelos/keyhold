@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   Cpu,
   Home,
   Lock,
@@ -19,8 +20,12 @@ import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 
-import { api, type Status, type VaultSummary } from '../api'
+import { api, type AwsLogin, type RecordIcon, type Status, type VaultSummary } from '../api'
+import { AWS_CHANGED, useAwsRenew } from './AwsAccounts'
+import { AwsMark } from './AwsMark'
 import { colourOf } from './colours'
+import { RecordTile } from './icons'
+import { LogoIcon } from './Logo'
 
 /**
  * The shell every screen shares: a narrow rail with what belongs to Keyhold itself, and a top bar
@@ -42,19 +47,22 @@ export function Rail({
   place,
   status,
   onGo,
+  onSettings,
   onLock,
   onChanged,
 }: {
   place: Place
   status: Status
   onGo: (place: Exclude<Place, 'vault'>) => void
+  /** Ajustes, opened on one section ("aws", "tranca"). */
+  onSettings: (section: string) => void
   onLock: () => void
   onChanged: () => void
 }) {
   return (
-    <nav className="flex min-h-0 flex-col items-center gap-1 border-r bg-sidebar px-1.5 pt-3 pb-2.5">
-      <span className="mb-3.5 grid size-9 place-items-center rounded-[10px] bg-amber-soft text-amber">
-        <Lock className="size-[18px]" />
+    <nav className="flex min-h-0 flex-col items-center gap-1.5 border-r bg-sidebar px-3 pt-4 pb-3">
+      <span className="mb-4 grid size-9 place-items-center">
+        <LogoIcon className="size-9" />
       </span>
 
       {RAIL.map(({ id, label, icon: Icon }) => (
@@ -64,9 +72,9 @@ export function Rail({
           aria-current={place === id}
           onClick={() => onGo(id)}
           className={cn(
-            'relative flex w-16 flex-col items-center gap-1 rounded-[10px] pt-2 pb-1.5 text-[11px] font-medium text-faint hover:bg-hover hover:text-foreground',
+            'relative flex w-16 flex-col items-center gap-1 rounded-[10px] pt-2.5 pb-2 text-[11px] font-medium text-faint hover:bg-hover hover:text-foreground',
             place === id &&
-              'bg-card text-foreground ring-1 ring-border before:absolute before:top-3 before:bottom-3 before:-left-1.5 before:w-[3px] before:rounded-r before:bg-primary',
+              'bg-card text-foreground ring-1 ring-border before:absolute before:top-3 before:bottom-3 before:-left-3 before:w-[3px] before:rounded-r before:bg-primary',
           )}
         >
           <Icon className="size-[18px]" />
@@ -76,8 +84,150 @@ export function Rail({
 
       <span className="flex-1" />
 
-      <LockButton status={status} onLock={onLock} onChanged={onChanged} onSettings={() => onGo('settings')} />
+      <AwsSession onAccounts={() => onSettings('aws')} />
+      <LockButton status={status} onLock={onLock} onChanged={onChanged} onSettings={() => onSettings('tranca')} />
     </nav>
+  )
+}
+
+/** "2 h", "45 min", "30 s": how long is left, in the rail's few characters. */
+function remaining(seconds: number): string {
+  if (seconds <= 0) return 'expirou'
+  if (seconds >= 3600) return `${Math.floor(seconds / 3600)} h`
+  if (seconds >= 60) return `${Math.ceil(seconds / 60)} min`
+
+  return `${Math.ceil(seconds)} s`
+}
+
+function clock(at: number): string {
+  return new Date(at * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
+
+/**
+ * How long the AWS session lasts, under the lock's own countdown. Shown only while some SSO login
+ * has a session with an end: the soonest one is the number, the popover has each of them.
+ *
+ * Asking `/api/aws` does not count as activity, so this polling never keeps the vault from locking.
+ */
+function AwsSession({ onAccounts }: { onAccounts: () => void }) {
+  const [logins, setLogins] = useState<AwsLogin[]>([])
+  const [now, setNow] = useState(() => Date.now() / 1000)
+  const [open, setOpen] = useState(false)
+
+  const load = useCallback(
+    () =>
+      api
+        .aws()
+        .then((found) => setLogins(found.logins))
+        .catch(() => setLogins([])),
+    [],
+  )
+  const { renew, busy, dialog } = useAwsRenew(() => void load())
+
+  // Read once, and again whenever Contas AWS changes something. Reads are not activity, so this
+  // never keeps the vault from locking itself.
+  useEffect(() => {
+    void load()
+    const again = () => void load()
+    window.addEventListener(AWS_CHANGED, again)
+    return () => window.removeEventListener(AWS_CHANGED, again)
+  }, [load])
+
+  const timed = logins
+    .filter((login): login is AwsLogin & { expires_at: number } => login.expires_at !== null)
+    .sort((a, b) => a.expires_at - b.expires_at)
+  const any = timed.length > 0
+
+  // The clock ticks, and the sessions are read again every 30 s, only while there is one to show.
+  useEffect(() => {
+    if (!any) return
+    const poll = window.setInterval(() => void load(), 30_000)
+    const tick = window.setInterval(() => setNow(Date.now() / 1000), 1000)
+
+    return () => {
+      window.clearInterval(poll)
+      window.clearInterval(tick)
+    }
+  }, [any, load])
+
+  if (!any) return dialog || null
+
+  const left = timed[0].expires_at - now
+  const urgent = left <= 600
+
+  return (
+    <>
+    {dialog}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Sessão AWS: ${remaining(left)}`}
+          className={cn(
+            'mb-1 flex w-16 flex-col items-center gap-1 rounded-[10px] py-2 text-[11px] text-muted-foreground hover:bg-hover',
+            urgent && 'text-rose',
+          )}
+        >
+          <AwsMark
+            className={cn('size-[26px]', urgent && 'ring-2 ring-rose ring-offset-2 ring-offset-sidebar')}
+          />
+          <span className="tabular-nums">{remaining(left)}</span>
+        </button>
+      </PopoverTrigger>
+
+      <PopoverContent side="right" align="end" sideOffset={10} className="w-[300px] p-0">
+        <div className="flex items-center gap-2.5 border-b px-4 py-3">
+          <AwsMark size="xs" />
+          <b className="text-sm font-semibold">Sessões AWS</b>
+        </div>
+        <div className="divide-y">
+          {timed.map((login) => {
+            const gone = login.expires_at <= now
+
+            return (
+              <div key={login.id} className="flex items-center gap-3 px-4 py-3">
+                <span className="min-w-0 flex-1">
+                  <b className="block truncate text-sm font-medium">{login.label || login.start_url}</b>
+                  <span
+                    className={cn(
+                      'block text-xs',
+                      gone ? 'text-rose' : login.expires_at - now <= 600 ? 'text-rose' : 'text-faint',
+                    )}
+                  >
+                    {gone ? `expirou às ${clock(login.expires_at)}` : `expira às ${clock(login.expires_at)}`}
+                  </span>
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  aria-label={`Renovar ${login.label || login.start_url}`}
+                  onClick={() => {
+                    setOpen(false)
+                    void renew(login)
+                  }}
+                >
+                  Renovar
+                </Button>
+              </div>
+            )
+          })}
+        </div>
+        <div className="border-t p-2">
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              onAccounts()
+            }}
+            className="w-full rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-hover hover:text-foreground"
+          >
+            Abrir Contas AWS
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+    </>
   )
 }
 
@@ -204,7 +354,23 @@ export function Title({ children }: { children: React.ReactNode }) {
   return <b className="truncate text-[15px] font-semibold text-foreground">{children}</b>
 }
 
-export function VaultInitial({ vault, size = 'sm' }: { vault: Pick<VaultSummary, 'name' | 'colour'>; size?: 'sm' | 'md' | 'lg' }) {
+export function VaultInitial({
+  vault,
+  size = 'sm',
+}: {
+  vault: Pick<VaultSummary, 'name' | 'colour'> & { icon?: RecordIcon | null }
+  size?: 'sm' | 'md' | 'lg'
+}) {
+  if (vault.icon && (vault.icon.image || vault.icon.name)) {
+    return (
+      <RecordTile
+        icon={vault.icon}
+        size={size === 'sm' ? 'xs' : size === 'lg' ? 'md' : 'sm'}
+        className={size === 'md' ? 'size-7 rounded-lg [&_svg]:size-[15px]' : undefined}
+      />
+    )
+  }
+
   const letters = vault.name
     .split(/\s+/)
     .filter(Boolean)
@@ -234,12 +400,15 @@ export function VaultSwitcher({
   onPick,
   onNew,
   onManage,
+  onCopy,
 }: {
   vaults: VaultSummary[]
   current: VaultSummary
   onPick: (id: string) => void
   onNew: () => void
   onManage: () => void
+  /** "Copiar cofre para…", for the vault being shown. */
+  onCopy?: () => void
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -256,6 +425,7 @@ export function VaultSwitcher({
         >
           <VaultInitial vault={current} />
           {current.name}
+          {current.kind === 'aws' && <AwsMark className="size-4" title="Cofre AWS" />}
           <ChevronDown className="size-3.5 text-faint" />
         </button>
       </PopoverTrigger>
@@ -281,6 +451,7 @@ export function VaultSwitcher({
             >
               <VaultInitial vault={vault} />
               <span className="flex-1 truncate">{vault.name}</span>
+              {vault.kind === 'aws' && <AwsMark className="size-4" title="Cofre AWS" />}
               {vault.id === current.id && <Check className="size-4 text-primary" />}
             </button>
           ))}
@@ -309,6 +480,19 @@ export function VaultSwitcher({
           <Settings2 className="size-4 text-muted-foreground" />
           Gerenciar cofres
         </button>
+        {onCopy && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              onCopy()
+            }}
+            className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-sm hover:bg-hover"
+          >
+            <Copy className="size-4 text-muted-foreground" />
+            Copiar este cofre para…
+          </button>
+        )}
       </PopoverContent>
     </Popover>
   )
@@ -316,7 +500,7 @@ export function VaultSwitcher({
 
 /** A page's body: the same padding everywhere, scrolling inside. */
 export function Body({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn('min-h-0 flex-1 overflow-auto p-6', className)}>{children}</div>
+  return <div className={cn('kh-wide min-h-0 flex-1 overflow-auto p-6', className)}>{children}</div>
 }
 
 /** A card: the one container every screen is made of. */

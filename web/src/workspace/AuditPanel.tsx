@@ -31,6 +31,7 @@ const LABELS: Record<string, string> = {
   'record.deleted': 'Registro excluído',
   'record.destroyed': 'Registro apagado para sempre',
   'record.restored': 'Registro restaurado',
+  'record.copied': 'Registro copiado de outro cofre',
   'secret.revealed': 'Segredo revelado',
   'secret.copied': 'Segredo copiado',
   'instance.closed': 'Instância encerrada',
@@ -60,6 +61,7 @@ const SHORT: Record<string, string> = {
   'record.deleted': 'Excluiu',
   'record.destroyed': 'Apagou de vez',
   'record.restored': 'Restaurou',
+  'record.copied': 'Copiou',
   'agent.granted': 'Permitiu',
   'agent.grant.revoked': 'Revogou',
 }

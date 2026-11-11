@@ -46,6 +46,7 @@ export function RecordView({
   onClone,
   onMoveToFolder,
   onMoveToVault,
+  onCopy,
   onTrash,
   permanent = false,
 }: {
@@ -56,6 +57,8 @@ export function RecordView({
   onClone: () => void
   onMoveToFolder: (folderId: string | null) => void
   onMoveToVault: () => void
+  /** "Copiar para…": into any vault, AWS included. */
+  onCopy: () => void
   onTrash: () => void
   /** AWS vaults have no trash: deleting is for good, and the menu says so. */
   permanent?: boolean
@@ -177,6 +180,7 @@ export function RecordView({
               ],
             },
             ...(permanent ? [] : [{ kind: 'item' as const, label: 'Mover para outro cofre', icon: Vault, onSelect: onMoveToVault }]),
+            { kind: 'item', label: 'Copiar para…', icon: Copy, onSelect: onCopy },
             {
               kind: 'item',
               label: record.compromised_at ? 'Não está mais comprometido' : 'Marcar como comprometido',

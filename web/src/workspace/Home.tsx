@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowRight, Bot, Cloud, Folder, HardDrive, Lock, Plus, ShieldCheck, Star } from 'lucide-react'
+import { ArrowRight, Bot, Folder, HardDrive, Lock, Plus, ShieldCheck, Star } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -14,6 +14,7 @@ import {
   type VaultSummary,
 } from '../api'
 import { RecordTile } from './icons'
+import { AwsMark } from './AwsMark'
 import { Body, Panel, PanelHead, TopBar, Title, VaultInitial } from './shell'
 import { when } from './vault/paths'
 
@@ -138,7 +139,7 @@ export function Home({
                   <span className="min-w-0">
                     <b className="block truncate text-[15px] font-semibold">{vault.name}</b>
                     <span className="flex items-center gap-1 text-xs text-faint">
-                      {vault.kind === 'aws' ? <Cloud className="size-3" /> : <HardDrive className="size-3" />}
+                      {vault.kind === 'aws' ? <AwsMark className="size-3.5" /> : <HardDrive className="size-3" />}
                       {vault.kind === 'aws' ? `AWS Parameter Store, ${vault.aws?.region ?? ''}` : 'Cofre local'}
                     </span>
                   </span>

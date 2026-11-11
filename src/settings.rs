@@ -125,11 +125,19 @@ pub struct Appearance {
     pub theme: String,
     /// `ambar`, `oceano`, `floresta` or `coral`.
     pub accent: String,
+    /// `inteira` (the content fills the window) or `contida` (centred, at most 1280px wide).
+    /// Rows written before this existed have none, and read as `inteira`.
+    #[serde(default = "full_width")]
+    pub width: String,
+}
+
+fn full_width() -> String {
+    "inteira".into()
 }
 
 impl Default for Appearance {
     fn default() -> Self {
-        Self { theme: "grafite".into(), accent: "ambar".into() }
+        Self { theme: "grafite".into(), accent: "ambar".into(), width: full_width() }
     }
 }
 
@@ -146,8 +154,12 @@ impl Appearance {
             "ambar" | "oceano" | "floresta" | "coral" => self.accent,
             _ => fallback.accent,
         };
+        let width = match self.width.as_str() {
+            "inteira" | "contida" => self.width,
+            _ => fallback.width,
+        };
 
-        Self { theme, accent }
+        Self { theme, accent, width }
     }
 }
 
@@ -281,12 +293,22 @@ mod tests {
 
         let saved = set_appearance(
             &store,
-            Appearance { theme: "claro".into(), accent: "rosa-choque".into() },
+            Appearance { theme: "claro".into(), accent: "rosa-choque".into(), width: "contida".into() },
         )
         .unwrap();
 
-        assert_eq!(saved, Appearance { theme: "claro".into(), accent: "ambar".into() });
+        assert_eq!(
+            saved,
+            Appearance { theme: "claro".into(), accent: "ambar".into(), width: "contida".into() }
+        );
         assert_eq!(appearance(&store), saved);
+    }
+
+    #[test]
+    fn an_appearance_saved_before_the_width_existed_fills_the_window() {
+        let old: Appearance = serde_json::from_str(r#"{"theme":"claro","accent":"oceano"}"#).unwrap();
+
+        assert_eq!(old.width, "inteira");
     }
 
     #[test]

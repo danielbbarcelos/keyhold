@@ -60,7 +60,7 @@ export function Toaster() {
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed top-[72px] left-[calc(76px+(100vw-76px)/2)] z-[60] flex w-[380px] max-w-[calc(100vw-96px)] -translate-x-1/2 flex-col gap-2.5"
+      className="pointer-events-none fixed top-[72px] left-[calc(88px+(100vw-88px)/2)] z-[60] flex w-[380px] max-w-[calc(100vw-108px)] -translate-x-1/2 flex-col gap-2.5"
     >
       {all.map((one) => (
         <div

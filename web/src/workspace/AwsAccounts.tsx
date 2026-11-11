@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Cloud, ExternalLink, Loader2, LogOut, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { ExternalLink, Loader2, LogOut, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -23,6 +23,7 @@ import {
 import { cn } from '@/lib/utils'
 
 import { api, type AwsConnection, type AwsLogin, type DeviceLogin, type VaultSummary } from '../api'
+import { AwsMark } from './AwsMark'
 import { toast, toastError } from './toast'
 
 /**
@@ -47,6 +48,7 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
       setLogins(found.logins)
       setConnections(found.connections)
       setFailed('')
+      announceAwsChange()
     } catch (cause) {
       setLogins([])
       setFailed(cause instanceof Error ? cause.message : 'Não consegui ler as contas AWS.')
@@ -94,9 +96,7 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
           return (
             <div key={login.id} className="overflow-hidden rounded-xl border">
               <div className="flex flex-wrap items-center gap-3 bg-raised px-4 py-3">
-                <span className="grid size-8 place-items-center rounded-lg bg-sky-soft text-sky">
-                  <Cloud className="size-4" />
-                </span>
+                <AwsMark size="sm" />
                 <span className="min-w-0 flex-1">
                   <b className="block truncate text-sm font-semibold">{login.label || login.start_url}</b>
                   <span className="block truncate text-xs text-faint">
@@ -330,8 +330,61 @@ function NewLoginDialog({
   )
 }
 
+/** Said whenever logins change here, so the rail's session clock reads them again. */
+export const AWS_CHANGED = 'keyhold:aws-changed'
+
+export function announceAwsChange() {
+  window.dispatchEvent(new Event(AWS_CHANGED))
+}
+
+/**
+ * Renew an SSO session from anywhere: the rail, a copy that stopped on an expired session. When
+ * AWS wants the device code confirmed, the code dialog opens right there, over whatever asked, so
+ * nothing in progress is thrown away to go and find it.
+ */
+export function useAwsRenew(onRenewed: () => void) {
+  const [pending, setPending] = useState<{ login: AwsLogin; device: DeviceLogin } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const renewed = useRef(onRenewed)
+  renewed.current = onRenewed
+
+  async function renew(login: AwsLogin) {
+    setBusy(true)
+    try {
+      const answer = await api.renewAwsLogin(login.id)
+      if (answer.device) {
+        setPending({ login: answer.login, device: answer.device })
+      } else {
+        toast('Sessão renovada', login.label || login.start_url)
+        announceAwsChange()
+        renewed.current()
+      }
+    } catch (cause) {
+      toastError(cause, 'Não renovei a sessão')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const dialog = pending && (
+    <DeviceDialog
+      login={pending.login}
+      device={pending.device}
+      onDone={() => {
+        toast('Login SSO conectado', pending.login.label || pending.login.start_url)
+        setPending(null)
+        announceAwsChange()
+        renewed.current()
+      }}
+      onCancel={() => setPending(null)}
+    />
+  )
+
+  return { renew, busy, dialog }
+}
+
 /** The device-code step: show the code, open the AWS page, and wait for the yes. */
-function DeviceDialog({
+export function DeviceDialog({
   login,
   device,
   onDone,

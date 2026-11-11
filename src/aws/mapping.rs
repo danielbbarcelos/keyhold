@@ -470,6 +470,34 @@ pub fn decode_value(value: &str, tagged_json: Option<bool>) -> Decoded {
     }
 }
 
+/// The fields of a `String` parameter whose value is a JSON object: one password per key, in the
+/// object's order, with anything that is not a string kept as its JSON text. `None` for any other
+/// value, which stays the single "Valor" field.
+///
+/// Only for `String` parameters, which Keyhold never writes: an application's config there is
+/// usually a JSON of credentials, and reading it key by key is what a person wants. A
+/// `SecureString` keeps its value whole, because saving it would otherwise rewrite the
+/// application's JSON as Keyhold's.
+pub fn plaintext_fields(value: &str) -> Option<Vec<Field>> {
+    let object = match serde_json::from_str::<serde_json::Value>(value.trim()).ok()? {
+        serde_json::Value::Object(object) if !object.is_empty() => object,
+        _ => return None,
+    };
+
+    Some(
+        object
+            .into_iter()
+            .map(|(key, value)| {
+                let text = match value {
+                    serde_json::Value::String(text) => text,
+                    other => other.to_string(),
+                };
+                Field::new(&key, PLAIN_KIND, &text)
+            })
+            .collect(),
+    )
+}
+
 /// A whole payload from what Parameter Store keeps.
 ///
 /// Notes come from the value when it has them; otherwise from a description written the old way,

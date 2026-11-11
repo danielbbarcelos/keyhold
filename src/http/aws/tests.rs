@@ -452,6 +452,7 @@ async fn start(seed: impl FnOnce(&mut Ssm), bucket: Option<String>, s3: Option<S
         lock,
         failures: Mutex::new(0),
         aws: Default::default(),
+        copies: Default::default(),
     });
     state.aws.set_endpoints(Endpoints { ssm: Some(ssm_base), s3, ..Endpoints::default() });
     state.aws.insert_credentials(
@@ -1333,4 +1334,585 @@ async fn removing_a_login_logs_it_out_of_identity_center() {
     assert_eq!(requests[0].uri, "/logout");
     assert_eq!(requests[0].header("x-amz-sso_bearer_token"), Some("vivo"));
     assert_eq!(h.state.aws.with(&h.state.lock, |i| i.tokens.len()), Some(0));
+}
+
+// ── copying between vaults (§9.1) ───────────────────────────────────────────────────────────────
+
+impl Harness {
+    async fn local_vault(&self, name: &str) -> String {
+        let made = self.post("/vaults", json!({ "name": name })).await;
+        assert_eq!(made.status, 200, "{}", made.body);
+        made.body["vault"]["id"].as_str().unwrap().to_string()
+    }
+
+    async fn local_folder(&self, vault: &str, name: &str, parent: Option<&str>) -> String {
+        let made = self.post(&format!("/vaults/{vault}/folders"), json!({ "name": name, "parent_id": parent })).await;
+        assert_eq!(made.status, 200, "{}", made.body);
+        made.body["folder"]["id"].as_str().unwrap().to_string()
+    }
+
+    async fn local_record(&self, vault: &str, folder: Option<&str>, payload: Value) -> String {
+        let made = self.post(&format!("/vaults/{vault}/records"), json!({ "folder_id": folder, "payload": payload })).await;
+        assert_eq!(made.status, 200, "{}", made.body);
+        made.body["record"]["id"].as_str().unwrap().to_string()
+    }
+
+    async fn copy_all(&self, scope: Value) -> Vec<Value> {
+        let plan = self.post("/copy/plan", scope.clone()).await;
+        assert_eq!(plan.status, 200, "{}", plan.body);
+        let mut done = Vec::new();
+        for item in plan.body["items"].as_array().unwrap() {
+            let ran = self
+                .post(
+                    "/copy/run",
+                    json!({
+                        "source_vault": scope["source_vault"],
+                        "dest_vault": scope["dest_vault"],
+                        "dest_folder": scope["dest_folder"],
+                        "item": { "source_id": item["source_id"], "rel": item["rel"], "name": item["name"] },
+                    }),
+                )
+                .await;
+            assert_eq!(ran.status, 200, "{}", ran.body);
+            done.push(ran.body);
+        }
+        done
+    }
+
+    async fn trail(&self, action: &str) -> Vec<Value> {
+        let read = self.get("/audit").await;
+        assert_eq!(read.status, 200, "{}", read.body);
+        let events = read.body["events"].as_array().cloned().unwrap_or_default();
+        events.into_iter().filter(|e| e["action"] == action).collect()
+    }
+}
+
+fn login(email: &str, password: &str) -> Value {
+    json!({
+        "title": "Banco Inter",
+        "notes": "conta corrente",
+        "icon": { "name": "landmark", "colour": "sky" },
+        "fields": [
+            { "label": "E-mail", "kind": "email", "value": email, "list": true },
+            { "label": "Senha", "kind": "password", "value": password }
+        ]
+    })
+}
+
+#[tokio::test]
+async fn a_local_vault_is_copied_whole_with_folders_files_and_favourites_and_the_original_stays() {
+    let h = start(account, None, None).await;
+    let from = h.local_vault("Pessoal").await;
+    let to = h.local_vault("Trabalho").await;
+
+    let banks = h.local_folder(&from, "Bancos", None).await;
+    let card = h.local_folder(&from, "Cartões", Some(&banks)).await;
+    let inter = h.local_record(&from, Some(&banks), login("eu@example.com", "s3nha-do-banco")).await;
+    let visa = h
+        .local_record(&from, Some(&card), json!({ "title": "Visa", "fields": [{ "label": "PIN", "kind": "pin", "value": "1234" }] }))
+        .await;
+    h.local_record(&from, None, json!({ "title": "Solto", "fields": [] })).await;
+    h.post(&format!("/records/{inter}/favourite"), json!({ "on": true })).await;
+    h.post(
+        &format!("/records/{inter}/attachments"),
+        json!({ "name": "contrato.pdf", "mime": "application/pdf", "data": crate::encoding::base64url(b"%PDF") }),
+    )
+    .await;
+    // The trash is not copied.
+    let gone = h.local_record(&from, None, json!({ "title": "Apagado", "fields": [] })).await;
+    h.post(&format!("/records/{gone}/archive"), json!({ "on": true })).await;
+
+    let scope = json!({ "source_vault": from, "dest_vault": to });
+    let plan = h.post("/copy/plan", scope.clone()).await;
+    assert_eq!(plan.status, 200, "{}", plan.body);
+    assert_eq!(plan.body["checks"]["ok"], true);
+    assert_eq!(plan.body["metadata_visible"], false);
+    let items = plan.body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3, "{}", plan.body);
+    let row = items.iter().find(|i| i["source_id"] == inter).unwrap();
+    assert_eq!(row["path"], "Bancos / Banco Inter");
+    assert_eq!(row["attachments"], 1);
+    assert!(row["conflict"].is_null());
+    assert!(!plan.body.to_string().contains("s3nha-do-banco"), "a plan never carries a value");
+    let visa_row = items.iter().find(|i| i["source_id"] == visa).unwrap();
+    assert_eq!(visa_row["rel"], json!(["Bancos", "Cartões"]));
+
+    let done = h.copy_all(scope.clone()).await;
+    assert!(done.iter().all(|d| !d.to_string().contains("s3nha-do-banco")));
+
+    let copied = done.iter().find(|d| d["source_id"] == inter).unwrap()["dest_id"].as_str().unwrap().to_string();
+    let opened = h.get(&format!("/records/{copied}")).await;
+    assert_eq!(opened.body["record"]["vault_id"], to);
+    assert_eq!(opened.body["record"]["favourite"], true);
+    assert_eq!(opened.body["record"]["version"], 1, "only the current version travels (C3)");
+    assert_eq!(opened.body["record"]["payload"]["fields"][1]["value"], "s3nha-do-banco");
+    assert_eq!(opened.body["record"]["payload"]["notes"], "conta corrente");
+    assert_eq!(opened.body["record"]["payload"]["icon"]["name"], "landmark");
+    let files = h.get(&format!("/records/{copied}/attachments")).await;
+    assert_eq!(files.body["attachments"][0]["name"], "contrato.pdf");
+
+    let folders = h.get(&format!("/vaults/{to}/folders")).await;
+    let names: Vec<&str> = folders.body["folders"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert_eq!(names, vec!["Bancos", "Cartões"], "folders made once, nested");
+
+    // C1: the original is untouched.
+    let original = h.get(&format!("/records/{inter}")).await;
+    assert_eq!(original.body["record"]["vault_id"], from);
+    assert_eq!(original.body["record"]["archived"], false);
+
+    // The trail says what was copied, from where to where, and never a value.
+    let lines = h.trail("record.copied").await;
+    assert_eq!(lines.len(), 3);
+    assert!(lines.iter().all(|l| l["detail"]["to_vault"] == to && l["detail"]["from_vault"] == from));
+    assert!(!lines.iter().any(|l| l.to_string().contains("s3nha")));
+
+    // A second plan finds every name taken (and that is what resuming relies on).
+    let again = h.post("/copy/plan", scope.clone()).await;
+    let conflicts: Vec<&Value> = again.body["items"].as_array().unwrap().iter().map(|i| &i["conflict"]).collect();
+    assert!(conflicts.iter().all(|c| c["reason"] == "exists"), "{}", again.body);
+}
+
+#[tokio::test]
+async fn conflicts_are_renamed_overwritten_or_left_and_originals_go_to_the_trash() {
+    let h = start(account, None, None).await;
+    let from = h.local_vault("Pessoal").await;
+    let to = h.local_vault("Trabalho").await;
+    let inter = h.local_record(&from, None, login("eu@example.com", "nova")).await;
+    let existing = h.local_record(&to, None, login("velho@example.com", "antiga")).await;
+
+    let plan = h.post("/copy/plan", json!({ "source_vault": from, "dest_vault": to, "record_ids": [inter] })).await;
+    let item = &plan.body["items"][0];
+    assert_eq!(item["conflict"]["reason"], "exists");
+    assert_eq!(item["conflict"]["dest_id"], existing);
+
+    let renamed = h
+        .post(
+            "/copy/run",
+            json!({ "source_vault": from, "dest_vault": to, "item": { "source_id": inter, "action": "rename", "title": "Banco Inter (2)" } }),
+        )
+        .await;
+    assert_eq!(renamed.status, 200, "{}", renamed.body);
+    let made = renamed.body["dest_id"].as_str().unwrap();
+    assert_eq!(h.get(&format!("/records/{made}")).await.body["record"]["payload"]["title"], "Banco Inter (2)");
+
+    let over = h
+        .post(
+            "/copy/run",
+            json!({ "source_vault": from, "dest_vault": to, "item": { "source_id": inter, "action": "overwrite", "dest_id": existing } }),
+        )
+        .await;
+    assert_eq!(over.status, 200, "{}", over.body);
+    let now = h.get(&format!("/records/{existing}")).await;
+    assert_eq!(now.body["record"]["payload"]["fields"][1]["value"], "nova");
+    assert_eq!(now.body["record"]["version"], 2, "an overwrite is a new version, the old one kept");
+
+    // Overwriting a record of another vault is refused.
+    let elsewhere = h
+        .post(
+            "/copy/run",
+            json!({ "source_vault": from, "dest_vault": to, "item": { "source_id": inter, "action": "overwrite", "dest_id": inter } }),
+        )
+        .await;
+    assert_eq!(elsewhere.status, 400);
+
+    // A source id from another vault is refused.
+    let wrong = h
+        .post("/copy/run", json!({ "source_vault": to, "dest_vault": from, "item": { "source_id": inter } }))
+        .await;
+    assert_eq!(wrong.status, 400);
+
+    // C7, local: to the trash, in one call, without typing anything.
+    let removed = h.post("/copy/originals", json!({ "source_vault": from, "record_ids": [inter] })).await;
+    assert_eq!(removed.status, 200, "{}", removed.body);
+    assert_eq!(removed.body["removed"], 1);
+    assert_eq!(removed.body["trash"], true);
+    let trash = h.get(&format!("/vaults/{from}/trash")).await;
+    assert_eq!(trash.body["records"].as_array().map(Vec::len), Some(1), "{}", trash.body);
+}
+
+#[tokio::test]
+async fn a_local_folder_goes_to_aws_with_names_from_titles_and_the_folders_key() {
+    let h = start(
+        |ssm| {
+            account(ssm);
+            ssm.seed("/app/dev/bancos/banco-inter", "ja-existe", Some("Banco Inter"), "alias/dev", &[]);
+            ssm.seed("/app/dev/bancos/legado", "texto", Some("Legado"), "", &[]);
+            ssm.parameters.get_mut("/app/dev/bancos/legado").unwrap().kind = "String".into();
+        },
+        None,
+        None,
+    )
+    .await;
+    let from = h.local_vault("Pessoal").await;
+    let banks = h.local_folder(&from, "Bancos", None).await;
+    let inter = h.local_record(&from, Some(&banks), login("eu@example.com", "s3nha")).await;
+    let wifi = h
+        .local_record(&from, Some(&banks), json!({ "title": "Wi-Fi de casa", "fields": [{ "label": "Senha", "kind": "password", "value": "wifi123" }] }))
+        .await;
+    let legacy = h
+        .local_record(&from, Some(&banks), json!({ "title": "Legado", "fields": [{ "label": "Senha", "kind": "password", "value": "x" }] }))
+        .await;
+
+    let scope = json!({ "source_vault": from, "folder_id": banks, "dest_vault": h.vault, "dest_folder": h.folder("/app/dev") });
+    let plan = h.post("/copy/plan", scope.clone()).await;
+    assert_eq!(plan.status, 200, "{}", plan.body);
+    assert_eq!(plan.body["metadata_visible"], true, "C6");
+    let items = plan.body["items"].as_array().unwrap();
+    let by = |id: &str| items.iter().find(|i| i["source_id"] == id).unwrap().clone();
+    assert_eq!(by(&wifi)["name"], "/app/dev/bancos/wi-fi-de-casa");
+    assert!(by(&wifi)["conflict"].is_null());
+    assert_eq!(by(&inter)["conflict"]["reason"], "exists");
+    assert_eq!(by(&inter)["conflict"]["read_only"], false);
+    assert_eq!(by(&legacy)["conflict"]["read_only"], true, "a String parameter is never offered for overwriting");
+    assert!(!plan.body.to_string().contains("wifi123"));
+
+    let ran = h
+        .post(
+            "/copy/run",
+            json!({ "source_vault": from, "dest_vault": h.vault, "dest_folder": h.folder("/app/dev"),
+                    "item": { "source_id": wifi, "rel": ["Bancos"], "name": by(&wifi)["name"] } }),
+        )
+        .await;
+    assert_eq!(ran.status, 200, "{}", ran.body);
+    let stored = h.parameter("/app/dev/bancos/wi-fi-de-casa").unwrap();
+    assert_eq!(stored.value, "wifi123", "a single password stays a plain value");
+    assert_eq!(stored.key_id, "alias/dev", "the key comes from the folder, never the default (H1)");
+
+    let json_one = h
+        .post(
+            "/copy/run",
+            json!({ "source_vault": from, "dest_vault": h.vault,
+                    "item": { "source_id": inter, "action": "rename", "title": "Banco Inter (2)", "name": "/app/dev/bancos/banco-inter-2" } }),
+        )
+        .await;
+    assert_eq!(json_one.status, 200, "{}", json_one.body);
+    let stored = h.parameter("/app/dev/bancos/banco-inter-2").unwrap();
+    assert!(stored.value.contains(r#""notes":"conta corrente""#));
+    assert!(stored.tags.contains(&("keyhold:formato".into(), "json".into())));
+
+    // Overwriting a String parameter is refused by the save path, and nothing is written.
+    let puts_before = h.with_ssm(|ssm| ssm.puts.len());
+    let refused = h
+        .post(
+            "/copy/run",
+            json!({ "source_vault": from, "dest_vault": h.vault,
+                    "item": { "source_id": legacy, "action": "overwrite", "dest_id": h.id("/app/dev/bancos/legado") } }),
+        )
+        .await;
+    assert_eq!(refused.status, 400, "{}", refused.body);
+    assert_eq!(h.with_ssm(|ssm| ssm.puts.len()), puts_before);
+    assert_eq!(h.parameter("/app/dev/bancos/legado").unwrap().value, "texto");
+}
+
+#[tokio::test]
+async fn an_aws_folder_comes_home_and_aws_originals_go_only_with_the_name_typed() {
+    let h = start(
+        |ssm| {
+            account(ssm);
+            ssm.seed("/app/prod/url", "https://exemplo", Some("URL"), "", &[]);
+            ssm.parameters.get_mut("/app/prod/url").unwrap().kind = "String".into();
+        },
+        None,
+        None,
+    )
+    .await;
+    let to = h.local_vault("Pessoal").await;
+
+    let scope = json!({ "source_vault": h.vault, "folder_id": h.folder("/app/prod"), "dest_vault": to });
+    let plan = h.post("/copy/plan", scope.clone()).await;
+    assert_eq!(plan.status, 200, "{}", plan.body);
+    assert_eq!(plan.body["metadata_visible"], false);
+    let items = plan.body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3, "{}", plan.body);
+    assert!(items.iter().all(|i| i["rel"] == json!(["prod"])));
+    assert!(!plan.body.to_string().contains("hunter2"));
+
+    let done = h.copy_all(scope).await;
+    let db = done.iter().find(|d| d["source_id"] == h.id("/app/prod/db")).unwrap()["dest_id"].as_str().unwrap().to_string();
+    let opened = h.get(&format!("/records/{db}")).await;
+    assert_eq!(opened.body["record"]["payload"]["title"], "Banco de produção");
+    assert_eq!(opened.body["record"]["payload"]["fields"][0]["value"], "hunter2");
+    assert_eq!(opened.body["record"]["payload"]["notes"], "só para o deploy");
+
+    let url = done.iter().find(|d| d["source_id"] == h.id("/app/prod/url")).unwrap()["dest_id"].as_str().unwrap().to_string();
+    let opened = h.get(&format!("/records/{url}")).await;
+    assert_eq!(opened.body["record"]["payload"]["fields"][0]["value"], "https://exemplo");
+    assert!(crate::records::is_secret_kind(opened.body["record"]["payload"]["fields"][0]["kind"].as_str().unwrap()));
+
+    // C7, AWS: never without the vault's name typed, and then for good.
+    let ids = json!([h.id("/app/prod/db")]);
+    let untyped = h.post("/copy/originals", json!({ "source_vault": h.vault, "record_ids": ids })).await;
+    assert_eq!(untyped.status, 400);
+    let wrong = h.post("/copy/originals", json!({ "source_vault": h.vault, "record_ids": ids, "confirm_name": "produção" })).await;
+    assert_eq!(wrong.status, 400);
+    assert!(h.parameter("/app/prod/db").is_some());
+
+    let typed = h.post("/copy/originals", json!({ "source_vault": h.vault, "record_ids": ids, "confirm_name": "Produção" })).await;
+    assert_eq!(typed.status, 200, "{}", typed.body);
+    assert_eq!(typed.body["removed"], 1);
+    assert_eq!(typed.body["trash"], false);
+    assert!(h.parameter("/app/prod/db").is_none());
+    assert!(h.parameter("/app/prod/api").is_some(), "only what was asked");
+
+    // An id of another vault is not deleted through this one.
+    let other = h.post("/copy/originals", json!({ "source_vault": h.vault, "record_ids": [db], "confirm_name": "Produção" })).await;
+    assert_eq!(other.body["removed"], 0);
+}
+
+#[tokio::test]
+async fn a_copy_into_aws_without_a_bucket_or_keys_is_stopped_before_anything_is_written() {
+    let h = start(
+        |ssm| {
+            account(ssm);
+            ssm.describe_denied = true;
+        },
+        None,
+        None,
+    )
+    .await;
+    let from = h.local_vault("Pessoal").await;
+    let inter = h.local_record(&from, None, login("eu@example.com", "s3nha")).await;
+    h.post(
+        &format!("/records/{inter}/attachments"),
+        json!({ "name": "a.txt", "mime": "text/plain", "data": crate::encoding::base64url(b"oi") }),
+    )
+    .await;
+
+    let plan = h.post("/copy/plan", json!({ "source_vault": from, "dest_vault": h.vault, "dest_folder": h.folder("/app/dev") })).await;
+    assert_eq!(plan.status, 200, "{}", plan.body);
+    assert_eq!(plan.body["checks"]["ok"], false);
+    let problems = plan.body["checks"]["problems"].to_string();
+    assert!(problems.contains("bucket"), "{problems}");
+    assert!(problems.contains("DescribeParameters"), "{problems}");
+    assert!(!problems.contains('—'));
+    assert!(h.with_ssm(|ssm| ssm.puts.is_empty()));
+}
+
+#[tokio::test]
+async fn a_copy_stops_when_the_vault_locks() {
+    let h = start(account, None, None).await;
+    let from = h.local_vault("Pessoal").await;
+    let to = h.local_vault("Trabalho").await;
+    let inter = h.local_record(&from, None, login("eu@example.com", "s3nha")).await;
+
+    h.state.lock.lock();
+
+    let ran = h.post("/copy/run", json!({ "source_vault": from, "dest_vault": to, "item": { "source_id": inter } })).await;
+    assert_eq!(ran.status, 423, "{}", ran.body);
+    let plan = h.post("/copy/plan", json!({ "source_vault": from, "dest_vault": to })).await;
+    assert_eq!(plan.status, 423);
+}
+
+// ── copy: what the review found (2026-11-11) ────────────────────────────────────────────────────
+
+/// A second vault entry on the same connection and region: another name for the same parameters.
+fn alias_vault(h: &Harness) -> String {
+    let store = h.state.store.lock().unwrap();
+    h.state
+        .lock
+        .with_key(|key| {
+            vaults::create_vault(
+                &store,
+                key,
+                VaultMeta {
+                    name: "Produção de novo".into(),
+                    kind: "aws".into(),
+                    aws: Some(AwsVault { connection_id: "CONN".into(), region: "sa-east-1".into(), bucket: None }),
+                    ..Default::default()
+                },
+            )
+        })
+        .unwrap()
+        .unwrap()
+        .id
+}
+
+#[tokio::test]
+async fn a_record_copied_onto_itself_is_never_overwritten_and_its_original_never_deleted() {
+    let h = start(account, None, None).await;
+    let from = h.local_vault("Pessoal").await;
+    let inter = h.local_record(&from, None, login("eu@example.com", "s3nha")).await;
+
+    // Local: the same vault, the same place.
+    let plan = h.post("/copy/plan", json!({ "source_vault": from, "dest_vault": from, "record_ids": [inter] })).await;
+    assert_eq!(plan.body["items"][0]["conflict"]["reason"], "self", "{}", plan.body);
+
+    let over = h
+        .post("/copy/run", json!({ "source_vault": from, "dest_vault": from, "item": { "source_id": inter, "action": "overwrite", "dest_id": inter } }))
+        .await;
+    assert_eq!(over.status, 400, "{}", over.body);
+
+    let removed = h.post("/copy/originals", json!({ "source_vault": from, "record_ids": [inter] })).await;
+    assert_eq!(removed.body["removed"], 0, "nothing was copied, so nothing may be deleted");
+    assert_eq!(h.get(&format!("/records/{inter}")).await.body["record"]["archived"], false);
+
+    // AWS: another vault entry over the same account and region is the same place.
+    let alias = alias_vault(&h);
+    let db = h.id("/app/prod/db");
+    let plan = h
+        .post("/copy/plan", json!({ "source_vault": h.vault, "dest_vault": alias, "record_ids": [db], "dest_folder": crate::aws::mapping::folder_id(&alias, "/app/prod") }))
+        .await;
+    assert_eq!(plan.status, 200, "{}", plan.body);
+    assert_eq!(plan.body["items"][0]["conflict"]["reason"], "self", "{}", plan.body);
+    let dest = plan.body["items"][0]["conflict"]["dest_id"].clone();
+
+    let over = h
+        .post("/copy/run", json!({ "source_vault": h.vault, "dest_vault": alias, "item": { "source_id": db, "action": "overwrite", "dest_id": dest } }))
+        .await;
+    assert_eq!(over.status, 400, "{}", over.body);
+
+    let gone = h.post("/copy/originals", json!({ "source_vault": h.vault, "record_ids": [db], "confirm_name": "Produção" })).await;
+    assert_eq!(gone.body["removed"], 0, "{}", gone.body);
+    assert!(h.parameter("/app/prod/db").is_some(), "the only copy survived");
+}
+
+#[tokio::test]
+async fn only_originals_copied_whole_and_still_there_can_be_deleted() {
+    let h = start(account, None, None).await;
+    let from = h.local_vault("Pessoal").await;
+    let inter = h.local_record(&from, None, login("eu@example.com", "s3nha")).await;
+    let other = h.local_record(&from, None, json!({ "title": "Outro", "fields": [] })).await;
+    h.post(
+        &format!("/records/{inter}/attachments"),
+        json!({ "name": "a.txt", "mime": "text/plain", "data": crate::encoding::base64url(b"oi") }),
+    )
+    .await;
+
+    // Into AWS with no bucket: the record arrives, its file does not.
+    let ran = h
+        .post("/copy/run", json!({ "source_vault": from, "dest_vault": h.vault, "dest_folder": h.folder("/app/dev"), "item": { "source_id": inter } }))
+        .await;
+    assert_eq!(ran.status, 200, "{}", ran.body);
+    assert_eq!(ran.body["files_ok"], false, "{}", ran.body);
+
+    let removed = h.post("/copy/originals", json!({ "source_vault": from, "record_ids": [inter, other] })).await;
+    assert_eq!(removed.body["removed"], 0, "{}", removed.body);
+    assert_eq!(removed.body["failed"].as_array().unwrap().len(), 2);
+
+    // Sent again, the same record is not written twice.
+    let again = h
+        .post("/copy/run", json!({ "source_vault": from, "dest_vault": h.vault, "dest_folder": h.folder("/app/dev"), "item": { "source_id": inter } }))
+        .await;
+    assert_eq!(again.status, 200, "{}", again.body);
+    assert_eq!(again.body["already"], true);
+    assert_eq!(again.body["dest_id"], ran.body["dest_id"]);
+
+    // A whole copy whose destination is then deleted no longer counts.
+    let to = h.local_vault("Trabalho").await;
+    let copied = h.post("/copy/run", json!({ "source_vault": from, "dest_vault": to, "item": { "source_id": other } })).await;
+    let dest = copied.body["dest_id"].as_str().unwrap().to_string();
+    h.post(&format!("/records/{dest}/archive"), json!({ "on": true })).await;
+    let removed = h.post("/copy/originals", json!({ "source_vault": from, "record_ids": [other] })).await;
+    assert_eq!(removed.body["removed"], 0, "{}", removed.body);
+
+    // A copy that is there: the original goes to the trash once, and a second call leaves it be.
+    let fresh = h.post("/copy/run", json!({ "source_vault": from, "dest_vault": to, "item": { "source_id": other, "action": "rename", "title": "Outro" } })).await;
+    assert_eq!(fresh.status, 200, "{}", fresh.body);
+    let removed = h.post("/copy/originals", json!({ "source_vault": from, "record_ids": [other] })).await;
+    assert_eq!(removed.body["removed"], 1, "{}", removed.body);
+    let twice = h.post("/copy/originals", json!({ "source_vault": from, "record_ids": [other] })).await;
+    assert_eq!(twice.body["removed"], 0);
+    assert_eq!(twice.body["skipped"], 1, "{}", twice.body);
+
+    // Locked: nothing is answered.
+    h.state.lock.lock();
+    let locked = h.post("/copy/originals", json!({ "source_vault": from, "record_ids": [other] })).await;
+    assert_eq!(locked.status, 423);
+}
+
+#[tokio::test]
+async fn an_overwrite_into_aws_checks_the_version_the_plan_saw() {
+    let h = start(account, None, None).await;
+    let from = h.local_vault("Pessoal").await;
+    let api = h.local_record(&from, None, json!({ "title": "API", "fields": [{ "label": "Senha", "kind": "password", "value": "nova" }] })).await;
+
+    let plan = h.post("/copy/plan", json!({ "source_vault": from, "dest_vault": h.vault, "record_ids": [api], "dest_folder": h.folder("/app/prod") })).await;
+    let conflict = plan.body["items"][0]["conflict"].clone();
+    assert_eq!(conflict["reason"], "exists", "{}", plan.body);
+    let seen = conflict["version"].as_i64().unwrap();
+
+    let stale = h
+        .post("/copy/run", json!({ "source_vault": from, "dest_vault": h.vault, "item": { "source_id": api, "action": "overwrite", "dest_id": conflict["dest_id"], "expected_version": seen - 1 } }))
+        .await;
+    assert_eq!(stale.status, 409, "{}", stale.body);
+
+    let fine = h
+        .post("/copy/run", json!({ "source_vault": from, "dest_vault": h.vault, "item": { "source_id": api, "action": "overwrite", "dest_id": conflict["dest_id"], "expected_version": seen } }))
+        .await;
+    assert_eq!(fine.status, 200, "{}", fine.body);
+    assert_eq!(h.parameter("/app/prod/api").unwrap().value, "nova");
+}
+
+#[tokio::test]
+async fn a_rename_moves_past_names_already_taken() {
+    let h = start(
+        |ssm| {
+            account(ssm);
+            ssm.seed("/app/prod/db-2", "ocupado", Some("Outro"), "alias/prod", &[]);
+        },
+        None,
+        None,
+    )
+    .await;
+    let from = h.local_vault("Pessoal").await;
+    let db = h.local_record(&from, None, json!({ "title": "db", "fields": [{ "label": "Senha", "kind": "password", "value": "x" }] })).await;
+
+    let ran = h
+        .post("/copy/run", json!({ "source_vault": from, "dest_vault": h.vault, "item": { "source_id": db, "action": "rename", "title": "db", "name": "/app/prod/db-2" } }))
+        .await;
+    assert_eq!(ran.status, 200, "{}", ran.body);
+    assert_eq!(ran.body["name"], "/app/prod/db-3");
+    assert!(h.parameter("/app/prod/db-3").is_some());
+
+    // Local: "X (2)" taken becomes "X (3)".
+    let to = h.local_vault("Trabalho").await;
+    h.local_record(&to, None, json!({ "title": "Banco Inter (2)", "fields": [] })).await;
+    let inter = h.local_record(&from, None, login("eu@example.com", "s")).await;
+    let ran = h
+        .post("/copy/run", json!({ "source_vault": from, "dest_vault": to, "item": { "source_id": inter, "action": "rename", "title": "Banco Inter (2)" } }))
+        .await;
+    assert_eq!(ran.status, 200, "{}", ran.body);
+    assert_eq!(ran.body["title"], "Banco Inter (3)");
+}
+
+#[tokio::test]
+async fn a_string_parameter_holding_json_reads_as_one_password_per_key() {
+    let h = start(
+        |ssm| {
+            account(ssm);
+            ssm.seed("/app/legado/config", r#"{"host":"db.interno","port":5432,"password":"p4ss"}"#, Some("Config"), "", &[]);
+            ssm.parameters.get_mut("/app/legado/config").unwrap().kind = "String".into();
+            ssm.seed("/app/legado/url", "texto simples", Some("URL"), "", &[]);
+            ssm.parameters.get_mut("/app/legado/url").unwrap().kind = "String".into();
+        },
+        None,
+        None,
+    )
+    .await;
+
+    let opened = h.get(&format!("/records/{}", h.id("/app/legado/config"))).await;
+    let fields = opened.body["record"]["payload"]["fields"].as_array().unwrap().clone();
+    let pairs: Vec<(String, String, String)> = fields
+        .iter()
+        .map(|f| (f["label"].as_str().unwrap().into(), f["kind"].as_str().unwrap().into(), f["value"].as_str().unwrap().into()))
+        .collect();
+    assert_eq!(pairs.len(), 3, "{pairs:?}");
+    assert!(pairs.contains(&("port".into(), "password".into(), "5432".into())));
+    assert!(pairs.contains(&("password".into(), "password".into(), "p4ss".into())));
+
+    let plain = h.get(&format!("/records/{}", h.id("/app/legado/url"))).await;
+    assert_eq!(plain.body["record"]["payload"]["fields"][0]["label"], "Valor");
+
+    // And it comes home the same way.
+    let to = h.local_vault("Pessoal").await;
+    let done = h
+        .copy_all(json!({ "source_vault": h.vault, "record_ids": [h.id("/app/legado/config")], "dest_vault": to }))
+        .await;
+    let copied = done[0]["dest_id"].as_str().unwrap();
+    let home = h.get(&format!("/records/{copied}")).await;
+    assert_eq!(home.body["record"]["payload"]["fields"].as_array().unwrap().len(), 3);
+
+    // A SecureString with an application's JSON keeps it whole: saving must not rewrite it.
+    let config = h.get(&format!("/records/{}", h.id("/config/app"))).await;
+    assert_eq!(config.body["record"]["payload"]["fields"].as_array().unwrap().len(), 1);
 }

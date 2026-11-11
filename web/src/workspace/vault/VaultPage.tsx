@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Copy,
   CopyPlus,
   FolderInput,
   FolderPlus,
@@ -41,6 +42,7 @@ import { DiscardDialog } from '../DiscardDialog'
 import { DeleteFolderDialog, MoveFolderDialog, RenameFolderDialog } from '../FolderDialogs'
 import type { MenuEntry } from '../menu'
 import { MoveToVaultDialog } from '../MoveToVaultDialog'
+import { CopyDialog, type CopySource } from '../CopyDialog'
 import { NameDialog } from '../NameDialog'
 import { NewRecordDialog } from '../record/NewRecordDialog'
 import { RecordEdit, type EditDraft } from '../record/RecordEdit'
@@ -98,6 +100,7 @@ export function VaultPage({
   const [folderAction, setFolderAction] = useState<{ what: 'rename' | 'move' | 'delete'; folder: FolderNode } | null>(null)
   const [deleting, setDeleting] = useState<{ id: string; title: string } | null>(null)
   const [movingToVault, setMovingToVault] = useState<{ id: string; title: string } | null>(null)
+  const [copying, setCopying] = useState<CopySource | null>(null)
   const [saving, setSaving] = useState(false)
   const [movingAws, setMovingAws] = useState<{ id: string; folderId: string | null } | null>(null)
   const [unavailable, setUnavailable] = useState<{ message: string; code?: string } | null>(null)
@@ -365,6 +368,7 @@ export function VaultPage({
       })),
     },
     { kind: 'item', label: 'Mover', icon: MoveRight, onSelect: () => setFolderAction({ what: 'move', folder }) },
+    { kind: 'item', label: 'Copiar para…', icon: Copy, onSelect: () => setCopying({ vaultId: vault.id, folderId: folder.id, what: `a pasta ${folder.name}` }) },
     { kind: 'separator' },
     { kind: 'item', label: 'Excluir', icon: Trash2, destructive: true, onSelect: () => setFolderAction({ what: 'delete', folder }) },
   ]
@@ -378,6 +382,7 @@ export function VaultPage({
       onSelect: () => setCreating({ payload: emptyPayload(), folderId: folder.id }),
     },
     { kind: 'item', label: 'Subpasta', icon: FolderPlus, onSelect: () => setAsking({ parentId: folder.id }) },
+    { kind: 'item', label: 'Copiar para…', icon: Copy, onSelect: () => setCopying({ vaultId: vault.id, folderId: folder.id, what: `a pasta ${folder.name}` }) },
     { kind: 'separator' },
     { kind: 'item', label: 'Excluir a pasta vazia', icon: Trash2, destructive: true, onSelect: () => setFolderAction({ what: 'delete', folder }) },
   ]
@@ -405,6 +410,12 @@ export function VaultPage({
     ...(aws
       ? []
       : [{ kind: 'item' as const, label: 'Mover para outro cofre', icon: Vault, onSelect: () => setMovingToVault({ id: record.id, title: record.title }) }]),
+    {
+      kind: 'item',
+      label: 'Copiar para…',
+      icon: Copy,
+      onSelect: () => setCopying({ vaultId: vault.id, recordIds: [record.id], what: `“${record.title}”` }),
+    },
     { kind: 'separator' },
     {
       kind: 'item',
@@ -446,7 +457,14 @@ export function VaultPage({
         )
       }
     >
-      <VaultSwitcher vaults={vaults} current={vault} onPick={(id) => guard(() => onVault(id))} onNew={onNewVault} onManage={onManageVaults} />
+      <VaultSwitcher
+        vaults={vaults}
+        current={vault}
+        onPick={(id) => guard(() => onVault(id))}
+        onNew={onNewVault}
+        onManage={onManageVaults}
+        onCopy={() => setCopying({ vaultId: vault.id, what: `o cofre ${vault.name}` })}
+      />
       {chain.map((folder, index) => (
         <Crumb
           key={folder.id}
@@ -538,6 +556,7 @@ export function VaultPage({
           onClone={() => void clone(open.id)}
           onMoveToFolder={(folderId) => void moveTo(open.id, folderId)}
           onMoveToVault={() => setMovingToVault({ id: open.id, title: open.payload.title })}
+          onCopy={() => setCopying({ vaultId: vault.id, recordIds: [open.id], what: `“${open.payload.title}”` })}
           onTrash={() => setDeleting({ id: open.id, title: open.payload.title })}
           permanent={aws}
         />
@@ -566,7 +585,7 @@ export function VaultPage({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {bar}
-      <div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6 max-xl:grid-cols-[260px_minmax(0,1fr)]">
+      <div className="kh-wide grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6 max-xl:grid-cols-[260px_minmax(0,1fr)]">
         <TreeCard
           folders={folders}
           records={records}
@@ -730,6 +749,19 @@ export function VaultPage({
             toast('Registro movido para outro cofre')
           }}
           onCancel={() => setMovingToVault(null)}
+        />
+      )}
+
+      {copying && (
+        <CopyDialog
+          source={copying}
+          vaults={vaults}
+          onAccounts={onAccounts}
+          onCancel={() => setCopying(null)}
+          onDone={() => {
+            setCopying(null)
+            void refresh()
+          }}
         />
       )}
     </div>

@@ -840,8 +840,8 @@ async fn move_record(
     // A17 is not done: a local record does not go into an AWS vault by being dragged there.
     if body.vault_id.as_deref().is_some_and(|to| aws::is_aws_vault(&state, to)) {
         return Err(bad_request(
-            "mover registros entre cofres AWS e locais ainda não é possível. Crie o registro no \
-             outro cofre e apague este",
+            "um registro local não vai para um cofre AWS por um arraste. Use \"Copiar para…\": \
+             ele copia para o outro cofre e, no fim, oferece apagar o original",
         ));
     }
 

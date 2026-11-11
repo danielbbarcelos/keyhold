@@ -7,6 +7,7 @@ import { Workspace } from './workspace/Workspace'
 import { clearNow } from './clipboard'
 import { hasToken } from './session'
 import { applyAppearance } from './theme'
+import { LogoLockup } from './workspace/Logo'
 import { useStatus } from './useStatus'
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
@@ -26,6 +27,7 @@ export function App() {
 
   const theme = status?.appearance.theme
   const accent = status?.appearance.accent
+  const width = status?.appearance.width ?? 'inteira'
 
   // Locking takes the clipboard back. Here rather than in the workspace: the workspace is already
   // gone by the time the status says the vault is locked.
@@ -36,9 +38,9 @@ export function App() {
 
   useEffect(() => {
     if (theme && accent) {
-      applyAppearance({ theme, accent })
+      applyAppearance({ theme, accent, width })
     }
-  }, [theme, accent])
+  }, [theme, accent, width])
 
   return <TooltipProvider delayDuration={300}>{screen()}</TooltipProvider>
 
@@ -77,6 +79,7 @@ function Notice({ title, children }: { title: string; children: React.ReactNode 
     <main className="grid min-h-screen place-items-center p-8">
       <Card className="w-full max-w-md gap-5 py-8">
         <CardHeader className="px-8">
+          <LogoLockup className="mb-4 h-[44px] w-auto self-start" />
           <CardTitle>{title}</CardTitle>
           {children && <CardDescription>{children}</CardDescription>}
         </CardHeader>

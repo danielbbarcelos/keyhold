@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Loader2, Lock } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { PasswordInput } from '@/components/common/PasswordInput'
 
 import { api, ApiError, type Status } from '../api'
+import { LogoLockup } from '../workspace/Logo'
 
 /**
  * The lock screen.
@@ -54,9 +55,7 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
         className="flex w-full max-w-[26rem] flex-col rounded-2xl border bg-card p-8 shadow-pop"
         onSubmit={(event) => void submit(event)}
       >
-        <span className="grid size-12 place-items-center rounded-xl bg-amber-soft text-amber">
-          <Lock className="size-[22px]" />
-        </span>
+        <LogoLockup className="h-[52px] w-auto self-start" />
 
         <h1 className="mt-5 text-[22px] font-semibold tracking-tight">Destrancar o Keyhold</h1>
         <p className="mt-1 mb-6 text-sm text-muted-foreground">

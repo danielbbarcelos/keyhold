@@ -24,11 +24,19 @@ export function IconPicker({
   kind,
   onChange,
   label = 'Trocar o ícone',
+  trigger,
+  onClear,
+  clearLabel = 'Voltar ao padrão',
 }: {
   icon: RecordIcon | null | undefined
   kind?: string
   onChange: (icon: RecordIcon) => void
   label?: string
+  /** What the button shows instead of the record tile (a vault shows its initials until it has an icon). */
+  trigger?: React.ReactNode
+  /** Offered when something can go back to having no icon of its own. */
+  onClear?: () => void
+  clearLabel?: string
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -69,7 +77,7 @@ export function IconPicker({
           title={label}
           className="relative rounded-[10px] outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
-          <RecordTile icon={icon} kind={kind} size="md" />
+          {trigger ?? <RecordTile icon={icon} kind={kind} size="md" />}
           <span className="absolute -right-1 -bottom-1 size-3.5 rounded-full border bg-card" />
         </button>
       </PopoverTrigger>
@@ -169,6 +177,19 @@ export function IconPicker({
             >
               <Trash2 className="size-3.5" />
               Tirar a imagem e voltar ao ícone
+            </button>
+          )}
+
+          {onClear && icon && (icon.image || icon.name) && (
+            <button
+              type="button"
+              onClick={() => {
+                onClear()
+                setOpen(false)
+              }}
+              className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs text-muted-foreground hover:bg-hover hover:text-foreground"
+            >
+              {clearLabel}
             </button>
           )}
 

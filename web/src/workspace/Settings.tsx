@@ -5,7 +5,6 @@ import {
   BellOff,
   Bot,
   Check,
-  Cloud,
   KeyRound,
   Loader2,
   Lock,
@@ -59,6 +58,7 @@ import {
   api,
   ApiError,
   type Accent,
+  type Width,
   type AgentGrant,
   type Appearance,
   type LockPolicy,
@@ -68,6 +68,7 @@ import {
 } from '../api'
 import { askToNotify, notifyState, type NotifyState } from '../notify'
 import { AwsAccounts } from './AwsAccounts'
+import { AwsMark } from './AwsMark'
 import { TransferPanel } from './TransferPanel'
 import { VaultsPanel } from './VaultsPanel'
 
@@ -86,15 +87,24 @@ interface SettingsProps {
   onVaultsChanged: () => void
   /** Tells the top bar which section is being read. */
   onSection?: (label: string) => void
+  /** The section to open on; the first one when not said. */
+  initial?: string
+  /** Changes with every request to open a section, so asking twice for the same one still lands there. */
+  request?: number
 }
 
-const SECTIONS: Array<{ id: string; label: string; icon: LucideIcon }> = [
+/** The AWS mark in the size and slot a lucide icon takes in the navigation. */
+function AwsNavMark({ className }: { className?: string }) {
+  return <AwsMark className={cn(className, 'size-4')} />
+}
+
+const SECTIONS: Array<{ id: string; label: string; icon: LucideIcon | typeof AwsNavMark }> = [
   { id: 'aparencia', label: 'Aparência', icon: Palette },
   { id: 'tranca', label: 'Tranca automática', icon: Timer },
   { id: 'segundo-fator', label: 'Segundo fator', icon: ShieldCheck },
   { id: 'senha', label: 'Senha-mestra', icon: KeyRound },
   { id: 'cofres', label: 'Cofres', icon: Vault },
-  { id: 'aws', label: 'Contas AWS', icon: Cloud },
+  { id: 'aws', label: 'Contas AWS', icon: AwsNavMark },
   { id: 'chaves', label: 'Trocar a chave', icon: RefreshCw },
   { id: 'lixeira', label: 'Lixeira', icon: Trash2 },
   { id: 'trilha', label: 'Trilha', icon: ScrollText },
@@ -111,42 +121,29 @@ const FLAT =
   '[&_[data-slot=card-header]]:px-5 [&_[data-slot=card-content]]:px-5 [&_[data-slot=card-footer]]:border-0 [&_[data-slot=card-footer]]:bg-transparent [&_[data-slot=card-footer]]:px-5 [&_[data-slot=card-footer]]:pt-1 ' +
   '[&_[data-slot=card-title]]:text-[15px] [&_[data-slot=card-title]]:font-semibold [&_[data-slot=card-title]>svg]:hidden [&_[data-slot=card-description]]:max-w-2xl [&_[data-slot=card-description]]:text-[13px]'
 
-export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection }: SettingsProps) {
-  const [active, setActive] = useState(SECTIONS[0].id)
+export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection, initial, request }: SettingsProps) {
+  const known = (id?: string) => SECTIONS.some((one) => one.id === id)
+  const [active, setActive] = useState(known(initial) ? (initial as string) : SECTIONS[0].id)
+  // Sections stay mounted once opened, only hidden: half-typed text in one (a new master password)
+  // survives a look at another.
+  const [opened, setOpened] = useState<Set<string>>(() => new Set([active]))
+  const page = useRef<HTMLDivElement>(null)
+
+  function open(id: string) {
+    setActive(id)
+    setOpened((was) => (was.has(id) ? was : new Set(was).add(id)))
+    page.current?.scrollTo({ top: 0 })
+  }
 
   useEffect(() => {
     onSection?.(SECTIONS.find((one) => one.id === active)?.label ?? '')
   }, [active, onSection])
-  const page = useRef<HTMLDivElement>(null)
-  // A click on the navigation wins over the scroll it causes, which would otherwise light up
-  // whichever short section happens to end at the top.
-  const pinnedUntil = useRef(0)
 
-  // Light up the section being read. The one nearest the top of the page wins.
+  // A shortcut from elsewhere ("Abrir Contas AWS") lands on its own card, without remounting the rest.
   useEffect(() => {
-    const root = page.current
-
-    if (!root) {
-      return
-    }
-
-    const watcher = new IntersectionObserver(
-      (entries) => {
-        const top = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
-
-        if (top && Date.now() > pinnedUntil.current) {
-          setActive(top.target.id.replace('ajuste-', ''))
-        }
-      },
-      { root, rootMargin: '0px 0px -70% 0px' },
-    )
-
-    root.querySelectorAll('section[id^="ajuste-"]').forEach((section) => watcher.observe(section))
-
-    return () => watcher.disconnect()
-  }, [])
+    if (known(initial)) open(initial as string)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request])
 
   const sections: Record<string, React.ReactNode> = {
     aparencia: <AppearanceSettings appearance={status.appearance} onChanged={onChanged} />,
@@ -163,18 +160,14 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
   }
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[232px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6 max-xl:grid-cols-[200px_minmax(0,1fr)]">
+    <div className="kh-wide grid min-h-0 flex-1 grid-cols-[232px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6 max-xl:grid-cols-[200px_minmax(0,1fr)]">
       <nav aria-label="Seções dos ajustes" className="h-fit space-y-0.5 rounded-[14px] border bg-card p-2.5">
         {SECTIONS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
             aria-current={active === id}
-            onClick={() => {
-              setActive(id)
-              pinnedUntil.current = Date.now() + 900
-              document.getElementById(`ajuste-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-            }}
+            onClick={() => open(id)}
             className={cn(
               'relative flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm whitespace-nowrap text-muted-foreground transition-colors hover:bg-hover hover:text-foreground',
               active === id &&
@@ -188,9 +181,9 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
       </nav>
 
       <div ref={page} className="min-h-0 overflow-y-auto">
-        <div className={cn('space-y-5 pb-24', FLAT)}>
-          {SECTIONS.map(({ id }) => (
-            <section key={id} id={`ajuste-${id}`} className="scroll-mt-0">
+        <div className={cn('pb-24', FLAT)}>
+          {SECTIONS.filter(({ id }) => opened.has(id)).map(({ id }) => (
+            <section key={id} hidden={id !== active}>
               {sections[id]}
             </section>
           ))}
@@ -203,6 +196,11 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
 const THEMES: Array<{ value: Theme; label: string; rail: string; side: string; page: string; ink: string }> = [
   { value: 'grafite', label: 'Grafite', rail: '#18191c', side: '#1e1f23', page: '#24252a', ink: '#e6e6e9' },
   { value: 'claro', label: 'Claro', rail: '#ebebee', side: '#f3f3f5', page: '#ffffff', ink: '#1f2024' },
+]
+
+const WIDTHS: Array<{ value: Width; label: string; hint: string }> = [
+  { value: 'inteira', label: 'Tela inteira', hint: 'O conteúdo ocupa toda a janela.' },
+  { value: 'contida', label: 'Contida', hint: 'Centralizado, com até 1280 px, em telas largas.' },
 ]
 
 const ACCENTS: Array<{ value: Accent; label: string; colour: string }> = [
@@ -263,6 +261,25 @@ function AppearanceSettings({
         </div>
 
         <div className="space-y-2.5">
+          <h3 className="text-sm font-bold">Largura do conteúdo</h3>
+          <div className="flex flex-wrap gap-3">
+            {WIDTHS.map((width) => (
+              <ThemeCard
+                key={width.value}
+                label={width.label}
+                chosen={appearance.width === width.value}
+                onPick={() => void save({ width: width.value })}
+              >
+                <WidthPreview contained={width.value === 'contida'} />
+              </ThemeCard>
+            ))}
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {WIDTHS.find((one) => one.value === appearance.width)?.hint}
+          </p>
+        </div>
+
+        <div className="space-y-2.5">
           <h3 className="text-sm font-bold">Cor de destaque</h3>
           <p className="text-sm text-muted-foreground">
             A cor do botão principal, do item selecionado e do foco.
@@ -296,6 +313,19 @@ function AppearanceSettings({
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+/** A small drawing of the window: the rail, and the content either filling it or centred. */
+function WidthPreview({ contained }: { contained: boolean }) {
+  return (
+    <span className="flex h-full bg-background">
+      <span className="w-3 shrink-0 border-r bg-sidebar" />
+      <span className={cn('flex flex-1 flex-col gap-1 py-2', contained ? 'px-6' : 'px-2')}>
+        <span className="h-2 w-1/2 rounded-sm bg-line-2" />
+        <span className="flex-1 rounded-sm border bg-card" />
+      </span>
+    </span>
   )
 }
 

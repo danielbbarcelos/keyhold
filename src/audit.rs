@@ -100,6 +100,7 @@ pub mod action {
     pub const RECORD_DELETED: &str = "record.deleted";
     pub const RECORD_DESTROYED: &str = "record.destroyed";
     pub const RECORD_RESTORED: &str = "record.restored";
+    pub const RECORD_COPIED: &str = "record.copied";
     pub const SECRET_REVEALED: &str = "secret.revealed";
     pub const SECRET_COPIED: &str = "secret.copied";
     pub const VAULT_CREATED: &str = "vault.created";

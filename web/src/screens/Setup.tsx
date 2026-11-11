@@ -13,6 +13,8 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+
+import { LogoLockup } from '../workspace/Logo'
 import { Separator } from '@/components/ui/separator'
 
 import { PasswordInput } from '@/components/common/PasswordInput'
@@ -68,6 +70,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
     <main className="grid min-h-screen place-items-center p-8">
       <Card className="w-full max-w-xl gap-5 py-8">
         <CardHeader className="px-8">
+          <LogoLockup className="mb-4 h-[44px] w-auto self-start" />
           <nav className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
             {STEPS.map((entry, index) => (
               <span key={entry.id} className="flex items-center gap-2">
