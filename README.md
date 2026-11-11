@@ -35,10 +35,12 @@ with your master password, and forgets the key the moment you lock it or close i
 
 ## Get started
 
-Keyhold runs on **Linux**. macOS support is in progress; Windows is not supported.
+Keyhold runs on **Linux**, **macOS** and **Windows**; every change is tested on all three.
 
 You need [Rust](https://rustup.rs) and [Node](https://nodejs.org). Node is only used to build the
 interface, which is then baked into the program.
+
+**Linux and macOS**
 
 ```bash
 git clone https://github.com/danielbbarcelos/keyhold
@@ -46,8 +48,21 @@ cd keyhold
 ./install.sh
 ```
 
-That builds Keyhold, puts it in `~/.local/bin`, and adds **Keyhold** to your app launcher. Run
-`./install.sh` again any time to upgrade.
+That builds Keyhold and puts it in `~/.local/bin`. On Linux it adds **Keyhold** to your app
+launcher; on macOS it makes `~/Applications/Keyhold.app`, which Launchpad and Spotlight find.
+
+**Windows** (PowerShell)
+
+```powershell
+git clone https://github.com/danielbbarcelos/keyhold
+cd keyhold
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+That puts `keyhold.exe` in `%LOCALAPPDATA%\Programs\Keyhold` (on your PATH) and adds **Keyhold**
+to the Start menu. Your vault lives in `%LOCALAPPDATA%\Keyhold`.
+
+Run the installer again any time to upgrade.
 
 Then open Keyhold from the launcher (or run `keyhold`). The first time, it asks you to choose a
 master password and shows a **recovery key**: write it down somewhere safe. With neither of them,
@@ -182,6 +197,8 @@ ever gets the current code, never the secret behind it.
 
 ## A friendlier address
 
+Linux and macOS only, for now.
+
 ```bash
 sudo ~/.local/bin/keyhold set-host            # keyhold.local
 sudo ~/.local/bin/keyhold set-host --remove   # undo
@@ -219,6 +236,9 @@ short is: AES-256-GCM with each record bound to its own id and version, Argon2id
 password, a strict Content-Security-Policy enforced by a test, and no web storage in the interface.
 
 ## Where things are kept
+
+On Linux and macOS (on Windows, the same three folders are under `%LOCALAPPDATA%\Keyhold`, and the
+agent talks through a named pipe instead of a socket):
 
 | Path | What |
 |---|---|

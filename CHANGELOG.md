@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- **macOS and Windows.** Keyhold now runs on both, tested on every change alongside Linux. On
+  macOS the installer makes `Keyhold.app`; on Windows `install.ps1` adds it to the Start menu.
+  The agent talks through a per-user named pipe on Windows, and on both ends only a process of the
+  same user is answered. `set-host` is still Linux and macOS only.
+- **A new record is written on the page**, like an edit, with the templates (Login, Cartão…) on
+  top and, in an AWS vault, the parameter name as you type.
+
+### Fixed
+
+- The title in the record editor lines up with Pasta and Trocar até again; a hint under one field
+  no longer pushes its neighbours down.
+
 ## 0.3.0
 
 Copying between vaults, local and AWS alike, a vault's own icon, and Keyhold's own logo.
