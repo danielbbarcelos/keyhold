@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.0.1
+
+Secrets used by coding assistants never show up in their conversation or in the commands they
+write, and one approval answers a whole burst of requests.
 
 ### Security
 
