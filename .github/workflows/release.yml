@@ -1,12 +1,20 @@
 name: Release
 
-# A tag v* builds Keyhold for Windows, macOS and Linux and attaches the downloads to that tag's
-# release (made as a draft when it does not exist yet). Run by hand, it only builds, so the
-# packages can be checked first.
+# Every release builds its downloads by itself: pushing a tag v* (or publishing a release on
+# GitHub) builds the Windows installer, the macOS app and the Linux package and attaches them.
+# When the release does not exist yet it is created and published, with that version's section
+# of CHANGELOG.md as its notes. Run by hand, it only builds, so the packages can be checked first.
 on:
   push:
     tags: ['v*']
+  release:
+    types: [published]
   workflow_dispatch:
+
+# A tag pushed together with a release made on GitHub would start this twice; one is enough.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -72,35 +80,46 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build
         run: cargo build --release --locked
-      - name: Package
+      - name: Installer
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist\Keyhold\assets | Out-Null
-          Copy-Item target\release\keyhold.exe, install.ps1 dist\Keyhold\
-          Copy-Item 'packaging\windows\Instalar Keyhold.cmd' dist\Keyhold\
-          Copy-Item assets\icon.png dist\Keyhold\assets\
-          Compress-Archive -Path dist\Keyhold -DestinationPath keyhold-windows-x64.zip
-      - name: Installer from the package
+          choco install innosetup -y --no-progress | Out-Null
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp "/DAppVersion=$version" packaging\windows\keyhold.iss
+          if ($LASTEXITCODE -ne 0) { throw 'the installer did not build' }
+          Copy-Item dist\KeyholdSetup.exe KeyholdSetup.exe
+      - name: Install it, the way a person would (silently here)
         shell: pwsh
         run: |
-          Expand-Archive keyhold-windows-x64.zip -DestinationPath check
-          powershell -ExecutionPolicy Bypass -File check\Keyhold\install.ps1
-          & "$env:LOCALAPPDATA\Programs\Keyhold\keyhold.exe" --version
+          Start-Process .\KeyholdSetup.exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+          $app = "$env:LOCALAPPDATA\Programs\Keyhold"
+          if (-not (Test-Path "$app\keyhold.exe")) { throw 'keyhold.exe not installed' }
+          if (-not (Test-Path "$app\keyhold-launch.exe")) { throw 'the launcher is missing' }
+          if (-not (Test-Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'Keyhold.lnk'))) { throw 'no Start menu entry' }
+          if (-not (Test-Path 'HKCU:\Software\Classes\keyhold\shell\open\command')) { throw 'keyhold:// not registered' }
+          & "$app\keyhold.exe" --version
       - uses: actions/upload-artifact@v4
-        with: { name: windows, path: keyhold-windows-x64.zip }
+        with: { name: windows, path: KeyholdSetup.exe }
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release'
     needs: [linux, macos, windows]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { path: out, merge-multiple: true }
-      - name: Attach to the release
+      - name: Attach to the release, making it when there is none
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "Keyhold ${TAG#v}" --notes "Keyhold ${TAG#v}"
-          gh release upload "$TAG" out/* --repo "$GITHUB_REPOSITORY" --clobber
+          VERSION="${TAG#v}"
+          # The notes are that version's section of the changelog, heading excluded.
+          awk -v v="$VERSION" '$0 ~ "^## "v"( |$)" {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "Keyhold $VERSION" > notes.md
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" out/* --repo "$GITHUB_REPOSITORY" --title "Keyhold $VERSION" --notes-file notes.md --latest
+          fi

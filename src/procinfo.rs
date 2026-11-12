@@ -320,14 +320,17 @@ mod imp {
         snapshot().into_iter().find(|(p, _, _)| *p == pid)
     }
 
-    /// "keyhold.exe" reads as "keyhold", the name the other systems give.
+    /// "keyhold.exe" reads as "keyhold", the name the other systems give. A process that has
+    /// exited but is still held open by someone stays in the snapshot; it is not running.
     pub fn name(pid: i32) -> Option<String> {
+        start_mark(pid)?;
         let (_, _, name) = entry(pid)?;
 
         Some(name.strip_suffix(".exe").or_else(|| name.strip_suffix(".EXE")).unwrap_or(&name).to_string())
     }
 
     pub fn parent(pid: i32) -> Option<i32> {
+        start_mark(pid)?;
         entry(pid).map(|(_, parent, _)| parent)
     }
 
@@ -511,13 +514,18 @@ mod tests {
 
     #[test]
     fn a_reaped_process_is_described_by_nothing() {
-        let mut child = if cfg!(windows) {
-            std::process::Command::new("cmd").args(["/C", "exit 0"]).spawn().unwrap()
-        } else {
-            std::process::Command::new("true").spawn().unwrap()
+        // The child is dropped before asking: on Windows a handle still open keeps the exited
+        // process listed.
+        let pid = {
+            let mut child = if cfg!(windows) {
+                std::process::Command::new("cmd").args(["/C", "exit 0"]).spawn().unwrap()
+            } else {
+                std::process::Command::new("true").spawn().unwrap()
+            };
+            let pid = child.id() as i32;
+            child.wait().unwrap();
+            pid
         };
-        let pid = child.id() as i32;
-        child.wait().unwrap();
 
         assert!(name(pid).is_none());
         assert!(start_mark(pid).is_none());

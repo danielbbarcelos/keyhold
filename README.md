@@ -51,16 +51,14 @@ cd keyhold
 That builds Keyhold and puts it in `~/.local/bin`. On Linux it adds **Keyhold** to your app
 launcher; on macOS it makes `~/Applications/Keyhold.app`, which Launchpad and Spotlight find.
 
-**Windows** (PowerShell)
+**Windows**: download `KeyholdSetup.exe` from the
+[latest release](https://github.com/danielbbarcelos/keyhold/releases/latest) and open it. It installs
+for your user only (no administrator), adds **Keyhold** to the Start menu, and can be removed from
+"Adicionar ou remover programas". Your vault lives in `%LOCALAPPDATA%\Keyhold` and is never touched
+by installing, upgrading or uninstalling. Windows warns the first time, because the installer is not
+signed yet: "Mais informações", then "Executar assim mesmo".
 
-```powershell
-git clone https://github.com/danielbbarcelos/keyhold
-cd keyhold
-powershell -ExecutionPolicy Bypass -File .\install.ps1
-```
-
-That puts `keyhold.exe` in `%LOCALAPPDATA%\Programs\Keyhold` (on your PATH) and adds **Keyhold**
-to the Start menu. Your vault lives in `%LOCALAPPDATA%\Keyhold`.
+To build it yourself instead, `powershell -ExecutionPolicy Bypass -File .\install.ps1` in a clone.
 
 Run the installer again any time to upgrade.
 
