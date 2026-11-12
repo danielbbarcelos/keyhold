@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- **A Windows installer**, `KeyholdSetup.exe`: per user, no administrator, Start menu entry,
+  `keyhold://`, uninstallable. Every tag `v*` (or release published on GitHub) now builds the three
+  downloads by itself and publishes the release with its changelog section.
+- **Coding assistants reach AWS vaults** switched on for them in Ajustes → Agentes, with the same
+  approval per field and the same trail as a local vault, through the AWS session open in Keyhold.
+- **Renewing an expired AWS session from the vault**: the code and the AWS page come up right
+  there, and the vault reloads once AWS says yes.
+- Every button with only an icon names its action in a tooltip.
+
+### Changed
+
+- Lists in Ajustes (vaults, agents, the trail switch) are bordered rows with dividers and hover,
+  easier to aim at on a wide screen.
+
 ## 1.0.0
 
 Keyhold on Linux, macOS and Windows with downloads ready to install, names in AWS said before they

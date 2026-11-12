@@ -132,7 +132,7 @@ centred) are in **Ajustes → Aparência**.
 | Deleting | goes to the trash first | permanent (Parameter Store has no trash) |
 | History | every version, kept in the file | the last 100 versions, kept by AWS |
 | Attachments | inside the encrypted file | in an S3 bucket you name, encrypted with KMS |
-| A coding assistant | can be allowed, per vault, per secret | not yet |
+| A coding assistant | can be allowed, per vault, per secret | the same, using the AWS session open in Keyhold |
 
 A local vault is the default and the one Keyhold is built around. An AWS vault is the one, narrow
 exception to "nothing leaves your machine": only that vault's content goes out, and only to the

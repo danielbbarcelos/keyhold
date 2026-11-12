@@ -16,7 +16,7 @@
 //!    values that exist for exactly one moment: the recovery key at setup, and the second-factor
 //!    secret while it is being scanned.
 
-mod aws;
+pub(crate) mod aws;
 mod contents;
 mod copy;
 

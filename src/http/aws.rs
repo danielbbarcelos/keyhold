@@ -2591,3 +2591,44 @@ pub(crate) fn start_sweeper(state: &Arc<AppState>, every: Duration) -> tokio::ta
 
 #[cfg(test)]
 mod tests;
+
+// ── for the agent ───────────────────────────────────────────────────────────────────────────────
+
+/// A record of an AWS vault as an agent's search lists it: nothing secret.
+pub(crate) struct AgentPreview {
+    pub id: String,
+    pub title: String,
+    pub subtitle: String,
+}
+
+/// The records of an AWS vault, for an agent, through the same listing the interface reads.
+pub(crate) async fn agent_previews(state: &AppState, vault_id: &str) -> Result<Vec<AgentPreview>, String> {
+    let Json(listing) = list_records(state, vault_id).await.map_err(|failure| failure.1)?;
+
+    Ok(listing["records"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .map(|row| AgentPreview {
+                    id: row["id"].as_str().unwrap_or_default().to_string(),
+                    title: row["title"].as_str().unwrap_or_default().to_string(),
+                    subtitle: row["subtitle"].as_str().unwrap_or_default().to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// An AWS record's payload, for an agent that was allowed to read it. The reason it did not open
+/// (an expired session, a denied parameter) comes back in words.
+pub(crate) async fn agent_payload(state: &AppState, record_id: &str) -> Result<Payload, String> {
+    let Json(opened) = open_record(state, record_id).await.map_err(|failure| {
+        if failure.2 == Some("session_expired") {
+            "a sessão da AWS acabou. Peça para a pessoa renovar no Keyhold".to_string()
+        } else {
+            failure.1
+        }
+    })?;
+
+    serde_json::from_value(opened["record"]["payload"].clone()).map_err(|e| e.to_string())
+}

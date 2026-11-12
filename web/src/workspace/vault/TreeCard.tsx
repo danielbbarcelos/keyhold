@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Folder, FolderOpen, List, ListTree, Search, Star, Trash2 } from 'lucide-react'
 
 import { Input } from '@/components/ui/input'
+import { Tip } from '@/components/ui/tip'
 import { cn } from '@/lib/utils'
 
 import type { FolderNode, RecordPreview } from '../../api'
@@ -319,6 +320,7 @@ export function TreeCard({
               dropping === folder.id && 'ring-2 ring-primary',
             )}
           >
+<Tip label={open ? 'Recolher' : 'Expandir'}>
             <button
               type="button"
               aria-label={open ? 'Recolher' : 'Expandir'}
@@ -333,7 +335,7 @@ export function TreeCard({
               className="grid size-5 place-items-center rounded text-faint hover:text-foreground"
             >
               {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-            </button>
+            </button></Tip>
             <button
               type="button"
               onClick={(event) => !pick(key, event) && onFolder(folder.id)}
@@ -387,15 +389,15 @@ export function TreeCard({
           </ModeButton>
         </div>
         {mode === 'tree' && folders.length > 0 && (
+<Tip label={allClosed ? 'Expandir todas as pastas' : 'Recolher todas as pastas'}>
           <button
             type="button"
-            title={allClosed ? 'Expandir todas as pastas' : 'Recolher todas as pastas'}
             aria-label={allClosed ? 'Expandir todas as pastas' : 'Recolher todas as pastas'}
             onClick={() => setClosed(allClosed ? new Set() : new Set(folders.map((folder) => folder.id)))}
             className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border bg-raised text-faint hover:text-foreground"
           >
             {allClosed ? <ChevronsUpDown className="size-[15px]" /> : <ChevronsDownUp className="size-[15px]" />}
-          </button>
+          </button></Tip>
         )}
       </div>
 
@@ -492,16 +494,16 @@ export function TreeCard({
 
 function ModeButton({ on, label, onClick, children }: { on: boolean; label: string; onClick: () => void; children: React.ReactNode }) {
   return (
+<Tip label={label}>
     <button
       type="button"
-      title={label}
       aria-label={label}
       aria-pressed={on}
       onClick={onClick}
       className={cn('grid h-[26px] w-[30px] place-items-center rounded-md text-faint hover:text-foreground', on && 'bg-card text-foreground shadow-sm')}
     >
       {children}
-    </button>
+    </button></Tip>
   )
 }
 

@@ -173,9 +173,13 @@ pub fn list(store: &Store, key: &SecretKey) -> Result<Vec<Grant>> {
             continue;
         }
 
-        let record_title = crate::records::open(store, key, &record_id)
-            .map(|record| record.payload.title)
-            .unwrap_or_default();
+        // An AWS record is not in the file: its parameter name stands in for the title.
+        let record_title = match crate::aws::mapping::decode_id(&record_id) {
+            Some((_, _, name)) => name,
+            None => crate::records::open(store, key, &record_id)
+                .map(|record| record.payload.title)
+                .unwrap_or_default(),
+        };
 
         standing.push(Grant {
             id,

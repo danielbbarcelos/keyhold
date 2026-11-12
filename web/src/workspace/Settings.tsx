@@ -857,15 +857,17 @@ function TrailSettings({ on, onChanged }: { on: boolean; onChanged: () => void }
       </CardHeader>
 
       <CardContent className="space-y-4 px-6">
-        <div className="flex items-center justify-between gap-4">
-          <Label htmlFor="log-reads" className="font-normal">
-            Registrar quando um segredo é revelado ou copiado
-          </Label>
-          <Switch
-            id="log-reads"
-            checked={on}
-            onCheckedChange={(next) => void api.setLogReads(next).then(onChanged)}
-          />
+        <div className="divide-y overflow-hidden rounded-xl border">
+          <div className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-hover">
+            <Label htmlFor="log-reads" className="flex-1 cursor-pointer py-1 font-normal">
+              Registrar quando um segredo é revelado ou copiado
+            </Label>
+            <Switch
+              id="log-reads"
+              checked={on}
+              onCheckedChange={(next) => void api.setLogReads(next).then(onChanged)}
+            />
+          </div>
         </div>
 
         {!on && (
@@ -1090,8 +1092,9 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
           </p>
         </div>
 
-        <div className="flex items-start justify-between gap-4">
-          <Label htmlFor="agent-reveal" className="font-normal">
+        <div className="divide-y overflow-hidden rounded-xl border">
+        <div className="flex items-start justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-hover">
+          <Label htmlFor="agent-reveal" className="flex flex-1 cursor-pointer flex-col items-start gap-1 font-normal">
             Deixar o assistente ler valores
             <span className="mt-1 block text-sm text-muted-foreground">
               Desligado, ele nunca recebe uma senha — e por isso não tem como escrevê-la na conversa.
@@ -1106,8 +1109,8 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
           />
         </div>
 
-        <div className="flex items-center justify-between gap-4">
-          <Label htmlFor="agent-surface" className="font-normal">
+        <div className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-hover">
+          <Label htmlFor="agent-surface" className="flex-1 cursor-pointer py-1 font-normal">
             Aceitar pedidos de um assistente local
           </Label>
           <Switch
@@ -1116,6 +1119,7 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
             disabled={marked === 0}
             onCheckedChange={(on) => void api.setAgentSurface(on).then(refresh)}
           />
+        </div>
         </div>
 
         {marked === 0 && (
@@ -1126,22 +1130,22 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
 
         <DesktopKnock />
 
-        <div className="space-y-3 border-t pt-4">
+        <div className="space-y-2 border-t pt-4">
           <Label>Cofres ao alcance</Label>
 
+          <div className="divide-y overflow-hidden rounded-xl border">
           {vaults
             .filter((vault) => !vault.archived)
             .map((vault) => (
-              <div key={vault.id} className="flex items-center justify-between gap-4">
-                <Label htmlFor={`agent-${vault.id}`} className="font-normal">
+              <div key={vault.id} className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-hover">
+                <Label htmlFor={`agent-${vault.id}`} className="flex-1 cursor-pointer py-1 font-normal">
                   {vault.name}
                   {vault.kind === 'aws' && (
-                    <span className="ml-2 text-xs text-faint">cofre AWS, ainda fora do alcance de agentes</span>
+                    <span className="ml-2 text-xs text-faint">cofre AWS, lido com a sessão aberta no Keyhold</span>
                   )}
                 </Label>
                 <Switch
                   id={`agent-${vault.id}`}
-                  disabled={vault.kind === 'aws'}
                   checked={vault.agent_access}
                   onCheckedChange={(on) =>
                     void api.setAgentAccess(vault.id, on).then(() => {
@@ -1152,6 +1156,7 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
                 />
               </div>
             ))}
+          </div>
         </div>
 
         <StandingGrants onChanged={refresh} />

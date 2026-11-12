@@ -65,9 +65,10 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="space-y-3 px-6">
+      <CardContent className="px-6">
+        <div className="divide-y overflow-hidden rounded-xl border">
         {vaults.map((vault) => (
-          <div key={vault.id} className="flex items-center justify-between gap-3">
+          <div key={vault.id} className="flex items-center justify-between gap-3 px-4 py-3.5 transition-colors hover:bg-hover">
             <span className="flex min-w-0 items-center gap-2">
               <VaultInitial vault={vault} />
               <span className="truncate text-sm">{vault.name}</span>
@@ -88,8 +89,7 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Copiar o cofre para…"
-                title="Copiar para outro cofre, local ou AWS"
+                aria-label="Copiar para outro cofre"
                 onClick={() => setCopying(vault)}
               >
                 <Copy />
@@ -115,6 +115,7 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
             </span>
           </div>
         ))}
+        </div>
       </CardContent>
 
       {renaming && (

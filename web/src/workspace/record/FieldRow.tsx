@@ -420,7 +420,7 @@ function IconButton({ label, onClick, children }: { label: string; onClick: () =
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label={label} onClick={onClick}>
+        <Button tooltip={false} variant="ghost" size="icon" aria-label={label} onClick={onClick}>
           {children}
         </Button>
       </TooltipTrigger>

@@ -49,6 +49,7 @@ import { RecordSkeleton, TreeSkeleton } from '../Skeletons'
 import { Splitter } from '../Splitter'
 import { RecordEdit, renameOf, type EditDraft } from '../record/RecordEdit'
 import { awsPathOf, nameProblem, suggestName, titleProblem } from '../awsName'
+import { useAwsRenew } from '../AwsAccounts'
 import { RecordView } from '../record/RecordView'
 import { Crumb, TopBar, VaultSwitcher } from '../shell'
 import { toast, toastError } from '../toast'
@@ -174,6 +175,27 @@ export function VaultPage({
     return titleProblem(editing.payload.title) ?? (leaf !== null ? nameProblem(awsPathOf(editing.folderId), leaf) : null)
   })()
 
+  // Renewing an expired AWS session from the vault itself: its login is known, so the code and
+  // the AWS page come up here, and the vault reloads (skeletons first) once AWS says yes.
+  const { renew, busy: renewing, dialog: renewDialog } = useAwsRenew(() => {
+    setUnavailable(null)
+    setLoaded(false)
+    void refreshRef.current()
+  })
+  const refreshRef = useRef<() => Promise<void>>(async () => undefined)
+
+  async function renewHere() {
+    try {
+      const { logins, connections } = await api.aws()
+      const connection = connections.find((one) => one.id === vault.aws?.connection_id)
+      const login = logins.find((one) => one.id === connection?.login_id)
+      if (login) await renew(login)
+      else onAccounts()
+    } catch (cause) {
+      toastError(cause, 'Não consegui ler as contas AWS')
+    }
+  }
+
   const refresh = useCallback(async () => {
     try {
       const [tree, list, bin] = await Promise.all([api.folders(vault.id), api.records(vault.id), api.trash(vault.id)])
@@ -225,6 +247,8 @@ export function VaultPage({
       }
     }
   }, [vault.id])
+
+  refreshRef.current = refresh
 
   useEffect(() => {
     setOpen(null)
@@ -856,10 +880,20 @@ export function VaultPage({
             </b>
             <p className="text-sm text-muted-foreground">{unavailable.message}</p>
             <div className="flex justify-center gap-2">
-              {unavailable.code === 'session_expired' && <Button onClick={onAccounts}>Renovar em Contas AWS</Button>}
-              <Button variant="outline" onClick={() => void refresh()}>
-                Tentar de novo
-              </Button>
+              {unavailable.code === 'session_expired' ? (
+                <>
+                  <Button disabled={renewing} onClick={() => void renewHere()}>
+                    Renovar a sessão
+                  </Button>
+                  <Button variant="outline" onClick={onAccounts}>
+                    Abrir Contas AWS
+                  </Button>
+                </>
+              ) : (
+                <Button variant="outline" onClick={() => void refresh()}>
+                  Tentar de novo
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -976,7 +1010,11 @@ export function VaultPage({
       {bar}
       <div className="kh-wide grid min-h-0 flex-1 grid-cols-[var(--kh-tree,300px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6">
         <div className="relative grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
-        {loaded ? (
+        {loaded && unavailable ? (
+          <aside className="grid min-h-0 place-items-center rounded-[14px] border bg-card p-6 text-center text-[13px] text-faint">
+            Os registros deste cofre ficam disponíveis quando a sessão da AWS for renovada.
+          </aside>
+        ) : loaded ? (
         <TreeCard
           vaultId={vault.id}
           folders={folders}
@@ -1020,6 +1058,8 @@ export function VaultPage({
         </div>
         <div className="min-h-0 min-w-0">{main()}</div>
       </div>
+
+      {renewDialog}
 
       <DiscardDialog
         open={leaving !== null}

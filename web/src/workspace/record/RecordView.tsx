@@ -163,6 +163,7 @@ export function RecordView({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
+              tooltip={false}
               variant="outline"
               size="icon-lg"
               aria-label={record.favourite ? 'Tirar dos favoritos' : 'Favoritar'}

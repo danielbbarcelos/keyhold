@@ -3,6 +3,7 @@ import { Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react'
 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
+import { Tip } from '@/components/ui/tip'
 
 /**
  * A date, picked from a small calendar in the interface's own look rather than the browser's.
@@ -97,15 +98,17 @@ export function DatePicker({
         />
         <span className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center">
           {value && (
-            <button
+            <Tip label="Tirar a data"><button
               type="button"
+             
               aria-label="Tirar a data"
               onClick={() => onChange('')}
               className="grid size-7 place-items-center rounded-md text-faint hover:bg-hover hover:text-foreground"
             >
               <X className="size-3.5" />
-            </button>
+            </button></Tip>
           )}
+          <Tip label="Escolher no calendário">
           <PopoverTrigger asChild>
             <button
               type="button"
@@ -115,20 +118,21 @@ export function DatePicker({
               <Calendar className="size-4" />
             </button>
           </PopoverTrigger>
+          </Tip>
         </span>
       </div>
 
       <PopoverContent align="end" className="w-[268px] p-3">
         <div className="mb-2 flex items-center gap-1">
-          <button type="button" aria-label="Mês anterior" onClick={() => shift(-1)} className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-hover">
+          <Tip label="Mês anterior"><button type="button" aria-label="Mês anterior" onClick={() => shift(-1)} className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-hover">
             <ChevronLeft className="size-4" />
-          </button>
+          </button></Tip>
           <b className="flex-1 text-center text-sm font-semibold first-letter:uppercase">
             {MONTHS[month.getMonth()]} de {month.getFullYear()}
           </b>
-          <button type="button" aria-label="Próximo mês" onClick={() => shift(1)} className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-hover">
+          <Tip label="Próximo mês"><button type="button" aria-label="Próximo mês" onClick={() => shift(1)} className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-hover">
             <ChevronRight className="size-4" />
-          </button>
+          </button></Tip>
         </div>
 
         <div className="grid grid-cols-7 gap-0.5 text-center">

@@ -411,6 +411,7 @@ function SecretInput({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
+                tooltip={false}
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Gerar uma senha"

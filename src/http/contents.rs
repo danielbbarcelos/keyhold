@@ -190,14 +190,6 @@ async fn agent_access(
     Path(id): Path<String>,
     Json(flag): Json<Flag>,
 ) -> Answer {
-    // A19: the agent surface reads the local file only. Saying so here is better than a switch
-    // that turns on and then finds nothing.
-    if flag.on && aws::is_aws_vault(&state, &id) {
-        return Err(bad_request(
-            "assistentes ainda não leem cofres AWS. Este cofre fica fora do alcance deles",
-        ));
-    }
-
     let store = state.store.lock().unwrap();
 
     with_key!(state, |_key| vaults::set_agent_access(&store, &id, flag.on)).map_err(bad_request)?;

@@ -364,11 +364,9 @@ where
     Ok(())
 }
 
-/// The vaults an agent is allowed to know about at all.
-///
-/// Never an AWS vault (F9, A19). Reading one means requests to AWS on the agent's behalf, with
-/// approvals that would have to outlive a socket round trip; until that is built, an agent sees
-/// only the local file, and the switch that would expose an AWS vault refuses to turn on.
+/// The vaults an agent is allowed to know about at all: the ones switched on for agents, local or
+/// AWS. An AWS vault is read through the same calls the interface makes, with the session that is
+/// open in Keyhold; without one, the agent is told to have the person renew it.
 fn visible_vaults(state: &AppState) -> Vec<String> {
     let store = state.store.lock().unwrap();
 
@@ -380,7 +378,7 @@ fn visible_vaults(state: &AppState) -> Vec<String> {
                     found
                         .into_iter()
                         .filter(|vault| {
-                            vault.agent_access && !vault.archived && vault.kind != vaults::KIND_AWS
+                            vault.agent_access && !vault.archived
                         })
                         .map(|vault| vault.id)
                         .collect()
@@ -417,14 +415,17 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
     match request {
         Request::Status => {
             let allowed = visible_vaults(state);
+            let mut records = 0;
+            for vault in &allowed {
+                if crate::http::aws::is_aws_vault(state, vault) {
+                    records += crate::http::aws::agent_previews(state, vault).await.map(|found| found.len()).unwrap_or(0);
+                } else {
+                    let store = state.store.lock().unwrap();
+                    records += records::list(&store, vault, false).map(|found| found.len()).unwrap_or(0);
+                }
+            }
+
             let store = state.store.lock().unwrap();
-
-            let records = allowed
-                .iter()
-                .filter_map(|vault| records::list(&store, vault, false).ok())
-                .map(|found| found.len())
-                .sum();
-
             let may_reveal = crate::settings::agent_may_reveal(&store);
 
             Response::Status {
@@ -436,9 +437,9 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
             }
         }
 
-        Request::Search { query } => search(state, &query),
+        Request::Search { query } => search(state, &query).await,
 
-        Request::Describe { record } => describe(state, &record),
+        Request::Describe { record } => describe(state, &record).await,
 
         Request::Get { record, field } => {
             // The refusal that matters: a value an agent never receives is a value it cannot print
@@ -460,7 +461,7 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
 
             match approved(state, peer, &record, &field, "get").await {
                 Err(refusal) => refusal,
-                Ok(()) => match value_of(state, &record, &field) {
+                Ok(()) => match value_of(state, &record, &field).await {
                     Some(value) => {
                         note_agent(state, peer, audit::action::SECRET_REVEALED, &record, &field, true);
 
@@ -474,7 +475,7 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
         Request::Copy { record, field } => {
             match approved(state, peer, &record, &field, "copy").await {
                 Err(refusal) => refusal,
-                Ok(()) => match value_of(state, &record, &field) {
+                Ok(()) => match value_of(state, &record, &field).await {
                     None => Response::refused("esse campo não existe neste registro"),
                     Some(value) => match crate::clipboard::copy_for_a_while(&value) {
                         Err(error) => Response::refused(error.to_string()),
@@ -502,7 +503,7 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
 
             match approved(state, peer, &record, &field, "run").await {
                 Err(refusal) => refusal,
-                Ok(()) => match value_of(state, &record, &field) {
+                Ok(()) => match value_of(state, &record, &field).await {
                     None => Response::refused("esse campo não existe neste registro"),
                     Some(value) => {
                         note_agent(state, peer, audit::action::SECRET_REVEALED, &record, &field, true);
@@ -515,32 +516,50 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
     }
 }
 
-fn search(state: &Arc<AppState>, query: &str) -> Response {
+async fn search(state: &Arc<AppState>, query: &str) -> Response {
     // Same reason as `reachable`: this takes the store lock, so it runs before we take it here.
     let allowed = visible_vaults(state);
-    let store = state.store.lock().unwrap();
     let needle = query.trim().to_lowercase();
+    let matches = |title: &str, subtitle: &str, url: &str| {
+        needle.is_empty() || format!("{title} {subtitle} {url}").to_lowercase().contains(&needle)
+    };
+    let mut found = Vec::new();
 
-    let found = state.lock.with_key(|key| {
-        let mut found = Vec::new();
-
-        for vault_id in &allowed {
-            let name = vaults::read_vault(&store, key, vault_id)
-                .map(|vault| vault.name)
-                .unwrap_or_default();
-
-            let Ok(previews) = records::list_with_previews(&store, key, vault_id, false) else {
+    for vault_id in &allowed {
+        if crate::http::aws::is_aws_vault(state, vault_id) {
+            let name = {
+                let store = state.store.lock().unwrap();
+                state.lock.with_key(|key| vaults::read_vault(&store, key, vault_id).map(|v| v.name).unwrap_or_default()).unwrap_or_default()
+            };
+            let Ok(previews) = crate::http::aws::agent_previews(state, vault_id).await else {
                 continue;
             };
-
             for preview in previews {
-                let haystack = format!("{} {} {}", preview.title, preview.subtitle, preview.url)
-                    .to_lowercase();
-
-                if !needle.is_empty() && !haystack.contains(&needle) {
+                if !matches(&preview.title, &preview.subtitle, "") {
                     continue;
                 }
+                found.push(RecordSummary {
+                    id: preview.id,
+                    title: preview.title,
+                    username: preview.subtitle,
+                    url: String::new(),
+                    vault: name.clone(),
+                    kind: "item".into(),
+                });
+            }
+            continue;
+        }
 
+        let store = state.store.lock().unwrap();
+        let _ = state.lock.with_key(|key| {
+            let name = vaults::read_vault(&store, key, vault_id).map(|vault| vault.name).unwrap_or_default();
+            let Ok(previews) = records::list_with_previews(&store, key, vault_id, false) else {
+                return;
+            };
+            for preview in previews {
+                if !matches(&preview.title, &preview.subtitle, &preview.url) {
+                    continue;
+                }
                 found.push(RecordSummary {
                     id: preview.header.id,
                     title: preview.title,
@@ -550,12 +569,10 @@ fn search(state: &Arc<AppState>, query: &str) -> Response {
                     kind: preview.header.kind,
                 });
             }
-        }
+        });
+    }
 
-        found
-    });
-
-    Response::Records { records: found.unwrap_or_default() }
+    Response::Records { records: found }
 }
 
 /// Whether this record is one the agent is allowed to touch.
@@ -565,6 +582,15 @@ fn search(state: &Arc<AppState>, query: &str) -> Response {
 /// not fail — it waits, forever, for itself.
 fn reachable(state: &Arc<AppState>, record_id: &str) -> bool {
     let allowed = visible_vaults(state);
+
+    // An AWS record's id names its vault; whether the parameter is there is AWS's to say.
+    if crate::aws::mapping::is_aws_id(record_id) {
+        return matches!(
+            crate::aws::mapping::decode_id(record_id),
+            Some((crate::aws::mapping::IdKind::Record, vault, _)) if allowed.contains(&vault)
+        );
+    }
+
     let store = state.store.lock().unwrap();
 
     match records::header(&store, record_id) {
@@ -573,24 +599,30 @@ fn reachable(state: &Arc<AppState>, record_id: &str) -> bool {
     }
 }
 
-fn describe(state: &Arc<AppState>, record_id: &str) -> Response {
+/// A record's payload, from the file or from AWS. `Err` carries why an AWS record did not open
+/// (an expired session, most often), for the agent to pass on.
+async fn payload_of(state: &Arc<AppState>, record_id: &str) -> std::result::Result<records::Payload, String> {
+    if crate::aws::mapping::is_aws_id(record_id) {
+        return crate::http::aws::agent_payload(state, record_id).await;
+    }
+
+    let store = state.store.lock().unwrap();
+    state
+        .lock
+        .with_key(|key| records::open(&store, key, record_id).map(|record| record.payload).map_err(|e| e.to_string()))
+        .unwrap_or_else(|| Err("o cofre está trancado".into()))
+}
+
+async fn describe(state: &Arc<AppState>, record_id: &str) -> Response {
     if !reachable(state, record_id) {
         return Response::refused("esse registro não está ao alcance de um agente");
     }
 
-    let store = state.store.lock().unwrap();
-
-    let opened = state
-        .lock
-        .with_key(|key| records::open(&store, key, record_id).ok())
-        .flatten();
-
-    match opened {
-        None => Response::refused("esse registro não abriu"),
-        Some(record) => Response::Fields {
-            title: record.payload.title,
-            fields: record
-                .payload
+    match payload_of(state, record_id).await {
+        Err(why) => Response::refused(format!("esse registro não abriu: {why}")),
+        Ok(payload) => Response::Fields {
+            title: payload.title,
+            fields: payload
                 .fields
                 .iter()
                 .map(|field| FieldSummary {
@@ -603,29 +635,21 @@ fn describe(state: &Arc<AppState>, record_id: &str) -> Response {
     }
 }
 
-fn value_of(state: &Arc<AppState>, record_id: &str, field: &str) -> Option<String> {
-    let store = state.store.lock().unwrap();
+async fn value_of(state: &Arc<AppState>, record_id: &str, field: &str) -> Option<String> {
+    let payload = payload_of(state, record_id).await.ok()?;
 
-    state
-        .lock
-        .with_key(|key| {
-            let record = records::open(&store, key, record_id).ok()?;
+    if field == "username" {
+        return Some(payload.username()).filter(|s| !s.is_empty());
+    }
 
-            if field == "username" {
-                return Some(record.payload.username()).filter(|s| !s.is_empty());
-            }
+    let one = payload.fields.iter().find(|one| one.label.eq_ignore_ascii_case(field))?;
 
-            let one = record.payload.fields.iter().find(|one| one.label.eq_ignore_ascii_case(field))?;
+    // A 2FA field hands out the code of the moment, never the secret that makes codes.
+    if one.kind == "totp" {
+        return crate::totp::code_for_field(&one.value, now_seconds()).map(|(code, _)| code);
+    }
 
-            // A 2FA field hands out the code of the moment, never the secret that makes codes.
-            if one.kind == "totp" {
-                return crate::totp::code_for_field(&one.value, now_seconds())
-                    .map(|(code, _)| code);
-            }
-
-            Some(one.value.clone())
-        })
-        .flatten()
+    Some(one.value.clone())
 }
 
 /// Ask the person, unless they already said yes for this field.
@@ -657,18 +681,7 @@ async fn approved(
         return Ok(());
     }
 
-    let title = {
-        let store = state.store.lock().unwrap();
-
-        state
-            .lock
-            .with_key(|key| {
-                records::open(&store, key, record_id)
-                    .map(|record| record.payload.title)
-                    .unwrap_or_default()
-            })
-            .unwrap_or_default()
-    };
+    let title = payload_of(state, record_id).await.map(|payload| payload.title).unwrap_or_default();
 
     let id = vaults::new_id();
 

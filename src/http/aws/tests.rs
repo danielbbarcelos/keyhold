@@ -2080,3 +2080,46 @@ async fn a_string_parameter_holding_json_reads_as_one_password_per_key() {
     let config = h.get(&format!("/records/{}", h.id("/config/app"))).await;
     assert_eq!(config.body["record"]["payload"]["fields"].as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn an_agent_reaches_an_aws_vault_switched_on_for_it_and_still_asks() {
+    use crate::agent::protocol::{Request, Response};
+
+    let h = start(account, None, None).await;
+
+    let on = h.post(&format!("/vaults/{}/agent-access", h.vault), json!({ "on": true })).await;
+    assert_eq!(on.status, 200, "an AWS vault can be put within an agent's reach: {}", on.body);
+    {
+        let store = h.state.store.lock().unwrap();
+        crate::settings::set_agent_may_reveal(&store, true).unwrap();
+    }
+
+    let found = crate::agent::handle_for_tests(Request::Search { query: "produção".into() }, &h.state).await;
+    let Response::Records { records } = found else { panic!("not a list: {found:?}") };
+    assert!(records.iter().any(|r| r.id == h.id("/app/prod/db")), "{records:?}");
+
+    let described = crate::agent::handle_for_tests(Request::Describe { record: h.id("/app/prod/db") }, &h.state).await;
+    let Response::Fields { fields, .. } = described else { panic!("no fields: {described:?}") };
+    assert!(fields.iter().all(|f| !f.label.is_empty()));
+
+    let field = fields[0].label.clone();
+    let state = h.state.clone();
+    let id = h.id("/app/prod/db");
+    let asking = tokio::spawn(async move {
+        crate::agent::handle_for_tests(Request::Get { record: id, field }, &state).await
+    });
+
+    let waiting = loop {
+        let waiting = h.state.agent.waiting();
+        if !waiting.is_empty() {
+            break waiting;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    };
+    h.state.agent.answer(&waiting[0].id, true);
+
+    match asking.await.unwrap() {
+        Response::Value { value } => assert_eq!(value, "hunter2"),
+        other => panic!("no value: {other:?}"),
+    }
+}
