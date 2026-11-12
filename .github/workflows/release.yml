@@ -54,8 +54,7 @@ jobs:
         working-directory: web
         run: npm ci --ignore-scripts && npm run build
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # master
-        with: { toolchain: stable }
-        with: { targets: 'aarch64-apple-darwin,x86_64-apple-darwin' }
+        with: { toolchain: stable, targets: 'aarch64-apple-darwin,x86_64-apple-darwin' }
       - name: Build (Apple Silicon and Intel)
         run: |
           cargo build --release --locked --target aarch64-apple-darwin
