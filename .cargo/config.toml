@@ -1,0 +1,7 @@
+# Windows: link the C runtime into the executables. Without this they need VCRUNTIME140.dll,
+# which a clean Windows does not have, and Keyhold would install fine and then refuse to start.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

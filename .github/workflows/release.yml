@@ -80,6 +80,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build
         run: cargo build --release --locked
+      - name: Nothing a clean Windows lacks
+        shell: pwsh
+        run: |
+          # This machine has the Visual C++ runtime; a person's may not. The executables must not
+          # ask for it (see .cargo/config.toml), or Keyhold installs and then fails to start.
+          foreach ($exe in 'keyhold.exe', 'keyhold-launch.exe') {
+            $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("target\release\$exe"))
+            foreach ($dll in 'VCRUNTIME140', 'MSVCP140', 'api-ms-win-crt') {
+              if ($text.IndexOf($dll, [StringComparison]::OrdinalIgnoreCase) -ge 0) { throw "$exe needs $dll" }
+            }
+          }
       - name: Installer
         shell: pwsh
         run: |
@@ -118,6 +129,9 @@ jobs:
           # The notes are that version's section of the changelog, heading excluded.
           awk -v v="$VERSION" '$0 ~ "^## "v"( |$)" {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "Keyhold $VERSION" > notes.md
+          # What each download should hash to, for anyone who wants to check before running it.
+          (cd out && sha256sum * > SHA256SUMS.txt)
+          { echo; echo '### SHA-256'; echo; echo '```'; cat out/SHA256SUMS.txt; echo '```'; } >> notes.md
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" out/* --repo "$GITHUB_REPOSITORY" --clobber
           else
