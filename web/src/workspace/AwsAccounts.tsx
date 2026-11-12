@@ -51,7 +51,7 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
       announceAwsChange()
     } catch (cause) {
       setLogins([])
-      setFailed(cause instanceof Error ? cause.message : 'Não consegui ler as contas AWS.')
+      setFailed(cause instanceof Error ? cause.message : 'Não foi possível carregar as contas AWS.')
     }
   }, [])
 
@@ -67,7 +67,7 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
         void refresh()
       }
     } catch (cause) {
-      toastError(cause, 'Não renovei a sessão')
+      toastError(cause, 'Não foi possível renovar a sessão')
     }
   }
 
@@ -81,9 +81,9 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
           <span className="rounded-full bg-sky-soft px-2 py-px text-[11px] font-medium text-sky">novo</span>
         </CardTitle>
         <CardDescription>
-          Para cofres guardados no AWS Parameter Store. O login é o SSO do IAM Identity Center, feito aqui
-          mesmo; a sessão fica só na memória e some quando o Keyhold fecha ou tranca. Só o conteúdo de um
-          cofre AWS sai desta máquina, e só para a conta dele.
+          Para cofres armazenados no AWS Parameter Store. O login é feito pelo SSO do IAM Identity Center,
+          no próprio Keyhold. A sessão fica apenas na memória e é encerrada quando o Keyhold é fechado ou
+          trancado. Apenas o conteúdo de um cofre AWS sai desta máquina, e somente para a conta dele.
         </CardDescription>
       </CardHeader>
 
@@ -130,7 +130,7 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
                           toast('Sessão revogada', 'O SSO foi desconectado. As contas continuam listadas.')
                           void refresh()
                         })
-                        .catch((cause) => toastError(cause, 'Não revoguei'))
+                        .catch((cause) => toastError(cause, 'Não foi possível revogar a sessão'))
                     }
                   >
                     <LogOut />
@@ -141,12 +141,12 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
                   <Button
                     variant="ghost"
                     size="icon"
-                    aria-label="Remover o login"
+                    aria-label="Remover login"
                     onClick={() =>
                       void api
                         .removeAwsLogin(login.id)
                         .then(refresh)
-                        .catch((cause) => toastError(cause, 'Não removi o login'))
+                        .catch((cause) => toastError(cause, 'Não foi possível remover o login'))
                     }
                   >
                     <Trash2 />
@@ -166,20 +166,20 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
                     </span>
                     {connection.note && <span className="block truncate text-xs text-muted-foreground">{connection.note}</span>}
                   </span>
-                  <Button variant="ghost" size="icon" aria-label="Editar a conta" onClick={() => setEditing(connection)}>
+                  <Button variant="ghost" size="icon" aria-label="Editar conta" onClick={() => setEditing(connection)}>
                     <Pencil />
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon"
-                    aria-label="Remover a conta"
+                    aria-label="Remover conta"
                     disabled={connection.used_by.length > 0}
-                    title={connection.used_by.length > 0 ? 'Um cofre usa esta conta' : 'Remover'}
+                    title={connection.used_by.length > 0 ? 'Conta em uso por um cofre' : 'Remover conta'}
                     onClick={() =>
                       void api
                         .removeAwsConnection(connection.id)
                         .then(refresh)
-                        .catch((cause) => toastError(cause, 'Não removi a conta'))
+                        .catch((cause) => toastError(cause, 'Não foi possível remover a conta'))
                     }
                   >
                     <Trash2 />
@@ -201,7 +201,7 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
         })}
 
         {logins?.length === 0 && !failed && (
-          <p className="text-sm text-faint">Nenhum login SSO ainda.</p>
+          <p className="text-sm text-faint">Nenhum login SSO adicionado.</p>
         )}
 
         <Button variant="outline" onClick={() => setAdding(true)}>
@@ -280,7 +280,7 @@ function NewLoginDialog({
         <DialogHeader>
           <DialogTitle>Adicionar login SSO</DialogTitle>
           <DialogDescription>
-            O endereço de acesso do IAM Identity Center (o "AWS access portal") e a região onde ele foi criado.
+            O endereço de acesso do IAM Identity Center (o “AWS access portal”) e a região onde ele foi criado.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -360,7 +360,7 @@ export function useAwsRenew(onRenewed: () => void) {
         renewed.current()
       }
     } catch (cause) {
-      toastError(cause, 'Não renovei a sessão')
+      toastError(cause, 'Não foi possível renovar a sessão')
     } finally {
       setBusy(false)
     }
@@ -433,8 +433,8 @@ export function DeviceDialog({
         <DialogHeader>
           <DialogTitle>Confirme na página da AWS</DialogTitle>
           <DialogDescription>
-            Abra a página, confira que o código abaixo é o mesmo e permita o acesso. Esta janela continua sozinha
-            quando você permitir.
+            Abra a página, confira se o código abaixo é o mesmo e permita o acesso. Esta janela avança
+            automaticamente após a confirmação.
           </DialogDescription>
         </DialogHeader>
         <div className="grid place-items-center gap-3 rounded-xl border bg-raised py-5">
@@ -451,11 +451,11 @@ export function DeviceDialog({
           {state === 'waiting' && (
             <>
               <Loader2 className="size-4 animate-spin" />
-              Esperando a confirmação…
+              Aguardando confirmação…
             </>
           )}
           {state === 'denied' && <span className="text-rose">O acesso foi negado na página da AWS.</span>}
-          {state === 'expired' && <span className="text-rose">O código venceu. Feche e tente de novo.</span>}
+          {state === 'expired' && <span className="text-rose">O código expirou. Feche e tente novamente.</span>}
         </p>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
@@ -489,7 +489,7 @@ function ConnectionDialog({
       .awsAccounts(login.id)
       .then((answer) => setAccounts(answer.accounts))
       .catch((cause) => {
-        toastError(cause, 'Não li as contas deste login')
+        toastError(cause, 'Não foi possível carregar as contas deste login')
         setAccounts([])
       })
   }, [login.id])
@@ -501,12 +501,12 @@ function ConnectionDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Adicionar conta</DialogTitle>
-          <DialogDescription>Uma conta da AWS e o papel com que o Keyhold entra nela.</DialogDescription>
+          <DialogDescription>A conta da AWS e o papel que o Keyhold usa para acessá-la.</DialogDescription>
         </DialogHeader>
         {accounts === null ? (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
-            Lendo as contas…
+            Carregando as contas…
           </p>
         ) : (
           <div className="space-y-3">
@@ -520,7 +520,7 @@ function ConnectionDialog({
                 }}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Escolha uma conta" />
+                  <SelectValue placeholder="Selecione…" />
                 </SelectTrigger>
                 <SelectContent>
                   {accounts.map((one) => (
@@ -579,7 +579,7 @@ function ConnectionDialog({
                   toast('Conta adicionada', title || `${account} / ${role}`)
                   onDone()
                 })
-                .catch((cause) => toastError(cause, 'Não adicionei a conta'))
+                .catch((cause) => toastError(cause, 'Não foi possível adicionar a conta'))
             }
           >
             Adicionar
@@ -607,8 +607,8 @@ function EditConnectionDialog({
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Editar a conta {connection.account_id}</DialogTitle>
-          <DialogDescription>Trocar o papel muda o que o Keyhold consegue ler e gravar nos cofres desta conta.</DialogDescription>
+          <DialogTitle>Editar conta {connection.account_id}</DialogTitle>
+          <DialogDescription>O papel define o que o Keyhold pode ler e gravar nos cofres desta conta.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <label className="grid gap-1.5">
@@ -634,7 +634,7 @@ function EditConnectionDialog({
               void api
                 .updateAwsConnection(connection.id, { role, title: title.trim(), note: note.trim() })
                 .then(onDone)
-                .catch((cause) => toastError(cause, 'Não salvei a conta'))
+                .catch((cause) => toastError(cause, 'Não foi possível salvar a conta'))
             }
           >
             Salvar

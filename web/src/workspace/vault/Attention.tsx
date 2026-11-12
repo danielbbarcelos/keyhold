@@ -17,11 +17,11 @@ export type Attention = Map<string, Concern>
 /** What to do about each kind of issue, in the order the person would do it. */
 const ACTION: Record<HealthIssue, string> = {
   compromised:
-    'Troque a senha no próprio serviço e grave a nova aqui, em Editar. Depois tire a marca de comprometido.',
-  rotation: 'Troque a senha no serviço, grave a nova em Editar e escolha a próxima data em "Trocar até".',
-  reused: 'Use uma senha diferente neste serviço: em Editar, o gerador no campo de senha cria uma nova.',
-  weak: 'Troque por uma senha mais forte: em Editar, o gerador no campo de senha cria uma.',
-  stale: 'Vale trocar a senha. Se ela não precisa mudar, marque uma data em "Trocar até" para lembrar depois.',
+    'Troque a senha no próprio serviço e salve a nova em Editar. Depois, remova a marca de comprometido.',
+  rotation: 'Troque a senha no serviço, salve a nova em Editar e escolha a próxima data em “Trocar até”.',
+  reused: 'Use uma senha diferente neste serviço. Em Editar, o gerador do campo de senha cria uma nova.',
+  weak: 'Troque por uma senha mais forte. Em Editar, o gerador do campo de senha cria uma.',
+  stale: 'Recomenda-se trocar a senha. Se ela não precisa mudar, defina uma data em “Trocar até” como lembrete.',
 }
 
 /**
@@ -45,7 +45,7 @@ export function AttentionDot({
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label="Pede atenção: ver o motivo"
+          aria-label="Pede atenção: visualizar o motivo"
           title="Pede atenção"
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
@@ -102,7 +102,7 @@ export function AttentionDot({
               }}
             >
               <ShieldCheck />
-              Não está mais comprometido
+              Remover marca de comprometido
             </Button>
           )}
         </div>

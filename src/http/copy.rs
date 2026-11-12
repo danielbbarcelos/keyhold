@@ -163,14 +163,14 @@ fn is_aws(state: &AppState, vault_id: &str) -> bool {
 fn vault_exists(state: &AppState, vault_id: &str) -> Result<vaults::VaultSummary, Failure> {
     let store = state.store.lock().unwrap();
     with_key!(state, |key| vaults::read_vault(&store, key, vault_id))
-        .map_err(|_| bad_request("esse cofre não existe"))
+        .map_err(|_| bad_request("o cofre não existe mais"))
 }
 
 /// A vault records may be written into: it exists and is not archived.
 fn writable_vault(state: &AppState, vault_id: &str) -> Result<vaults::VaultSummary, Failure> {
     let vault = vault_exists(state, vault_id)?;
     if vault.archived {
-        return Err(bad_request("esse cofre está arquivado. Restaure-o antes de copiar para ele"));
+        return Err(bad_request("o cofre está arquivado. Restaure o cofre antes de copiar para ele"));
     }
     Ok(vault)
 }
@@ -233,7 +233,7 @@ fn local_sources(state: &AppState, scope: &Scope) -> Result<Vec<Source>, Failure
             .collect();
 
         if found.len() != wanted.len() {
-            return Err(bad_request("algum registro escolhido não está neste cofre"));
+            return Err(bad_request("um dos registros escolhidos não está neste cofre"));
         }
 
         return Ok(found);
@@ -241,7 +241,7 @@ fn local_sources(state: &AppState, scope: &Scope) -> Result<Vec<Source>, Failure
 
     if let Some(root) = &scope.folder_id {
         if !folders.contains_key(root) {
-            return Err(bad_request("essa pasta não está neste cofre"));
+            return Err(bad_request("a pasta não está neste cofre"));
         }
     }
 
@@ -271,7 +271,7 @@ async fn aws_sources(state: &AppState, scope: &Scope) -> Result<Vec<Source>, Fai
     let root = match &scope.folder_id {
         Some(id) => Some(
             aws::folder_path(&scope.source_vault, Some(id))?
-                .ok_or_else(|| bad_request("essa pasta não está neste cofre"))?,
+                .ok_or_else(|| bad_request("a pasta não está neste cofre"))?,
         ),
         None => None,
     };
@@ -313,7 +313,7 @@ async fn aws_sources(state: &AppState, scope: &Scope) -> Result<Vec<Source>, Fai
 
     if let Some(wanted) = &wanted {
         if found.len() != wanted.len() {
-            return Err(bad_request("algum registro escolhido não está neste cofre"));
+            return Err(bad_request("um dos registros escolhidos não está neste cofre"));
         }
     }
 
@@ -474,8 +474,8 @@ async fn plan(State(state): State<Arc<AppState>>, Json(scope): Json<Scope>) -> A
 
     if unknown_files > 0 {
         problems.push(format!(
-            "não consegui listar os anexos de {unknown_files} registro(s) na origem. Sem saber se \
-             eles têm arquivos, a cópia levaria só os campos"
+            "não foi possível listar os anexos de {unknown_files} registro(s) na origem. Sem essa \
+             informação, a cópia levaria apenas os campos"
         ));
     }
 
@@ -501,8 +501,8 @@ async fn plan(State(state): State<Arc<AppState>>, Json(scope): Json<Scope>) -> A
     if let Some(ends) = session_expires_at {
         if ends < now + estimate + SESSION_MARGIN {
             problems.push(
-                "a sessão AWS termina antes do tempo previsto para a cópia. Renove o login em \
-                 Ajustes, Contas AWS, e planeje de novo"
+                "a sessão AWS expira antes do tempo previsto para a cópia. Renove o login em \
+                 Ajustes, Contas AWS, e planeje a cópia novamente"
                     .to_string(),
             );
         }
@@ -658,7 +658,7 @@ fn read_local(state: &AppState, vault_id: &str, id: &str) -> Result<Read, Failur
         let opened = records::open(&store, key, id).map_err(bad_request)?;
 
         if opened.header.vault_id != vault_id || opened.header.archived {
-            return Err(bad_request("esse registro não está no cofre de origem"));
+            return Err(bad_request("o registro não está no cofre de origem"));
         }
 
         let mut files = Vec::new();
@@ -674,7 +674,7 @@ fn read_local(state: &AppState, vault_id: &str, id: &str) -> Result<Read, Failur
 async fn read_aws(state: &AppState, vault_id: &str, id: &str) -> Result<Read, Failure> {
     match mapping::decode_id(id) {
         Some((IdKind::Record, owner, _)) if owner == vault_id => {}
-        _ => return Err(bad_request("esse registro não está no cofre de origem")),
+        _ => return Err(bad_request("o registro não está no cofre de origem")),
     }
 
     let Json(opened) = aws::open_record(state, id).await?;
@@ -691,7 +691,7 @@ async fn read_aws(state: &AppState, vault_id: &str, id: &str) -> Result<Read, Fa
         let bytes = file["data"]
             .as_str()
             .and_then(crate::encoding::from_base64url)
-            .ok_or_else(|| bad_request("um anexo da origem não chegou inteiro"))?;
+            .ok_or_else(|| bad_request("um anexo da origem não foi recebido por completo"))?;
         files.push((
             file["name"].as_str().unwrap_or("anexo").to_string(),
             file["mime"].as_str().unwrap_or("application/octet-stream").to_string(),
@@ -781,10 +781,10 @@ const RENAME_TRIES: u32 = 50;
 /// Write into a local vault: the record and its files together, or nothing.
 fn write_local(state: &AppState, run: &Run, read: &Read, payload: &Payload) -> Result<Written, Failure> {
     if run.item.action == "overwrite" {
-        let id = run.item.dest_id.clone().ok_or_else(|| bad_request("falta o registro a sobrescrever"))?;
+        let id = run.item.dest_id.clone().ok_or_else(|| bad_request("o registro a sobrescrever não foi informado"))?;
         if id == run.item.source_id {
             return Err(bad_request(
-                "esse é o próprio registro que está sendo copiado. Escolha renomear ou pular",
+                "o destino é o próprio registro em cópia. Escolha renomear ou pular",
             ));
         }
 
@@ -837,7 +837,7 @@ fn write_local(state: &AppState, run: &Run, read: &Read, payload: &Payload) -> R
             while taken.contains(&payload.title.trim().to_lowercase()) {
                 tries += 1;
                 if tries > RENAME_TRIES {
-                    return Err(bad_request("não achei um nome livre para a cópia. Escolha um à mão"));
+                    return Err(bad_request("não foi possível encontrar um nome livre para a cópia. Informe um nome manualmente"));
                 }
                 payload.title = bump_title(&payload.title);
             }
@@ -884,14 +884,14 @@ async fn write_aws(
     generation: u64,
 ) -> Result<Written, Failure> {
     let (id, name) = if run.item.action == "overwrite" {
-        let id = run.item.dest_id.clone().ok_or_else(|| bad_request("falta o registro a sobrescrever"))?;
+        let id = run.item.dest_id.clone().ok_or_else(|| bad_request("o registro a sobrescrever não foi informado"))?;
         match mapping::decode_id(&id) {
             Some((IdKind::Record, owner, _)) if owner == run.dest_vault => {}
             _ => return Err(bad_request("o registro a sobrescrever não está no cofre de destino")),
         }
         if identity(state, &id) == identity(state, &run.item.source_id) {
             return Err(bad_request(
-                "esse é o próprio parâmetro que está sendo copiado. Escolha renomear ou pular",
+                "o destino é o próprio parâmetro em cópia. Escolha renomear ou pular",
             ));
         }
 
@@ -935,7 +935,7 @@ async fn write_aws(
             path = Some(mapping::join(path.as_deref(), &piece));
             if piece != *folder {
                 if let Err(failure) = aws::ensure_folder_label(state, &run.dest_vault, path.as_deref().unwrap_or_default(), folder).await {
-                    folder_warning = Some(format!("a pasta “{folder}” ficou com o nome {piece}: {}", failure.1));
+                    folder_warning = Some(format!("a pasta “{folder}” recebeu o nome {piece}: {}", failure.1));
                 }
             }
         }
@@ -1070,7 +1070,7 @@ async fn run(State(state): State<Arc<AppState>>, Json(run): Json<Run>) -> Answer
     let mut payload = read.payload.clone();
     if run.item.action == "rename" {
         let title = run.item.title.as_deref().map(str::trim).filter(|t| !t.is_empty());
-        payload.title = title.ok_or_else(|| bad_request("o novo título ficou vazio"))?.to_string();
+        payload.title = title.ok_or_else(|| bad_request("o novo título está vazio"))?.to_string();
     }
 
     let written = if dest_aws {
@@ -1135,7 +1135,7 @@ async fn not_deletable(
     let whole: Vec<&Copied> = copies.iter().filter(|c| c.source_vault == source_vault && c.files_ok).collect();
 
     if whole.is_empty() {
-        return Ok(Some("não foi copiado inteiro nesta sessão"));
+        return Ok(Some("não foi copiado por completo nesta sessão"));
     }
 
     let own = identity(state, id);
@@ -1180,7 +1180,7 @@ async fn remove_originals(State(state): State<Arc<AppState>>, Json(body): Json<O
         let typed = body.confirm_name.as_deref().map(str::trim).unwrap_or_default();
         if typed != vault.name.trim() {
             return Err(bad_request(
-                "para apagar na AWS, digite o nome do cofre exatamente como ele é. Lá não há lixeira",
+                "para excluir na AWS, digite o nome do cofre exatamente como ele é. A AWS não tem lixeira",
             ));
         }
     }

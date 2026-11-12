@@ -55,7 +55,7 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
       setNote(await action())
       setError('')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
       setNote('')
     } finally {
       setBusy(false)
@@ -80,11 +80,11 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
       <CardHeader className="px-6">
         <CardTitle className="flex items-center gap-2">
           <Download className="size-4" />
-          Levar embora e trazer de volta
+          Exportar e importar
         </CardTitle>
         <CardDescription>
-          O arquivo exportado é selado com uma senha só dele — nunca a senha-mestra. Ele guarda no
-          próprio cabeçalho como foi fechado, para que ainda abra daqui a alguns anos.
+          O arquivo exportado é cifrado com uma senha própria, nunca com a senha-mestra. O cabeçalho
+          registra como ele foi cifrado, para que continue legível daqui a alguns anos.
         </CardDescription>
       </CardHeader>
 
@@ -130,7 +130,7 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
 
                   setPassphrase('')
 
-                  return 'Arquivo salvo. Guarde a senha dele junto, ela não está em lugar nenhum.'
+                  return 'Arquivo salvo. Anote a senha do arquivo, pois ela não é armazenada.'
                 })
               }
             >
@@ -139,12 +139,12 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
             </Button>
           </div>
           <p className="text-sm text-muted-foreground">
-            Mínimo de 12 caracteres. Para importar de volta, é esta senha que abre o arquivo.
+            Mínimo de 12 caracteres. Esta senha é necessária para importar o arquivo.
           </p>
         </div>
 
         <div className="space-y-2 border-t pt-4">
-          <Label>Trazer registros para {chosen?.name ?? 'este cofre'}</Label>
+          <Label>Importar registros para {chosen?.name ?? 'este cofre'}</Label>
 
           <input
             ref={filePicker}
@@ -171,7 +171,7 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
                 onChanged()
 
                 return `${done.imported.records} ${
-                  done.imported.records === 1 ? 'registro trazido' : 'registros trazidos'
+                  done.imported.records === 1 ? 'registro importado' : 'registros importados'
                 }${done.imported.folders > 0 ? `, em ${done.imported.folders} pasta(s) nova(s)` : ''}.`
               })
             }}
@@ -183,13 +183,13 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
             onClick={() => filePicker.current?.click()}
           >
             <Upload />
-            Escolher um arquivo
+            Escolher arquivo
           </Button>
 
           <p className="text-sm text-muted-foreground">
-            Um arquivo do Keyhold (<span className="text-foreground">.json</span>, pede a senha
-            acima) ou um CSV de outro gerenciador. Nada é sobrescrito: tudo entra como registro
-            novo.
+            Um arquivo do Keyhold (<span className="text-foreground">.json</span>, que exige a senha
+            acima) ou um CSV de outro gerenciador. Nenhum registro é sobrescrito: tudo é importado
+            como registro novo.
           </p>
         </div>
 

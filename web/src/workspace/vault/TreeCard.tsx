@@ -454,12 +454,12 @@ export function TreeCard({
         {shown.length === 0 && (
           <p className="px-3 py-6 text-center text-[13px] text-faint">
             {records.length === 0
-              ? 'Este cofre ainda está vazio. "Novo registro", no topo, cria o primeiro.'
+              ? 'Este cofre está vazio. Crie o primeiro registro em “Novo registro”.'
               : filter === 'favourites'
-                ? 'Nenhum favorito aqui. A estrela de um registro o traz para cá.'
+                ? 'Nenhum favorito neste cofre. Marque a estrela de um registro para exibi-lo aqui.'
                 : filter === 'attention'
-                  ? 'Nada pede atenção neste cofre.'
-                  : 'Nada com esse nome.'}
+                  ? 'Nenhum registro pede atenção neste cofre.'
+                  : 'Nenhum registro encontrado.'}
           </p>
         )}
         {/* The empty space under the rows is the vault's root: right-click there to make something in it. */}
@@ -485,7 +485,7 @@ export function TreeCard({
       </TabMenu>
       ) : (
         <p className="flex h-11 shrink-0 items-center gap-2 border-t px-4 text-xs text-faint">
-          Na AWS não há lixeira: apagar é de vez.
+          Na AWS não há lixeira: a exclusão é permanente.
         </p>
       )}
     </aside>

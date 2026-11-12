@@ -249,8 +249,19 @@ export class ApiError extends Error {
     /** For AWS vaults: what kind of failure it was (`session_expired`, `access_denied`, ...). */
     readonly aws?: string,
   ) {
-    super(message)
+    super(sentence(message))
   }
+}
+
+/**
+ * The binary writes its errors in lower case and without a final full stop, so they can be
+ * composed into longer ones. On screen each is a sentence: capital first letter, full stop.
+ */
+function sentence(text: string): string {
+  const trimmed = text.trim()
+  if (!trimmed) return trimmed
+  const capital = trimmed.charAt(0).toLocaleUpperCase('pt-BR') + trimmed.slice(1)
+  return /[.!?…:]$/.test(capital) ? capital : `${capital}.`
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {

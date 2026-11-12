@@ -41,7 +41,7 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
       )
       onUnlocked()
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
       setPassword('')
       setCode('')
     } finally {
@@ -60,10 +60,10 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
         <h1 className="mt-5 text-[22px] font-semibold tracking-tight">Destrancar o Keyhold</h1>
         <p className="mt-1 mb-6 text-sm text-muted-foreground">
           {usingRecovery
-            ? 'Digite a chave de recuperação que você guardou ao criar o cofre.'
+            ? 'Digite a chave de recuperação anotada ao criar o cofre.'
             : needsPassword
-              ? 'Digite a senha-mestra para abrir os seus cofres.'
-              : 'Este cofre não usa senha-mestra: ele abre com a chave guardada nesta máquina.'}
+              ? 'Digite a senha-mestra para abrir os cofres.'
+              : 'Este cofre não usa senha-mestra. Ele abre com a chave armazenada nesta máquina.'}
         </p>
 
         <div className="w-full space-y-3 text-left">
@@ -93,7 +93,7 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
 
           {needsCode && (
             <div className="space-y-2">
-              <Label htmlFor="code">Código do seu app autenticador</Label>
+              <Label htmlFor="code">Código do app autenticador</Label>
               <Input
                 id="code"
                 value={code}
@@ -110,8 +110,8 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
           {status.attemptsLeft <= 2 && (
             <p className="text-sm text-muted-foreground">
               {status.attemptsLeft > 0
-                ? `${status.attemptsLeft} tentativas antes de o Keyhold parar de responder.`
-                : 'Feche o Keyhold e abra de novo para tentar outra vez.'}
+                ? `Restam ${status.attemptsLeft} tentativas antes de o Keyhold parar de responder.`
+                : 'Feche e abra o Keyhold novamente para tentar outra vez.'}
             </p>
           )}
 

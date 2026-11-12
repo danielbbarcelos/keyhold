@@ -453,8 +453,8 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
                 note_agent(state, peer, audit::action::SECRET_REVEALED, &record, &field, false);
 
                 return Response::refused(
-                    "este cofre não entrega valores a um assistente. Use keyhold_copy para pôr o \
-                     valor na área de transferência da pessoa, ou keyhold_run para executar um \
+                    "este cofre não entrega valores a um assistente. Use keyhold_copy para colocar o \
+                     valor na área de transferência do usuário, ou keyhold_run para executar um \
                      comando com ele.",
                 );
             }
@@ -467,7 +467,7 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
 
                         Response::Value { value }
                     }
-                    None => Response::refused("esse campo não existe neste registro"),
+                    None => Response::refused("o campo não existe neste registro"),
                 },
             }
         }
@@ -476,7 +476,7 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
             match approved(state, peer, &record, &field, "copy").await {
                 Err(refusal) => refusal,
                 Ok(()) => match value_of(state, &record, &field).await {
-                    None => Response::refused("esse campo não existe neste registro"),
+                    None => Response::refused("o campo não existe neste registro"),
                     Some(value) => match crate::clipboard::copy_for_a_while(&value) {
                         Err(error) => Response::refused(error.to_string()),
                         Ok(seconds) => {
@@ -504,7 +504,7 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
             match approved(state, peer, &record, &field, "run").await {
                 Err(refusal) => refusal,
                 Ok(()) => match value_of(state, &record, &field).await {
-                    None => Response::refused("esse campo não existe neste registro"),
+                    None => Response::refused("o campo não existe neste registro"),
                     Some(value) => {
                         note_agent(state, peer, audit::action::SECRET_REVEALED, &record, &field, true);
 
@@ -615,11 +615,11 @@ async fn payload_of(state: &Arc<AppState>, record_id: &str) -> std::result::Resu
 
 async fn describe(state: &Arc<AppState>, record_id: &str) -> Response {
     if !reachable(state, record_id) {
-        return Response::refused("esse registro não está ao alcance de um agente");
+        return Response::refused("o registro não está disponível para um agente");
     }
 
     match payload_of(state, record_id).await {
-        Err(why) => Response::refused(format!("esse registro não abriu: {why}")),
+        Err(why) => Response::refused(format!("não foi possível abrir o registro: {why}")),
         Ok(payload) => Response::Fields {
             title: payload.title,
             fields: payload
@@ -663,7 +663,7 @@ async fn approved(
     if !reachable(state, record_id) {
         note_agent(state, peer, audit::action::SECRET_REVEALED, record_id, field, false);
 
-        return Err(Response::refused("esse registro não está ao alcance de um agente"));
+        return Err(Response::refused("o registro não está disponível para um agente"));
     }
 
     // A standing permission answers before anybody is asked. Read fresh every time rather than
@@ -712,7 +712,7 @@ async fn approved(
 
             note_agent(state, peer, audit::action::SECRET_REVEALED, record_id, field, false);
 
-            return Err(Response::refused("a pessoa negou este pedido"));
+            return Err(Response::refused("o pedido foi negado"));
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -721,7 +721,7 @@ async fn approved(
     state.agent.pending.lock().unwrap().retain(|one| one.id != id);
     note_agent(state, peer, audit::action::SECRET_REVEALED, record_id, field, false);
 
-    Err(Response::refused("ninguém respondeu ao pedido a tempo"))
+    Err(Response::refused("o pedido expirou sem resposta"))
 }
 
 /// The question, asked on the desktop as well, for as long as it is open.
@@ -793,13 +793,13 @@ impl Drop for Release<'_> {
 fn knock_text(request: &PendingRequest) -> String {
     let who = request.peer.parent.as_deref().unwrap_or(&request.peer.process);
     let what = if request.intent == "run" {
-        format!("usar {} de \"{}\" num comando", request.field, request.record_title)
+        format!("usar {} de “{}” em um comando", request.field, request.record_title)
     } else {
-        format!("ler {} de \"{}\"", request.field, request.record_title)
+        format!("ler {} de “{}”", request.field, request.record_title)
     };
 
     format!(
-        "{who} (PID {}) quer {what}.\n\nO pedido expira em {APPROVAL_TIMEOUT_SECONDS} segundos. \
+        "{who} (PID {}) pede para {what}.\n\nO pedido expira em {APPROVAL_TIMEOUT_SECONDS} segundos. \
          Abra o Keyhold para permitir ou negar.",
         request.peer.parent_pid.unwrap_or(request.peer.pid)
     )

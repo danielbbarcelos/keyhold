@@ -38,9 +38,9 @@ export function segmentProblem(segment: string): string | null {
   if (!segment) return 'O nome não pode ficar vazio.'
 
   const bad = [...segment].find((c) => !/[A-Za-z0-9._-]/.test(c))
-  if (bad === ' ') return 'Espaço não vale na AWS. Use - ou _.'
-  if (bad === '/') return 'A barra separa pastas: aqui vai só um nome.'
-  if (bad) return `“${bad}” não vale na AWS: só letras sem acento, números, ponto, hífen e sublinhado.`
+  if (bad === ' ') return 'A AWS não aceita espaço. Use - ou _.'
+  if (bad === '/') return 'A barra separa pastas. Informe apenas um nome.'
+  if (bad) return `A AWS não aceita “${bad}”. Use apenas letras sem acento, números, ponto, hífen e sublinhado.`
   if (segment === '.keep') return 'Esse nome é reservado para as pastas.'
 
   return null
@@ -54,15 +54,15 @@ export function nameProblem(parent: string | null, leaf: string): string | null 
   const full = join(parent, leaf)
   const first = full.split('/')[1]?.toLowerCase() ?? ''
   if (first.startsWith('aws') || first.startsWith('ssm')) return 'A AWS reserva nomes que começam com aws ou ssm.'
-  if (full.split('/').length - 1 > 15) return 'A AWS só aceita 15 níveis de pasta.'
-  if (full.length > 1011) return 'O nome passa de 1011 caracteres.'
+  if (full.split('/').length - 1 > 15) return 'A AWS aceita no máximo 15 níveis de pasta.'
+  if (full.length > 1011) return 'O nome ultrapassa 1011 caracteres.'
 
   return null
 }
 
 /** A title or a folder name: anything at all, except the `/` that would read as one more folder. */
 export function titleProblem(title: string, what = 'O título'): string | null {
-  return title.includes('/') ? `${what} não pode ter “/”: na AWS isso vira mais uma pasta.` : null
+  return title.includes('/') ? `${what} não pode conter “/”, pois na AWS a barra cria mais uma pasta.` : null
 }
 
 export function join(parent: string | null, leaf: string): string {
@@ -158,7 +158,7 @@ export function AwsNameField({
             onChange(null)
           }}
         >
-          Usar o sugerido
+          Usar o nome sugerido
         </button>
       </span>
     </span>

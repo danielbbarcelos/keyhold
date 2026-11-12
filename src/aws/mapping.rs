@@ -244,7 +244,7 @@ pub fn validate_segment(segment: &str) -> Result<(), String> {
         .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')))
     {
         return Err(format!(
-            "o nome não pode ter '{bad}': na AWS só valem letras sem acento, números, ponto, hífen e sublinhado"
+            "o nome não pode conter '{bad}'. Na AWS, use apenas letras sem acento, números, ponto, hífen e sublinhado"
         ));
     }
 
@@ -260,13 +260,13 @@ pub fn validate_name(name: &str) -> Result<(), String> {
     let absolute = absolute(name);
 
     if absolute.len() > NAME_LIMIT {
-        return Err(format!("o nome passa de {NAME_LIMIT} caracteres"));
+        return Err(format!("o nome ultrapassa {NAME_LIMIT} caracteres"));
     }
 
     let segments: Vec<&str> = absolute.split('/').skip(1).collect();
 
     if segments.len() > MAX_LEVELS {
-        return Err(format!("a AWS só aceita {MAX_LEVELS} níveis de pasta"));
+        return Err(format!("a AWS aceita no máximo {MAX_LEVELS} níveis de pasta"));
     }
 
     if let Some(first) = segments.first() {
@@ -290,7 +290,7 @@ pub fn validate_title(title: &str) -> Result<(), String> {
     }
 
     if title.contains('/') {
-        return Err("o título não pode ter '/', porque na AWS isso vira uma pasta".into());
+        return Err("o título não pode conter '/', pois na AWS a barra cria uma pasta".into());
     }
 
     Ok(())
@@ -381,7 +381,7 @@ pub fn description_for(title: &str) -> Result<String, String> {
 
     if length > DESCRIPTION_LIMIT {
         return Err(format!(
-            "na AWS o título cabe em {DESCRIPTION_LIMIT} caracteres, e este tem {length}. \
+            "na AWS, o título aceita até {DESCRIPTION_LIMIT} caracteres, e este tem {length}. \
              Encurte o título"
         ));
     }
@@ -454,8 +454,8 @@ pub fn encode_value(payload: &Payload) -> Result<(String, bool), String> {
 
     if value.len() > ADVANCED_LIMIT {
         return Err(format!(
-            "na AWS um parâmetro guarda até {} KB, e este registro (campos e notas) tem {:.1} KB. \
-             Guarde o que é grande num anexo",
+            "na AWS, um parâmetro armazena até {} KB, e este registro (campos e notas) tem {:.1} KB. \
+             Mova o conteúdo maior para um anexo",
             ADVANCED_LIMIT / 1024,
             value.len() as f64 / 1024.0
         ));

@@ -154,7 +154,7 @@ export function CopyDialog({
       if (login) void renew(login)
       else onAccounts?.()
     } catch (cause) {
-      fail(cause, 'Não consegui ler as contas AWS.')
+      fail(cause, 'Não foi possível carregar as contas AWS.')
     }
   }
 
@@ -200,7 +200,7 @@ export function CopyDialog({
       setExcluded(new Set(found.items.filter((item) => item.error).map((item) => item.source_id)))
       setStep('revisao')
     } catch (cause) {
-      fail(cause, 'Não consegui planejar a cópia.')
+      fail(cause, 'Não foi possível planejar a cópia.')
     } finally {
       setBusy(false)
     }
@@ -274,7 +274,7 @@ export function CopyDialog({
         setOutcomes(current)
       } catch (cause) {
         setOutcomes(current)
-        setStoppedAt({ index: i, message: cause instanceof ApiError ? cause.message : 'A cópia parou.' })
+        setStoppedAt({ index: i, message: cause instanceof ApiError ? cause.message : 'A cópia foi interrompida.' })
         setErrorKind(cause instanceof ApiError ? cause.aws : undefined)
         return
       }
@@ -326,7 +326,7 @@ export function CopyDialog({
       ]
       void runFrom(queue, index + 1, done, rule)
     } catch (cause) {
-      setStoppedAt({ index, message: cause instanceof ApiError ? cause.message : 'A cópia parou.' })
+      setStoppedAt({ index, message: cause instanceof ApiError ? cause.message : 'A cópia foi interrompida.' })
       setErrorKind(cause instanceof ApiError ? cause.aws : undefined)
     }
   }
@@ -355,14 +355,14 @@ export function CopyDialog({
       const answer = await api.copyOriginals(source.vaultId, copiedIds, mustType ? typed : undefined)
       setDeleted(
         answer.trash
-          ? `${answer.removed} original(is) na lixeira de ${sourceVault?.name ?? 'origem'}.`
-          : `${answer.removed} parâmetro(s) apagado(s) da AWS.`,
+          ? `${answer.removed} original(is) movido(s) para a lixeira de ${sourceVault?.name ?? 'origem'}.`
+          : `${answer.removed} parâmetro(s) excluído(s) permanentemente da AWS.`,
       )
       if (answer.failed.length > 0) {
-        setError(`${answer.failed.length} não saíram: ${answer.failed[0].error}`)
+        setError(`${answer.failed.length} não foram excluídos: ${answer.failed[0].error}`)
       }
     } catch (cause) {
-      fail(cause, 'Não apaguei os originais.')
+      fail(cause, 'Não foi possível excluir os originais.')
     } finally {
       setBusy(false)
     }
@@ -392,7 +392,7 @@ export function CopyDialog({
             {title}
           </DialogTitle>
           <DialogDescription>
-            O original fica onde está. No fim, você decide se quer apagá-lo.
+            O original é mantido. Ao final, você decide se ele deve ser excluído.
           </DialogDescription>
           <Steps step={step} />
         </DialogHeader>
@@ -448,9 +448,9 @@ export function CopyDialog({
                 </Select>
                 <span className="text-xs text-faint">
                   {source.folderId
-                    ? 'A pasta vai inteira, com as subpastas, para dentro desta.'
+                    ? 'A pasta é copiada inteira, com as subpastas, para dentro desta.'
                     : source.recordIds
-                      ? 'Os registros entram direto nesta pasta.'
+                      ? 'Os registros são copiados diretamente para esta pasta.'
                       : 'As pastas do cofre são recriadas dentro desta.'}
                 </span>
               </label>
@@ -463,7 +463,7 @@ export function CopyDialog({
                 <div className="space-y-2 rounded-xl border border-rose/40 bg-rose-soft px-4 py-3 text-[13px]">
                   <b className="flex items-center gap-2 font-semibold">
                     <CircleAlert className="size-4 text-rose" />
-                    Antes de copiar, resolva isto
+                    Resolva antes de copiar
                   </b>
                   <ul className="list-disc space-y-1 pl-5 text-foreground">
                     {plan.checks.problems.map((problem) => (
@@ -477,8 +477,8 @@ export function CopyDialog({
                 rows={[
                   ['Registros', String(chosen.length)],
                   ['Anexos', String(files)],
-                  ['Nomes já ocupados', conflicts > 0 ? `${conflicts}, você decide um a um` : 'nenhum'],
-                  ['Histórico', 'só a versão atual. O histórico fica no original'],
+                  ['Nomes já ocupados', conflicts > 0 ? `${conflicts}, decididos um a um` : 'nenhum'],
+                  ['Histórico', 'Apenas a versão atual. O histórico permanece no original'],
                 ]}
               />
 
@@ -487,9 +487,9 @@ export function CopyDialog({
                   <div className="flex gap-3 rounded-xl bg-amber-soft px-4 py-3 text-[13px] text-foreground">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber" />
                     <span>
-                      Na AWS, o nome do parâmetro e o caminho das pastas não são cifrados: quem tem
-                      ssm:DescribeParameters na conta vê esta lista, mesmo sem poder ler os valores. Tire da cópia o
-                      que não deve aparecer assim.
+                      Na AWS, o nome do parâmetro e o caminho das pastas não são cifrados: quem possui
+                      ssm:DescribeParameters na conta visualiza esta lista, mesmo sem poder ler os valores. Remova da
+                      cópia o que não deve ficar visível.
                     </span>
                   </div>
                   <ul className="divide-y rounded-xl border">
@@ -543,7 +543,7 @@ export function CopyDialog({
             <div className="space-y-3">
               <div className="flex items-center justify-between text-sm" aria-live="polite">
                 <span className="font-medium">
-                  {stoppedAt ? 'A cópia parou' : step === 'conflito' ? 'Esperando sua decisão' : 'Copiando…'}
+                  {stoppedAt ? 'Cópia interrompida' : step === 'conflito' ? 'Aguardando sua decisão' : 'Copiando…'}
                 </span>
                 <span className="text-muted-foreground tabular-nums">
                   {outcomes.length} de {queue.length}
@@ -571,14 +571,14 @@ export function CopyDialog({
 
               {stoppedAt && (
                 <div className="space-y-2 rounded-xl border border-rose/40 bg-rose-soft px-4 py-3 text-[13px]">
-                  <b className="block font-semibold">Parou em “{queue[stoppedAt.index]?.title}”</b>
+                  <b className="block font-semibold">Interrompida em “{queue[stoppedAt.index]?.title}”</b>
                   <p>{stoppedAt.message}</p>
                   <p className="text-muted-foreground">
-                    {outcomes.length} registro(s) já chegaram e não serão copiados de novo.
+                    {outcomes.length} registro(s) já copiado(s) não serão copiados novamente.
                   </p>
                   {errorKind === 'session_expired' &&
                     (renewed ? (
-                      <p className="text-mint">Sessão renovada. Continue de onde parou.</p>
+                      <p className="text-mint">Sessão renovada. Continue de onde a cópia parou.</p>
                     ) : (
                       <Button variant="outline" size="sm" disabled={renewing} onClick={() => void renewHere()}>
                         {renewing && <Loader2 className="animate-spin" />}
@@ -592,8 +592,8 @@ export function CopyDialog({
                 <div className="space-y-3 rounded-xl border p-4">
                   <p className="text-sm">
                     Já existe <b className="font-semibold">{conflict.item.name ?? conflict.item.path}</b> no destino
-                    {conflict.item.conflict?.reason === 'repeated' ? ', vindo de outro registro desta mesma cópia' : ''}
-                    {conflict.item.conflict?.reason === 'self' ? ', e é o próprio registro que está sendo copiado' : ''}.
+                    {conflict.item.conflict?.reason === 'repeated' ? ', vindo de outro registro desta cópia' : ''}
+                    {conflict.item.conflict?.reason === 'self' ? ', e é o próprio registro em cópia' : ''}.
                   </p>
                   <div className="grid grid-cols-3 gap-2">
                     {(['rename', 'overwrite', 'skip'] as const).map((one) => {
@@ -620,9 +620,9 @@ export function CopyDialog({
                                 ? conflict.item.conflict?.reason === 'self'
                                   ? 'É o próprio registro'
                                   : conflict.item.conflict?.read_only
-                                    ? 'Parâmetro String: nunca'
-                                    : 'Vira uma versão nova'
-                                : 'Não copia este'}
+                                    ? 'Indisponível para parâmetro String'
+                                    : 'Cria uma nova versão'
+                                : 'Não copia este registro'}
                           </span>
                         </button>
                       )
@@ -649,7 +649,7 @@ export function CopyDialog({
 
                   <label className="flex items-center gap-2 text-sm">
                     <Checkbox checked={forNext} onCheckedChange={(on) => setForNext(on === true)} />
-                    Fazer o mesmo nos próximos nomes ocupados
+                    Aplicar aos próximos nomes ocupados
                   </label>
                 </div>
               )}
@@ -668,7 +668,7 @@ export function CopyDialog({
                 ]}
               />
               <p className="text-[13px] text-muted-foreground">
-                Foi só a versão atual de cada registro. O histórico de versões continua no original.
+                Apenas a versão atual de cada registro foi copiada. O histórico de versões permanece no original.
               </p>
 
               {outcomes.some((one) => one.warning || one.as) && (
@@ -677,7 +677,7 @@ export function CopyDialog({
                     .filter((one) => one.as)
                     .map((one) => (
                       <li key={`r-${one.item.source_id}`}>
-                        “{one.item.title}” entrou como <b className="font-medium">{one.as}</b>
+                        “{one.item.title}” foi copiado como <b className="font-medium">{one.as}</b>
                       </li>
                     ))}
                   {outcomes
@@ -695,11 +695,11 @@ export function CopyDialog({
                   <label className="flex items-start gap-2 text-sm">
                     <Checkbox className="mt-0.5" checked={deleteOriginals} onCheckedChange={(on) => setDeleteOriginals(on === true)} />
                     <span>
-                      <b className="block font-semibold">Apagar os originais em {sourceVault?.name}</b>
+                      <b className="block font-semibold">Excluir os originais em {sourceVault?.name}</b>
                       <span className="block text-xs text-muted-foreground">
                         {mustType
-                          ? `Só os ${copiedIds.length} que chegaram inteiros. Na AWS não há lixeira: apaga de vez, com os anexos.`
-                          : `Só os ${copiedIds.length} que chegaram inteiros. Vão para a lixeira e dá para restaurar.`}
+                          ? `Apenas os ${copiedIds.length} copiados por completo. Na AWS não há lixeira: eles são excluídos permanentemente, com os anexos. Esta ação não pode ser desfeita.`
+                          : `Apenas os ${copiedIds.length} copiados por completo. Eles são movidos para a lixeira e podem ser restaurados.`}
                       </span>
                     </span>
                   </label>
@@ -720,7 +720,7 @@ export function CopyDialog({
                         disabled={busy || (mustType && typed.trim() !== (sourceVault?.name ?? '').trim())}
                         onClick={() => void removeOriginals()}
                       >
-                        {mustType ? 'Apagar da AWS' : 'Mandar para a lixeira'}
+                        {mustType ? 'Excluir permanentemente' : 'Excluir originais'}
                       </Button>
                     </div>
                   )}

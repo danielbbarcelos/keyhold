@@ -76,8 +76,8 @@ export function NewVaultDialog({
         <DialogHeader>
           <DialogTitle>Novo cofre</DialogTitle>
           <DialogDescription>
-            Um cofre é um agrupamento: pode ficar trancado enquanto outro está aberto, e é a unidade que um agente
-            pode ou não enxergar.
+            Um cofre agrupa registros. Ele pode ficar trancado enquanto outro está aberto, e o acesso por agente é
+            definido por cofre.
           </DialogDescription>
         </DialogHeader>
 
@@ -87,7 +87,7 @@ export function NewVaultDialog({
             <div className="flex items-center gap-3">
               <IconPicker
                 icon={icon}
-                label="Escolher o ícone do cofre"
+                label="Escolher ícone do cofre"
                 onChange={setIcon}
                 onClear={() => setIcon(null)}
                 clearLabel="Voltar às iniciais"
@@ -112,27 +112,27 @@ export function NewVaultDialog({
               on={kind === 'local'}
               mark={<HardDrive className={cn('size-[18px]', kind === 'local' ? 'text-primary-text' : 'text-muted-foreground')} />}
               title="Cofre local"
-              detail="No arquivo desta máquina. Nada sai daqui."
+              detail="No arquivo desta máquina. O conteúdo não sai daqui."
               onClick={() => setKind('local')}
             />
             <Kind
               on={kind === 'aws'}
               mark={<AwsMark className="size-[22px]" />}
               title="AWS Parameter Store"
-              detail="Numa conta da AWS. Quem o IAM deixar lê e grava."
+              detail="Em uma conta da AWS. Quem o IAM autorizar pode ler e gravar."
               onClick={() => setKind('aws')}
             />
           </div>
 
           {kind === 'aws' &&
             (connections === null ? (
-              <p className="text-sm text-faint">Lendo as contas AWS…</p>
+              <p className="text-sm text-faint">Carregando as contas AWS…</p>
             ) : connections.length === 0 ? (
               <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line-2 px-6 py-6 text-center">
                 <AwsMark size="md" />
                 <b className="text-sm font-semibold">Nenhuma conta AWS conectada</b>
                 <p className="max-w-xs text-xs text-muted-foreground">
-                  Conecte um login SSO e escolha as contas dele em Ajustes. Depois é só voltar aqui e escolher a conta.
+                  Conecte um login SSO e escolha as contas em Ajustes. Depois, volte aqui e selecione a conta.
                 </p>
                 <Button size="sm" className="mt-1" onClick={onAccounts}>
                   Conectar conta AWS
@@ -200,7 +200,7 @@ export function NewVaultDialog({
                   </label>
                 </div>
                 <p className="text-xs text-faint">
-                  O Keyhold não cria o bucket. Sem ele, os registros funcionam e só os anexos ficam indisponíveis.
+                  O Keyhold não cria o bucket. Sem ele, os registros funcionam e apenas os anexos ficam indisponíveis.
                 </p>
               </div>
             ))}

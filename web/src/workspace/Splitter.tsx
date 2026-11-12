@@ -42,7 +42,7 @@ export function Splitter({ which, className }: { which: keyof Layout; className?
       role="separator"
       aria-orientation="vertical"
       aria-label={which === 'tree' ? 'Largura da árvore' : 'Largura dos nomes dos campos'}
-      title="Arraste para ajustar. Clique duas vezes para voltar ao padrão."
+      title="Arraste para ajustar. Clique duas vezes para voltar ao padrão"
       onPointerDown={(event) => {
         event.preventDefault()
         event.stopPropagation()

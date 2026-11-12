@@ -209,14 +209,14 @@ async fn open_window(State(state): State<Arc<AppState>>, uri: Uri, headers: Head
     let origin = headers.get(header::ORIGIN).and_then(|value| value.to_str().ok()).unwrap_or_default();
 
     if origin != format!("http://{host}") && origin != format!("https://{host}") {
-        return (StatusCode::FORBIDDEN, Json(json!({ "error": "só a própria página do Keyhold pode pedir isso" })))
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": "apenas a própria página do Keyhold pode fazer este pedido" })))
             .into_response();
     }
 
     let now = identity::now_seconds();
 
     if now.saturating_sub(LAST.swap(now, std::sync::atomic::Ordering::SeqCst)) < 3 {
-        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": "acabei de abrir; confira as abas" })))
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": "o Keyhold acabou de ser aberto. Confira as abas do navegador" })))
             .into_response();
     }
 
@@ -225,7 +225,7 @@ async fn open_window(State(state): State<Arc<AppState>>, uri: Uri, headers: Head
             crate::instance::open_browser(door);
             Json(json!({ "opened": true })).into_response()
         }
-        None => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": "não sei abrir o Keyhold daqui" })))
+        None => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": "não foi possível abrir o Keyhold a partir desta página" })))
             .into_response(),
     }
 }
@@ -375,7 +375,7 @@ async fn unlock(State(state): State<Arc<AppState>>, Json(body): Json<UnlockBody>
         if failures >= MAX_FAILURES {
             return Err(Failure(
                 StatusCode::TOO_MANY_REQUESTS,
-                "too many failed attempts — close Keyhold and open it again".into(),
+                "muitas tentativas sem sucesso. Feche o Keyhold e abra novamente".into(),
                 None,
             ));
         }
@@ -738,7 +738,7 @@ async fn answer_agent_request(
                     since,
                     process: asked.peer.parent.clone().unwrap_or_else(|| asked.peer.process.clone()),
                 },
-                None => return Err(bad_request("esse processo já não está mais rodando")),
+                None => return Err(bad_request("o processo não está mais em execução")),
             }
         }
     };
@@ -986,7 +986,7 @@ async fn enable_second_factor(
 
     if !totp::verify(&secret, &body.code, identity::now_seconds()) {
         return Err(bad_request(
-            "that code is not right — check the app is showing this store's entry",
+            "o código não confere. Confira se o aplicativo mostra o código deste cofre",
         ));
     }
 
@@ -1036,7 +1036,7 @@ async fn disable_second_factor(
         .map_err(bad_request)?;
 
     if !totp::verify(&secret, code, identity::now_seconds()) {
-        return Err(bad_request("that code is not right"));
+        return Err(bad_request("o código não confere"));
     }
 
     identity::disable_second_factor(&store).map_err(bad_request)?;

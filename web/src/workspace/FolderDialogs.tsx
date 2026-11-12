@@ -64,11 +64,11 @@ export function RenameFolderDialog({
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Renomear a pasta</AlertDialogTitle>
+          <AlertDialogTitle>Renomear pasta</AlertDialogTitle>
           <AlertDialogDescription>
             {aws
-              ? 'O nome aparece no Keyhold como você escrever. Na AWS, a pasta é parte do nome de cada parâmetro dentro dela.'
-              : 'O nome e a cor ficam cifrados como o resto do cofre.'}
+              ? 'O nome é exibido no Keyhold como você escrever. Na AWS, a pasta faz parte do nome de cada parâmetro dentro dela.'
+              : 'O nome e a cor são cifrados como o restante do cofre.'}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -89,19 +89,20 @@ export function RenameFolderDialog({
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-[13px]">
                   <Checkbox checked={move} onCheckedChange={(on) => setMove(on === true)} />
-                  Mudar o nome na AWS também
+                  Renomear também na AWS
                 </label>
                 {move ? (
                   <>
                     <AwsNameField parent={parent} from={name} value={leaf} onChange={setLeaf} fallback="pasta" />
                     <p className="text-xs text-amber">
-                      Cada parâmetro dentro de {path} vai para o caminho novo e perde o histórico. Quem lê pelo
-                      caminho antigo para de achar. Se algum tiver anexos, só o nome no Keyhold muda.
+                      Cada parâmetro dentro de {path} é movido para o novo caminho e perde o histórico. Quem lê
+                      pelo caminho antigo deixa de encontrá-lo. Se algum parâmetro tiver anexos, apenas o nome no
+                      Keyhold muda.
                     </p>
                   </>
                 ) : (
                   <p className="text-xs text-faint">
-                    Na AWS continua <code className="font-mono">{path}</code>. Só o nome no Keyhold muda.
+                    Na AWS, o caminho permanece <code className="font-mono">{path}</code>. Apenas o nome no Keyhold muda.
                   </p>
                 )}
               </div>
@@ -122,7 +123,7 @@ export function RenameFolderDialog({
               void api
                 .renameFolder(folder.id, name.trim(), aws ? null : colour, segment ?? undefined)
                 .then((answer) => {
-                  if (answer.warning) toast('Renomeada, com um aviso', answer.warning, 'error')
+                  if (answer.warning) toast('Pasta renomeada com um aviso', answer.warning, 'error')
                   onDone(answer.folder)
                 })
                 .catch((cause) => setError(describe(cause)))
@@ -178,12 +179,12 @@ export function MoveFolderDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Mover {folder.name}</AlertDialogTitle>
           <AlertDialogDescription>
-            Mover uma pasta não mexe no que está dentro dela: a chave da pasta continua a mesma.
+            O conteúdo da pasta não é alterado e a chave da pasta é mantida.
           </AlertDialogDescription>
         </AlertDialogHeader>
 
         <div className="space-y-2">
-          <Label>Para dentro de</Label>
+          <Label>Destino</Label>
           <Select value={parentId} onValueChange={setParentId}>
             <SelectTrigger className="w-full">
               <SelectValue />
@@ -194,7 +195,7 @@ export function MoveFolderDialog({
                 .filter((candidate) => !descendants.has(candidate.id))
                 .map((candidate) => (
                   <SelectItem key={candidate.id} value={candidate.id}>
-                    {'— '.repeat(candidate.depth)}
+                    {'\u00a0\u00a0\u00a0'.repeat(candidate.depth)}
                     {candidate.name}
                   </SelectItem>
                 ))}
@@ -246,12 +247,12 @@ export function DeleteFolderDialog({
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Excluir a pasta {folder.name}?</AlertDialogTitle>
+          <AlertDialogTitle>Excluir pasta {folder.name}</AlertDialogTitle>
           <AlertDialogDescription>
             {records > 0
-              ? `Os ${records} ${records === 1 ? 'registro que está' : 'registros que estão'} nela não ${
-                  records === 1 ? 'é apagado' : 'são apagados'
-                }: ${records === 1 ? 'volta' : 'voltam'} para a raiz do cofre.`
+              ? records === 1
+                ? 'O registro desta pasta não é excluído e é movido para a raiz do cofre.'
+                : `Os ${records} registros desta pasta não são excluídos e são movidos para a raiz do cofre.`
               : 'A pasta está vazia.'}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -269,7 +270,7 @@ export function DeleteFolderDialog({
                 .catch((cause) => setError(describe(cause)))
             }
           >
-            Excluir a pasta
+            Excluir pasta
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -278,5 +279,5 @@ export function DeleteFolderDialog({
 }
 
 function describe(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.'
+  return cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.'
 }

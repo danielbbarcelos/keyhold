@@ -179,7 +179,7 @@ function Secret({
       <Ops>
         {value && (
           <IconButton
-            label={showing ? `Esconder (some em ${remaining}s)` : 'Revelar por 20 segundos'}
+            label={showing ? `Ocultar (${remaining}s restantes)` : 'Revelar por 20 segundos'}
             onClick={toggle}
           >
             {showing ? <EyeOff /> : <Eye />}
@@ -224,7 +224,7 @@ function Card({ field, recordId, label }: { field: Field; recordId?: string; lab
       </span>
       <Ops>
         {(number || field.extra?.code || field.extra?.pin) && (
-          <IconButton label={showing ? `Esconder (some em ${remaining}s)` : 'Revelar por 20 segundos'} onClick={toggle}>
+          <IconButton label={showing ? `Ocultar (${remaining}s restantes)` : 'Revelar por 20 segundos'} onClick={toggle}>
             {showing ? <EyeOff /> : <Eye />}
           </IconButton>
         )}
@@ -287,7 +287,7 @@ function Totp({ recordId, trail, index, label }: { recordId?: string; trail?: st
   if (!recordId) {
     return (
       <>
-        <span className="text-sm text-faint">o código aparece no registro atual</span>
+        <span className="text-sm text-faint">o código é exibido no registro salvo</span>
         <Ops />
       </>
     )
@@ -390,7 +390,7 @@ export function CopyButton({
 
   return (
     <IconButton
-      label={copied > 0 ? `A área de transferência é limpa em ${copied}s` : `Copiar, e limpar depois de ${seconds}s`}
+      label={copied > 0 ? `A área de transferência é limpa em ${copied}s` : `Copiar (limpa em ${seconds}s)`}
       onClick={() => {
         void copyForSeconds(value, seconds, () => setCopied(0))
           .then(() => {
@@ -400,7 +400,7 @@ export function CopyButton({
             setCopied(seconds)
             toast(`${label} copiado`, `A área de transferência é limpa em ${seconds} segundos.`)
           })
-          .catch(() => toast('Não consegui copiar', 'O navegador não liberou a área de transferência nesta página.', 'error'))
+          .catch(() => toast('Não foi possível copiar', 'O navegador bloqueou o acesso à área de transferência nesta página.', 'error'))
       }}
     >
       {copied > 0 ? <Check className="text-primary" /> : <Copy />}

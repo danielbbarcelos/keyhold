@@ -130,12 +130,12 @@ pub fn export(
 /// Open an archive produced by [`export`].
 pub fn open_archive(envelope: &Envelope, passphrase: &str) -> Result<Archive> {
     if envelope.format != FORMAT {
-        bail!("este arquivo não é um export do Keyhold");
+        bail!("o arquivo não foi exportado pelo Keyhold");
     }
 
     if envelope.version > VERSION {
         bail!(
-            "este arquivo foi escrito por uma versão mais nova do Keyhold (formato {})",
+            "o arquivo foi gerado por uma versão mais nova do Keyhold (formato {}). Atualize o Keyhold para importá-lo",
             envelope.version
         );
     }
@@ -150,9 +150,9 @@ pub fn open_archive(envelope: &Envelope, passphrase: &str) -> Result<Archive> {
     let key = crypto::derive_key(passphrase, &salt, envelope.kdf_params)?;
 
     let bytes = crypto::open(&key, &sealed, &archive_aad())
-        .map_err(|_| anyhow!("a senha não abre este arquivo"))?;
+        .map_err(|_| anyhow!("a senha não corresponde a este arquivo"))?;
 
-    serde_json::from_slice(&bytes).context("o arquivo abriu, mas não é legível")
+    serde_json::from_slice(&bytes).context("o arquivo foi aberto, mas o conteúdo não é legível")
 }
 
 #[derive(Debug, Serialize)]
@@ -231,7 +231,7 @@ pub fn from_csv(text: &str) -> Result<Vec<ExportedRecord>> {
     };
 
     let title = column(&["name", "title", "nome", "título", "titulo", "account"])
-        .ok_or_else(|| anyhow!("o CSV não tem uma coluna de nome (name, title, nome)"))?;
+        .ok_or_else(|| anyhow!("o CSV não possui uma coluna de nome (name, title, nome)"))?;
     // Bitwarden prefixes its login columns with `login_`.
     let username = column(&["username", "user", "login", "login_username", "usuário", "usuario", "email"]);
     let password = column(&["password", "senha", "pass", "login_password"]);
@@ -297,7 +297,7 @@ pub fn from_csv(text: &str) -> Result<Vec<ExportedRecord>> {
     }
 
     if found.is_empty() {
-        bail!("nenhuma linha do CSV tinha um nome");
+        bail!("nenhuma linha do CSV possui um nome");
     }
 
     Ok(found)

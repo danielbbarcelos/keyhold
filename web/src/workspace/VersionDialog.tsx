@@ -39,7 +39,7 @@ export function VersionDialog({ recordId, version, onRestore, onCancel }: Versio
       .readVersion(recordId, version)
       .then((answer) => setPayload(answer.payload))
       .catch((cause) =>
-        setError(cause instanceof ApiError ? cause.message : 'Esta versão não abriu.'),
+        setError(cause instanceof ApiError ? cause.message : 'Não foi possível abrir esta versão.'),
       )
   }, [recordId, version])
 
@@ -49,8 +49,8 @@ export function VersionDialog({ recordId, version, onRestore, onCancel }: Versio
         <AlertDialogHeader>
           <AlertDialogTitle>Versão {version}</AlertDialogTitle>
           <AlertDialogDescription>
-            Restaurar não desfaz nada: o conteúdo de agora vira mais uma versão no histórico, e esta
-            passa a ser a atual.
+            Ao restaurar, o conteúdo atual é mantido como mais uma versão no histórico, e esta passa a
+            ser a atual.
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -63,7 +63,7 @@ export function VersionDialog({ recordId, version, onRestore, onCancel }: Versio
               <FieldRow key={index} field={field} index={index} recordId={recordId} live={false} />
             ))}
             {payload.fields.length === 0 && (
-              <p className="px-5 py-3 text-sm text-faint">Esta versão não tinha campos.</p>
+              <p className="px-5 py-3 text-sm text-faint">Esta versão não possui campos.</p>
             )}
           </div>
         )}

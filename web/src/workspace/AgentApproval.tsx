@@ -49,7 +49,7 @@ import { knock } from '../notify'
  * somebody actually means when they say "stop asking me during this session".
  */
 const WINDOWS: Array<{ value: string; label: string; window: GrantWindow }> = [
-  { value: 'once', label: 'Só desta vez', window: { kind: 'once' } },
+  { value: 'once', label: 'Somente desta vez', window: { kind: 'once' } },
   { value: '15', label: '15 minutos', window: { kind: 'minutes', minutes: 15 } },
   { value: '30', label: '30 minutos', window: { kind: 'minutes', minutes: 30 } },
   { value: '60', label: '1 hora', window: { kind: 'minutes', minutes: 60 } },
@@ -104,8 +104,8 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
         withdraw()
         knocked.current = next.id
         showing.current = knock({
-          title: 'Keyhold: um assistente está pedindo um segredo',
-          body: `${next.peer.parent ?? next.peer.process} quer ${next.field} de ${next.record_title}. Abra o Keyhold para decidir.`,
+          title: 'Keyhold: pedido de segredo de um assistente',
+          body: `${next.peer.parent ?? next.peer.process} pede ${next.field} de ${next.record_title}. Abra o Keyhold para permitir ou negar.`,
           tag: `keyhold-agent-${next.id}`,
         })
       }
@@ -149,7 +149,7 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
       <AlertDialogContent className="sm:max-w-[440px]">
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {request.peer.parent ?? request.peer.process} quer {runs ? 'usar' : 'ler'} um segredo
+            {request.peer.parent ?? request.peer.process} pede para {runs ? 'usar' : 'ler'} um segredo
           </AlertDialogTitle>
 
           <AlertDialogDescription asChild>
@@ -161,7 +161,7 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
                 <span className="min-w-0">
                   <b className="block truncate text-sm font-medium text-foreground">{request.peer.parent ?? request.peer.process}</b>
                   <span className="block truncate text-xs">
-                    pid {request.peer.pid}
+                    PID {request.peer.pid}
                     {request.peer.parent ? `, pela ponte ${request.peer.process}` : ''}
                   </span>
                 </span>
@@ -176,14 +176,14 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
                     {request.record_title}, {request.field}
                   </b>
                 </span>
-                <span className="rounded-full bg-stone-soft px-2.5 py-0.5 text-xs">{runs ? 'rodar comando' : 'ler o valor'}</span>
+                <span className="rounded-full bg-stone-soft px-2.5 py-0.5 text-xs">{runs ? 'executar comando' : 'ler valor'}</span>
               </div>
 
               {runs ? (
                 <p className="flex items-start gap-2 rounded-xl border p-3 text-left">
                   <Terminal className="mt-0.5 size-4 shrink-0" />
                   <span>
-                    O valor vai para uma variável de ambiente de um comando e{' '}
+                    O valor é enviado a uma variável de ambiente do comando e{' '}
                     <strong className="text-foreground">não entra na conversa</strong> do assistente.
                   </span>
                 </p>
@@ -191,8 +191,8 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
                 <p className="flex items-start gap-2 rounded-xl bg-amber-soft p-3 text-left text-foreground">
                   <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber" />
                   <span>
-                    Um valor entregue ao assistente sai desta máquina. Se der para resolver rodando um comando com a senha
-                    no ambiente, prefira isso.
+                    Um valor entregue ao assistente sai desta máquina. Quando possível, prefira executar um comando com a
+                    senha no ambiente.
                   </span>
                 </p>
               )}
@@ -204,7 +204,7 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="once">Só desta vez</SelectItem>
+                    <SelectItem value="once">Somente desta vez</SelectItem>
 
                     {request.peer.parent_pid !== null && (
                       <SelectItem value="process">
@@ -242,16 +242,16 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
 /** What the chosen window actually costs, said before it is chosen rather than after. */
 function describeWindow(value: string, request: AgentRequest): string {
   if (value === 'once') {
-    return 'O próximo pedido deste campo pergunta de novo.'
+    return 'O próximo pedido deste campo exige uma nova aprovação.'
   }
 
   if (value === 'process') {
-    return `Vale só enquanto esse processo viver. Fechou, acabou — e um processo novo com o mesmo PID não herda nada.`
+    return `Válida apenas enquanto este processo estiver em execução. Um novo processo com o mesmo PID não herda a permissão.`
   }
 
   if (value === 'always') {
-    return `Fica valendo até você revogar em Ajustes → Acesso por agente. Vale para "${request.field}" deste registro, e só.`
+    return `Válida até ser revogada em Ajustes → Acesso por agente, apenas para "${request.field}" deste registro.`
   }
 
-  return `Vale para "${request.field}" deste registro, e para nenhum outro campo. Dá para revogar antes em Ajustes.`
+  return `Válida apenas para "${request.field}" deste registro. A permissão pode ser revogada antes em Ajustes.`
 }

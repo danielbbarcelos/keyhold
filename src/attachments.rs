@@ -83,7 +83,7 @@ pub fn add(
 
     if bytes.len() > MAX_BYTES {
         bail!(
-            "o arquivo tem {:.1} MB; o limite é {} MB",
+            "o arquivo tem {:.1} MB, e o limite é {} MB",
             bytes.len() as f64 / (1024.0 * 1024.0),
             MAX_BYTES / (1024 * 1024)
         );
@@ -167,12 +167,12 @@ pub fn read(store: &Store, master: &SecretKey, id: &str) -> Result<Attachment> {
         .conn()
         .query_row("SELECT record_id FROM attachments WHERE id = ?1", params![id], |row| row.get(0))
         .optional()?
-        .ok_or_else(|| anyhow::anyhow!("não há um arquivo com esse nome aqui"))?;
+        .ok_or_else(|| anyhow::anyhow!("o arquivo não existe mais"))?;
 
     list(store, master, &record_id)?
         .into_iter()
         .find(|one| one.id == id)
-        .ok_or_else(|| anyhow::anyhow!("não há um arquivo com esse nome aqui"))
+        .ok_or_else(|| anyhow::anyhow!("o arquivo não existe mais"))
 }
 
 /// Open one file. The only path to its bytes.
@@ -185,20 +185,20 @@ pub fn open(store: &Store, master: &SecretKey, id: &str) -> Result<OpenFile> {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .optional()?
-        .ok_or_else(|| anyhow::anyhow!("não há um arquivo com esse nome aqui"))?;
+        .ok_or_else(|| anyhow::anyhow!("o arquivo não existe mais"))?;
 
     let header = records::header(store, &record_id)?;
     let vault_key = vaults::vault_key(store, master, &header.vault_id)?;
 
     let file_key =
-        unwrap_key(&vault_key, &wrapped, &key_aad(id)).context("a chave deste arquivo não abriu")?;
+        unwrap_key(&vault_key, &wrapped, &key_aad(id)).context("não foi possível abrir a chave deste arquivo")?;
 
     let meta: FileMeta = serde_json::from_slice(
-        &crypto::open(&file_key, &sealed_meta, &meta_aad(id)).context("este arquivo não abriu")?,
+        &crypto::open(&file_key, &sealed_meta, &meta_aad(id)).context("não foi possível abrir este arquivo")?,
     )?;
 
     let bytes = crypto::open(&file_key, &sealed_blob, &blob_aad(id, &record_id))
-        .context("este arquivo não abriu")?;
+        .context("não foi possível abrir este arquivo")?;
 
     Ok(OpenFile { name: meta.name, mime: meta.mime, bytes })
 }
@@ -209,7 +209,7 @@ pub fn remove(store: &Store, id: &str) -> Result<()> {
         .execute("DELETE FROM attachments WHERE id = ?1", params![id])?;
 
     if removed == 0 {
-        bail!("não há um arquivo com esse nome aqui");
+        bail!("o arquivo não existe mais");
     }
 
     Ok(())
@@ -240,7 +240,7 @@ pub(crate) fn rewrap_for_vault(
 
     for (id, wrapped) in &files {
         let file_key =
-            unwrap_key(from, wrapped, &key_aad(id)).context("a chave deste arquivo não abriu")?;
+            unwrap_key(from, wrapped, &key_aad(id)).context("não foi possível abrir a chave deste arquivo")?;
 
         conn.execute(
             "UPDATE attachments SET wrapped_key = ?2 WHERE id = ?1",

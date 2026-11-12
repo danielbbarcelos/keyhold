@@ -35,7 +35,7 @@ export function toast(title: string, detail?: string, tone: Toast['tone'] = 'ok'
   window.setTimeout(() => dismiss(id), tone === 'error' ? 7000 : 3500)
 }
 
-export function toastError(cause: unknown, title = 'Não deu certo') {
+export function toastError(cause: unknown, title = 'Não foi possível concluir a operação') {
   toast(title, describe(cause), 'error')
 }
 
@@ -45,7 +45,7 @@ export function dismiss(id: number) {
 }
 
 export function describe(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.'
+  return cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.'
 }
 
 export function Toaster() {

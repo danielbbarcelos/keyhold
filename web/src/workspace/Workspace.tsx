@@ -104,7 +104,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       setUnreadable(new Set(open.filter((_, index) => lists[index] === null).map((vault) => vault.id)))
     } catch (cause) {
       setVaultsLoaded(true)
-      toastError(cause, 'Não consegui ler os cofres')
+      toastError(cause, 'Não foi possível carregar os cofres')
     }
   }, [])
 
@@ -183,7 +183,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
     void api
       .lock()
       .then(onChanged)
-      .catch((cause) => toastError(cause, 'Não tranquei'))
+      .catch((cause) => toastError(cause, 'Não foi possível trancar o cofre'))
 
   const onSeen = useCallback((record: RecordPreview) => {
     setSeen((current) => [{ record, at: Date.now() }, ...current.filter((one) => one.record.id !== record.id)].slice(0, 12))
@@ -322,7 +322,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                 openVault(made.vault.id)
                 void refresh()
               })
-              .catch((cause) => toastError(cause, 'Não criei o cofre'))
+              .catch((cause) => toastError(cause, 'Não foi possível criar o cofre'))
               .finally(() => setPendingVault(false))
           }}
           onCancel={() => setAskingVault(false)}

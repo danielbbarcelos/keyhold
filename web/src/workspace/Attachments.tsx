@@ -57,7 +57,7 @@ export function Attachments({ recordId }: { recordId: string }) {
       await refresh()
       setError('')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
     } finally {
       setBusy(false)
     }
@@ -81,7 +81,7 @@ export function Attachments({ recordId }: { recordId: string }) {
               <Button
                 variant="ghost"
                 size="icon-xs"
-                aria-label={`Salvar ${file.name}`}
+                aria-label={`Baixar ${file.name}`}
                 onClick={() =>
                   void attempt(async () => {
                     const opened = await api.openAttachment(file.id)
@@ -104,7 +104,7 @@ export function Attachments({ recordId }: { recordId: string }) {
               <Button
                 variant="ghost"
                 size="icon-xs"
-                aria-label={`Remover ${file.name}`}
+                aria-label={`Excluir ${file.name}`}
                 onClick={() => void attempt(() => api.deleteAttachment(file.id).then(() => {}))}
               >
                 <Trash2 />
@@ -155,10 +155,10 @@ export function Attachments({ recordId }: { recordId: string }) {
         )}
       >
         {busy ? <Loader2 className="size-5 animate-spin" /> : <Paperclip className="size-5" />}
-        <span className="text-sm font-semibold text-foreground">Anexar um arquivo</span>
+        <span className="text-sm font-semibold text-foreground">Anexar arquivo</span>
         {maxBytes > 0 && (
           <span>
-            Até {Math.round(maxBytes / (1024 * 1024))} MB. O nome e o tipo são selados junto com o
+            Até {Math.round(maxBytes / (1024 * 1024))} MB. O nome e o tipo são cifrados junto com o
             conteúdo.
           </span>
         )}

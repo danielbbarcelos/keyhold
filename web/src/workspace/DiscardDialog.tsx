@@ -30,9 +30,9 @@ export function DiscardDialog({
     <AlertDialog open={open} onOpenChange={(isOpen) => !isOpen && onKeep()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Descartar {what}?</AlertDialogTitle>
+          <AlertDialogTitle>Descartar {what}</AlertDialogTitle>
           <AlertDialogDescription>
-            O que não foi salvo some, inclusive uma senha gerada agora. Para guardar, volte e use "Salvar".
+            O que não foi salvo será perdido, inclusive uma senha recém-gerada. Esta ação não pode ser desfeita.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

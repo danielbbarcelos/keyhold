@@ -139,7 +139,7 @@ impl VaultMeta {
         }
 
         let Some(aws) = self.aws.as_mut() else {
-            bail!("um cofre AWS precisa de uma conexão e de uma região");
+            bail!("um cofre AWS precisa de uma conta e de uma região");
         };
 
         aws.region = aws.region.trim().to_string();
@@ -162,10 +162,10 @@ fn settled_icon(icon: Option<crate::records::Icon>) -> Result<Option<crate::reco
 
     if let Some(image) = icon.image.as_deref() {
         if !image.starts_with("data:image/") {
-            bail!("a imagem de um cofre tem que ser uma imagem");
+            bail!("o ícone do cofre precisa ser uma imagem");
         }
         if image.len() > crate::records::ICON_IMAGE_LIMIT {
-            bail!("essa imagem é grande demais para o ícone de um cofre");
+            bail!("a imagem é grande demais para o ícone do cofre");
         }
     }
 
@@ -361,7 +361,7 @@ fn check_connection(store: &Store, master: &SecretKey, meta: &VaultMeta) -> Resu
     let config = crate::aws::config::load(store, master)?;
 
     if config.connection(&aws.connection_id).is_none() {
-        bail!("essa conexão AWS não existe mais; escolha outra");
+        bail!("a conta AWS não existe mais. Escolha outra");
     }
 
     Ok(())
@@ -438,7 +438,7 @@ pub fn delete_vault(store: &Store, master: &SecretKey, id: &str, confirm_name: &
     let vault = read_vault(store, master, id)?;
 
     if confirm_name.trim() != vault.name.trim() {
-        bail!("o nome digitado não é o deste cofre");
+        bail!("o nome digitado não corresponde ao nome do cofre");
     }
 
     let contents = contents_of(store, id)?;
@@ -504,7 +504,7 @@ pub fn rotate_vault(store: &mut Store, master: &SecretKey, id: &str) -> Result<V
             let aad = format!("keyhold:record-key:v1|{record_id}").into_bytes();
 
             let record_key = unwrap_key(&old_key, &wrapped, &aad)
-                .with_context(|| format!("a chave de um registro não abriu ({record_id})"))?;
+                .with_context(|| format!("não foi possível abrir a chave de um registro ({record_id})"))?;
 
             records.push((record_id, wrap_key(&new_key, &record_key, &aad)?));
         }
@@ -525,7 +525,7 @@ pub fn rotate_vault(store: &mut Store, master: &SecretKey, id: &str) -> Result<V
             let aad = folder_key_aad(&folder_id);
 
             let folder_key = unwrap_key(&old_key, &wrapped, &aad)
-                .with_context(|| format!("a chave de uma pasta não abriu ({folder_id})"))?;
+                .with_context(|| format!("não foi possível abrir a chave de uma pasta ({folder_id})"))?;
 
             folders.push((folder_id, wrap_key(&new_key, &folder_key, &aad)?));
         }

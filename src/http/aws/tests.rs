@@ -1361,7 +1361,7 @@ async fn a_record_whose_bucket_cannot_be_listed_is_not_deleted() {
     let refused = h.post(&format!("/records/{}/archive", h.id("/app/prod/db")), json!({ "on": true })).await;
     assert_eq!(refused.status, 403, "{}", refused.body);
     let text = refused.body["error"].as_str().unwrap();
-    assert!(text.contains("não apaguei") && text.contains("keyhold-producao") && !text.contains('—'), "{text}");
+    assert!(text.contains("não foi excluído") && text.contains("keyhold-producao") && !text.contains('—'), "{text}");
     assert!(h.parameter("/app/prod/db").is_some());
 
     // Without a bucket there is nothing to leave behind, and the record goes as before.

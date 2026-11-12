@@ -427,7 +427,7 @@ pub fn header(store: &Store, id: &str) -> Result<RecordHeader> {
             row_to_header,
         )
         .optional()?
-        .ok_or_else(|| anyhow!("there is no record with that name here"))
+        .ok_or_else(|| anyhow!("o registro não foi encontrado"))
 }
 
 /// Open one record.
@@ -812,7 +812,7 @@ fn check_folder(store: &Store, vault_id: &str, folder_id: Option<&str>) -> Resul
 
 fn changed(rows: usize) -> Result<()> {
     if rows == 0 {
-        bail!("there is no record with that name here");
+        bail!("o registro não foi encontrado");
     }
 
     Ok(())

@@ -149,7 +149,7 @@ export function RecordView({
                   setCopied(CLIPBOARD_SECONDS)
                   toast(`${primary.label} copiado`, 'A área de transferência é limpa em 30 segundos.')
                 })
-                .catch(() => toast('Não consegui copiar', 'O navegador não liberou a área de transferência nesta página.', 'error'))
+                .catch(() => toast('Não foi possível copiar', 'O navegador bloqueou o acesso à área de transferência nesta página.', 'error'))
             }}
           >
             <Copy />
@@ -166,14 +166,14 @@ export function RecordView({
               tooltip={false}
               variant="outline"
               size="icon-lg"
-              aria-label={record.favourite ? 'Tirar dos favoritos' : 'Favoritar'}
+              aria-label={record.favourite ? 'Remover dos favoritos' : 'Favoritar'}
               aria-pressed={record.favourite}
               onClick={() => void run(() => api.favouriteRecord(record.id, !record.favourite))}
             >
               <Star className={cn(record.favourite && 'fill-primary text-primary')} />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{record.favourite ? 'Tirar dos favoritos' : 'Favoritar'}</TooltipContent>
+          <TooltipContent>{record.favourite ? 'Remover dos favoritos' : 'Favoritar'}</TooltipContent>
         </Tooltip>
         <span className="flex-1" />
         <MenuButton
@@ -196,27 +196,27 @@ export function RecordView({
               ],
             },
             ...(permanent ? [] : [{ kind: 'item' as const, label: 'Mover para outro cofre', icon: Vault, onSelect: onMoveToVault }]),
-            { kind: 'item', label: 'Copiar para…', icon: Copy, onSelect: onCopy },
+            { kind: 'item', label: 'Copiar para outro local', icon: Copy, onSelect: onCopy },
             {
               kind: 'item',
-              label: record.compromised_at ? 'Não está mais comprometido' : 'Marcar como comprometido',
+              label: record.compromised_at ? 'Remover marca de comprometido' : 'Marcar como comprometido',
               icon: ShieldAlert,
               onSelect: () =>
                 void run(
                   () => api.setCompromised(record.id, record.compromised_at === null),
-                  record.compromised_at ? 'Marca de comprometido retirada' : 'Marcado como comprometido',
+                  record.compromised_at ? 'Marca de comprometido removida' : 'Marcado como comprometido',
                 ),
             },
             { kind: 'separator' },
-            { kind: 'item', label: permanent ? 'Apagar de vez' : 'Mandar para a lixeira', icon: Trash2, destructive: true, onSelect: onTrash },
+            { kind: 'item', label: permanent ? 'Excluir permanentemente' : 'Excluir', icon: Trash2, destructive: true, onSelect: onTrash },
           ]}
         />
       </div>
 
       {record.plaintext && (
         <p className="mx-5 mb-4 rounded-xl bg-amber-soft px-4 py-3 text-[13px] text-foreground">
-          Este parâmetro é do tipo String, sem cifra. O Keyhold mostra mas não altera: só grava SecureString, e mudar o
-          tipo poderia quebrar quem lê este parâmetro.
+          Este parâmetro é do tipo String, sem criptografia. O Keyhold exibe o valor, mas não o altera: apenas SecureString é
+          gravado, e mudar o tipo pode quebrar quem lê este parâmetro.
         </p>
       )}
 
@@ -246,7 +246,7 @@ export function RecordView({
             ))}
             {payload.fields.length === 0 && (
               <p className="px-5 py-6 text-sm text-faint">
-                Este registro ainda não tem campos. Em Editar, "Adicionar campo" mostra os tipos.
+                Este registro não possui campos. Use Editar para adicionar campos.
               </p>
             )}
           </div>
@@ -277,12 +277,12 @@ export function RecordView({
               <span className="flex-1 text-faint">substituída {when(entry.created_at)}</span>
               <Button variant="outline" size="sm" onClick={() => setViewing(entry.version)}>
                 <Eye />
-                Ver
+                Visualizar
               </Button>
             </div>
           ))}
           {versions.length === 0 && (
-            <p className="px-5 py-6 text-sm text-faint">Nenhuma versão anterior. Cada vez que você salva, a de antes fica aqui.</p>
+            <p className="px-5 py-6 text-sm text-faint">Nenhuma versão anterior. A cada alteração salva, a versão anterior é exibida aqui.</p>
           )}
         </div>
       )}
@@ -298,7 +298,7 @@ export function RecordView({
             void run(
               () =>
                 api.restoreVersion(record.id, version, permanent ? record.version : undefined).then((answer) => {
-                  if (answer.warning) toast('Restaurada, com um aviso', answer.warning, 'error')
+                  if (answer.warning) toast('Versão restaurada com um aviso', answer.warning, 'error')
                 }),
               `Versão ${version} restaurada`,
             )

@@ -60,7 +60,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
       await action()
       setError('')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
     } finally {
       setBusy(false)
     }
@@ -84,29 +84,29 @@ export function Setup({ onDone }: { onDone: () => void }) {
 
           {step === 'choose' && (
             <>
-              <CardTitle>Como este cofre vai ser protegido?</CardTitle>
+              <CardTitle>Escolha a proteção do cofre</CardTitle>
               <CardDescription>
-                As duas opções cifram o que você guarda. A diferença é onde mora a chave que abre.
+                As duas opções cifram o conteúdo do cofre. A diferença é onde fica a chave que o abre.
               </CardDescription>
             </>
           )}
 
           {step === 'password' && (
             <>
-              <CardTitle>Sua senha-mestra</CardTitle>
+              <CardTitle>Senha-mestra</CardTitle>
               <CardDescription>
-                Ela não é guardada em lugar nenhum e não pode ser redefinida. Use uma senha longa que
-                você não use em mais nada — ou deixe o Keyhold gerar uma.
+                A senha-mestra não é armazenada e não pode ser redefinida. Use uma senha longa e
+                exclusiva, ou gere uma com o Keyhold.
               </CardDescription>
             </>
           )}
 
           {step === 'recovery' && (
             <>
-              <CardTitle>Guarde a chave de recuperação</CardTitle>
+              <CardTitle>Anote a chave de recuperação</CardTitle>
               <CardDescription>
-                É a única forma de abrir este cofre se a senha-mestra se perder. Ela aparece uma vez
-                só, não fica guardada em lugar nenhum e não pode ser gerada de novo.
+                É a única forma de abrir este cofre caso a senha-mestra seja perdida. Ela é exibida
+                apenas uma vez, não é armazenada e não pode ser gerada novamente.
               </CardDescription>
             </>
           )}
@@ -122,8 +122,8 @@ export function Setup({ onDone }: { onDone: () => void }) {
                 title="Com uma senha-mestra"
                 badge={<Badge>recomendado</Badge>}
               >
-                A chave que abre o cofre nasce da sua senha e não existe em nenhum outro lugar. Quem
-                copiar o arquivo do cofre não leva nada aproveitável.
+                A chave que abre o cofre é derivada da sua senha e não existe em nenhum outro lugar.
+                Uma cópia do arquivo do cofre não revela nada sem a senha.
               </Option>
 
               <Option
@@ -132,9 +132,9 @@ export function Setup({ onDone }: { onDone: () => void }) {
                 icon={<ShieldCheck className="size-4" />}
                 title="Sem senha, protegido por esta máquina"
               >
-                Abre sozinho, sem digitar nada. Em troca, a chave fica num arquivo ao lado do cofre:
-                quem conseguir ler seus arquivos — um backup, uma pasta sincronizada, outro programa
-                seu — abre o cofre também.
+                O cofre abre sem senha. A chave fica em um arquivo ao lado do cofre: quem conseguir
+                ler seus arquivos (um backup, uma pasta sincronizada, outro programa) também abre o
+                cofre.
               </Option>
             </div>
           )}
@@ -160,8 +160,9 @@ export function Setup({ onDone }: { onDone: () => void }) {
 
               {entropy !== null && (
                 <p className="text-sm text-muted-foreground">
-                  Gerada aqui: <span className="text-foreground">{entropy} bits</span> de entropia.
-                  Copie-a para onde você guarda senhas antes de continuar — ela não aparece de novo.
+                  Senha gerada com <span className="text-foreground">{entropy} bits</span> de
+                  entropia. Copie a senha para um lugar seguro antes de continuar. Ela não é exibida
+                  novamente.
                 </p>
               )}
             </div>
@@ -174,14 +175,14 @@ export function Setup({ onDone }: { onDone: () => void }) {
               </p>
 
               <p className="text-sm text-muted-foreground">
-                Perder as duas — senha e chave — significa perder o conteúdo, inclusive para nós,
-                porque não existe nós.
+                Sem a senha-mestra e sem a chave de recuperação, o conteúdo do cofre não pode ser
+                recuperado por ninguém.
               </p>
 
               <Separator />
 
               <div className="space-y-2">
-                <Label htmlFor="confirm">Digite a chave de volta para confirmar</Label>
+                <Label htmlFor="confirm">Digite a chave novamente para confirmar</Label>
                 <Input
                   id="confirm"
                   value={typedBack}
@@ -241,7 +242,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
                 }
               >
                 {busy && <Loader2 className="animate-spin" />}
-                Criar o cofre
+                Criar cofre
               </Button>
             </>
           )}

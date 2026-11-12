@@ -147,10 +147,10 @@ export function FolderView({
       )}
 
       {tab === 'registros' && inside.length === 0 && (
-        <p className="px-5 py-6 text-sm text-faint">Nenhum registro nesta pasta. Arraste um da árvore para cá, ou crie um novo.</p>
+        <p className="px-5 py-6 text-sm text-faint">Nenhum registro nesta pasta. Arraste um registro da árvore para cá ou crie um novo.</p>
       )}
       {tab === 'subpastas' && children.length === 0 && (
-        <p className="px-5 py-4 text-sm text-faint">Nenhuma subpasta. "Subpasta", acima, cria uma.</p>
+        <p className="px-5 py-4 text-sm text-faint">Nenhuma subpasta. Crie a primeira em “Subpasta”.</p>
       )}
     </div>
   )

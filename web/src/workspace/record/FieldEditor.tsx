@@ -167,7 +167,7 @@ export function FieldEditor({
                   : []),
                 {
                   kind: 'sub',
-                  label: 'Trocar o tipo',
+                  label: 'Trocar tipo',
                   icon: Replace,
                   items: FIELD_TYPES.map((type) => ({
                     label: type.label,
@@ -187,7 +187,7 @@ export function FieldEditor({
                 { kind: 'separator' },
                 {
                   kind: 'item',
-                  label: 'Remover o campo',
+                  label: 'Remover campo',
                   icon: Trash2,
                   destructive: true,
                   onSelect: () =>
@@ -205,7 +205,7 @@ export function FieldEditor({
       {fields.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-4 py-6 text-center text-[13px] text-muted-foreground">
           <ListPlus className="size-5 text-faint" />
-          <span>Nenhum campo ainda. Escolha um modelo acima ou adicione os campos que precisar.</span>
+          <span>Nenhum campo adicionado. Escolha um modelo acima ou adicione os campos necessários.</span>
           <AddField onAdd={(kind) => change([...fields, newField(kind)], [...keys.current, newKey()])} button />
         </div>
       ) : (
@@ -338,7 +338,7 @@ function ValueEditor({ field, onChange }: { field: Field; onChange: (change: Par
             variant="ghost"
             size="icon-sm"
             className="absolute top-1.5 right-1.5"
-            aria-label="Esconder"
+            aria-label="Ocultar"
             onClick={() => setShowing(false)}
           >
             <EyeOff />
@@ -414,7 +414,7 @@ function SecretInput({
                 tooltip={false}
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Gerar uma senha"
+                aria-label="Gerar senha"
                 onClick={() => setGenerating(true)}
               >
                 <WandSparkles />
@@ -436,7 +436,7 @@ function SecretInput({
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={showing ? 'Esconder' : 'Mostrar'}
+          aria-label={showing ? 'Ocultar' : 'Mostrar'}
           onClick={() => setShowing(!showing)}
         >
           {showing ? <EyeOff /> : <Eye />}
@@ -464,7 +464,7 @@ function TypeButton({ kind, onPick }: { kind: FieldKind; onPick: (kind: FieldKin
       </PopoverTrigger>
       <PopoverContent className="w-[560px] p-0">
         <TypeGrid
-          title="Trocar o tipo"
+          title="Trocar tipo"
           onPick={(picked) => {
             onPick(picked)
             setOpen(false)

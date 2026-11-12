@@ -35,27 +35,27 @@ const ROLES: Record<
 > = {
   interface: {
     label: 'Interface do cofre',
-    what: 'Serve uma janela e guarda a chave enquanto o cofre está aberto.',
+    what: 'Serve uma janela e mantém a chave enquanto o cofre está aberto.',
     icon: MonitorSmartphone,
-    cost: 'O cofre que ela mantém aberto tranca, a chave é esquecida, e qualquer janela apontada para ela para de responder.',
+    cost: 'O cofre mantido aberto por ela é trancado, a chave é descartada e as janelas conectadas a ela deixam de responder.',
   },
   agent: {
     label: 'Ponte do assistente',
-    what: 'Traduz os pedidos de um assistente local. Não guarda chave nenhuma.',
+    what: 'Traduz os pedidos de um assistente local. Não armazena nenhuma chave.',
     icon: Bot,
-    cost: 'O assistente perde a ponte até abrir outra. Nada do cofre se perde.',
+    cost: 'O assistente perde a ponte até abrir outra. O conteúdo do cofre é preservado.',
   },
   command: {
     label: 'Comando com um segredo',
-    what: 'Um comando rodando com um segredo no ambiente dele.',
+    what: 'Um comando em execução com um segredo no ambiente.',
     icon: Terminal,
-    cost: 'O comando em execução é interrompido no meio.',
+    cost: 'O comando em execução é interrompido imediatamente.',
   },
   other: {
     label: 'Processo do Keyhold',
-    what: 'Um processo que esta versão não reconhece, provavelmente de uma build anterior.',
+    what: 'Um processo que esta versão não reconhece, provavelmente de uma versão anterior.',
     icon: Square,
-    cost: 'Ele é encerrado. O que estiver fazendo para no meio.',
+    cost: 'O processo é encerrado e o que estiver em andamento é interrompido.',
   },
 }
 
@@ -74,7 +74,7 @@ export function InstancesPanel() {
       setProcesses(answer.processes)
       setVersion(answer.version)
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
     }
   }, [])
 
@@ -98,7 +98,7 @@ export function InstancesPanel() {
         await api.closeInstance(target.pid)
       }
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
     } finally {
       setBusy(false)
       setConfirming(null)
@@ -112,8 +112,9 @@ export function InstancesPanel() {
         <div className="min-w-0 flex-1">
           <h3 className="text-[15px] font-semibold">Processos do Keyhold nesta máquina</h3>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
-            Um cofre, um processo. Abrir o Keyhold com outro já rodando pergunta antes de encerrá-lo. Esta
-            lista é para o que escapa disso, como um processo deixado por uma versão anterior.
+            Cada cofre usa um processo. Ao abrir o Keyhold com outro processo em execução, o Keyhold pergunta
+            antes de encerrá-lo. Esta lista exibe os demais casos, como um processo deixado por uma versão
+            anterior.
           </p>
         </div>
 
@@ -124,7 +125,7 @@ export function InstancesPanel() {
             disabled={busy}
             onClick={() => setConfirming({ others })}
           >
-            Encerrar as outras
+            Encerrar os outros
           </Button>
         )}
       </div>
@@ -132,7 +133,7 @@ export function InstancesPanel() {
       {error && <p className="px-5 pt-3 text-sm text-destructive">{error}</p>}
 
       {processes === null ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">Procurando…</p>
+        <p className="py-8 text-center text-sm text-muted-foreground">Carregando…</p>
       ) : (
         <ul className="divide-y">
           {processes.map((one) => {
@@ -168,7 +169,7 @@ export function InstancesPanel() {
                 </div>
 
                 {one.is_this_one ? (
-                  <span className="text-xs text-muted-foreground">Trancar, no menu ao lado</span>
+                  <span className="text-xs text-muted-foreground">Use Trancar, no menu lateral</span>
                 ) : (
                   <Button
                     variant="outline"
@@ -190,15 +191,15 @@ export function InstancesPanel() {
           <AlertDialogHeader>
             <AlertDialogTitle>
               {confirming && 'others' in confirming
-                ? `Encerrar ${confirming.others.length} processos?`
-                : `Encerrar o PID ${confirming?.pid}?`}
+                ? `Encerrar ${confirming.others.length} processos`
+                : `Encerrar o PID ${confirming?.pid}`}
             </AlertDialogTitle>
 
             <AlertDialogDescription asChild>
               <div className="space-y-2">
                 {confirming && 'others' in confirming ? (
                   <>
-                    <p>Tudo menos a instância que desenha esta janela:</p>
+                    <p>Todos os processos, exceto a instância desta janela:</p>
                     <ul className="space-y-1">
                       {confirming.others.map((one) => (
                         <li key={one.pid}>
@@ -212,7 +213,7 @@ export function InstancesPanel() {
                   confirming && <p>{ROLES[confirming.role].cost}</p>
                 )}
 
-                <p>Cada um recebe um pedido para encerrar por conta própria, nunca um tiro seco.</p>
+                <p>Cada processo recebe um pedido de encerramento e finaliza por conta própria.</p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>

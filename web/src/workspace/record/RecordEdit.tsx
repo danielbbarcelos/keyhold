@@ -149,7 +149,7 @@ export function RecordEdit({
                 </SelectContent>
               </Select>
               {aws && !creating && (
-                <span className="text-xs text-faint">Mudar a pasta na AWS apaga o histórico do nome antigo.</span>
+                <span className="text-xs text-faint">Mudar a pasta na AWS exclui o histórico do nome antigo.</span>
               )}
             </label>
             <div className="grid w-[190px] gap-1.5">
@@ -181,7 +181,7 @@ export function RecordEdit({
         )}
       </Card>
 
-      <Card title="Alertas" hint="Aparecem no topo do registro">
+      <Card title="Alertas" hint="Exibidos no topo do registro">
         <AlertsEditor alerts={draft.payload.alerts ?? []} onChange={(alerts) => setPayload({ alerts })} />
       </Card>
 
@@ -193,7 +193,7 @@ export function RecordEdit({
         <div className="px-5 pt-4 pb-5">
           <Textarea
             value={draft.payload.notes}
-            placeholder="Qualquer coisa que ajude a lembrar depois"
+            placeholder="Ex.: conta criada para o projeto X"
             spellCheck={false}
             onChange={(event) => setPayload({ notes: event.target.value })}
           />
@@ -284,7 +284,7 @@ function AwsName({
               checked={draft.rename ?? false}
               onCheckedChange={(on) => onChange({ ...draft, rename: on === true })}
             />
-            Mudar o nome na AWS também
+            Renomear também na AWS
           </label>
           {draft.rename ? (
             <>
@@ -295,13 +295,13 @@ function AwsName({
                 onChange={(leaf) => onChange({ ...draft, leaf })}
               />
               <span className="text-xs text-amber">
-                O Keyhold grava um parâmetro novo e apaga {parameter}, com o histórico dele. Quem lê o nome
-                antigo para de achar.
+                O Keyhold grava um novo parâmetro e exclui {parameter}, com o histórico dele. Quem lê pelo
+                nome antigo deixa de encontrá-lo.
               </span>
             </>
           ) : (
             <span className="text-xs text-faint">
-              Na AWS continua <code className="font-mono text-muted-foreground">{now}</code>. Só o título muda.
+              Na AWS, o nome permanece <code className="font-mono text-muted-foreground">{now}</code>. Apenas o título muda.
             </span>
           )}
         </>

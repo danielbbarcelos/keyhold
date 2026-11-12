@@ -82,8 +82,7 @@ export function Home({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vaults])
 
-  const hour = new Date().getHours()
-  const hello = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite'
+  const hello = 'Visão geral'
   const attention = records.filter((record) => issues.has(record.id) || record.compromised_at)
   const favourites = records.filter((record) => record.favourite)
   const vaultName = (id: string) => vaults.find((vault) => vault.id === id)?.name ?? ''
@@ -152,7 +151,7 @@ export function Home({
                   <span className="mt-4 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]">
                     <b className="font-semibold text-amber">Indisponível</b>
                     <span className="text-faint">
-                      {vault.kind === 'aws' ? 'sem sessão na AWS. Abra o cofre para renovar' : 'não consegui ler este cofre'}
+                      {vault.kind === 'aws' ? 'sem sessão na AWS. Abra o cofre para renovar' : 'não foi possível ler este cofre'}
                     </span>
                   </span>
                 ) : (
@@ -163,7 +162,7 @@ export function Home({
                   <span className={cn(flagged > 0 && 'text-amber')}>
                     <b className={cn('font-semibold', flagged > 0 ? 'text-amber' : 'text-foreground')}>{flagged}</b> atenção
                   </span>
-                  <span>{vault.agent_access ? 'agente ligado' : 'agente desligado'}</span>
+                  <span>{vault.agent_access ? 'agente liberado' : 'agente bloqueado'}</span>
                 </span>
                 )}
               </button>
@@ -190,7 +189,7 @@ export function Home({
                 </span>
               </RecordLine>
             ))}
-            {recent.length === 0 && <Empty>Nenhum registro ainda. Abra um cofre e crie o primeiro.</Empty>}
+            {recent.length === 0 && <Empty>Nenhum registro criado. Abra um cofre e crie o primeiro.</Empty>}
           </Panel>
 
           <Panel>
@@ -240,8 +239,8 @@ export function Home({
             {starred.length === 0 && (
               <Empty>
                 {tab === 'atencao'
-                  ? 'Nada pede atenção. Senhas fracas, repetidas ou vencidas aparecem aqui.'
-                  : 'Nenhum favorito. A estrela de um registro o traz para cá.'}
+                  ? 'Nenhum registro pede atenção. Senhas fracas, repetidas ou vencidas são exibidas aqui.'
+                  : 'Nenhum favorito. Marque a estrela de um registro para exibi-lo aqui.'}
               </Empty>
             )}
           </Panel>
@@ -251,13 +250,13 @@ export function Home({
           <PanelHead title="Atividade e agentes">
             <TabMenu to={{ place: 'trail' }}>
               <Button variant="ghost" size="sm" {...linkProps({ place: 'trail' }, onTrail)}>
-                Ver a trilha
+                Visualizar a trilha
                 <ArrowRight />
               </Button>
             </TabMenu>
           </PanelHead>
           <Line icon={Lock} tone="amber" title={unlockedAt ? `Destrancado desde ${new Date(unlockedAt.endsWith('Z') ? unlockedAt : `${unlockedAt}Z`).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Destrancado'}
-            detail={seconds === null ? 'sem tranca automática' : `tranca em ${seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${seconds} s`} parado`}>
+            detail={seconds === null ? 'sem tranca automática' : `tranca em ${seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${seconds} s`} sem uso`}>
             <Button variant="outline" size="sm" onClick={onLock}>
               Trancar
             </Button>
@@ -276,12 +275,12 @@ export function Home({
             detail={(() => {
               const on = open.filter((vault) => vault.agent_access).length
 
-              return on === 0 ? 'agente desligado em todos os cofres' : `agente ligado em ${on} ${on === 1 ? 'cofre' : 'cofres'}`
+              return on === 0 ? 'agente bloqueado em todos os cofres' : `agente liberado em ${on} ${on === 1 ? 'cofre' : 'cofres'}`
             })()}
           >
             <TabMenu to={{ place: 'settings', section: 'agentes' }}>
               <Button variant="ghost" size="sm" {...linkProps({ place: 'settings', section: 'agentes' }, onSettings)}>
-                ver em Ajustes
+                Visualizar em Ajustes
               </Button>
             </TabMenu>
           </Line>

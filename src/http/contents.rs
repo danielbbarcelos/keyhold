@@ -246,7 +246,7 @@ async fn export_vault(
 ) -> Answer {
     if aws::is_aws_vault(&state, &id) {
         return Err(bad_request(
-            "exportar um cofre AWS ainda não é possível: o conteúdo dele fica na AWS",
+            "ainda não é possível exportar um cofre AWS, pois o conteúdo dele fica na AWS",
         ));
     }
 
@@ -281,7 +281,7 @@ async fn import_into_vault(
     Json(body): Json<ImportRequest>,
 ) -> Answer {
     if aws::is_aws_vault(&state, &id) {
-        return Err(bad_request("importar para um cofre AWS ainda não é possível"));
+        return Err(bad_request("ainda não é possível importar para um cofre AWS"));
     }
 
     let store = state.store.lock().unwrap();
@@ -345,7 +345,7 @@ async fn add_attachment(
     Json(body): Json<NewAttachment>,
 ) -> Answer {
     let bytes = crate::encoding::from_base64url(&body.data)
-        .ok_or_else(|| bad_request("o conteúdo do arquivo não chegou inteiro"))?;
+        .ok_or_else(|| bad_request("o conteúdo do arquivo não foi recebido por completo"))?;
 
     let mime = if body.mime.is_empty() { "application/octet-stream" } else { &body.mime };
 
@@ -767,11 +767,11 @@ async fn totp_code(
         .fields
         .get(index)
         .filter(|f| f.kind == "totp")
-        .ok_or_else(|| bad_request(anyhow::anyhow!("esse campo não é um código 2FA")))?;
+        .ok_or_else(|| bad_request(anyhow::anyhow!("o campo não é um código 2FA")))?;
 
     let (code, remaining) =
         crate::totp::code_for_field(&field.value, crate::identity::now_seconds())
-            .ok_or_else(|| bad_request(anyhow::anyhow!("o segredo desse campo não é um 2FA válido")))?;
+            .ok_or_else(|| bad_request(anyhow::anyhow!("o segredo do campo não é um 2FA válido")))?;
 
     Ok(Json(json!({ "code": code, "remaining": remaining })))
 }
@@ -856,8 +856,8 @@ async fn move_record(
     // A17 is not done: a local record does not go into an AWS vault by being dragged there.
     if body.vault_id.as_deref().is_some_and(|to| aws::is_aws_vault(&state, to)) {
         return Err(bad_request(
-            "um registro local não vai para um cofre AWS por um arraste. Use \"Copiar para…\": \
-             ele copia para o outro cofre e, no fim, oferece apagar o original",
+            "um registro local não vai para um cofre AWS ao ser arrastado. Use “Copiar para outro \
+             local”: ele copia para o outro cofre e, ao final, oferece excluir o original",
         ));
     }
 

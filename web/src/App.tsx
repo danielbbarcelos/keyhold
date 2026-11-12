@@ -105,9 +105,9 @@ function Offline({ onRetry }: { onRetry: () => void }) {
     <Notice logo={false} title="O Keyhold não está respondendo">
       <span className="flex flex-col items-start gap-4">
         <span>
-          Esta aba perdeu o contato com o programa. Ele foi fechado ou reiniciado, e com isso a chave
-          do cofre saiu da memória: é assim que o cofre fica protegido. Seus dados continuam no
-          arquivo. Abra o Keyhold de novo e destranque.
+          Esta aba perdeu a conexão com o Keyhold, que foi fechado ou reiniciado. A chave do cofre
+          foi removida da memória, e os dados continuam no arquivo. Abra o Keyhold novamente e
+          destranque o cofre.
         </span>
         <span className="flex flex-wrap gap-2">
           <Button
@@ -119,13 +119,13 @@ function Offline({ onRetry }: { onRetry: () => void }) {
             Abrir o Keyhold
           </Button>
           <Button variant="outline" onClick={onRetry}>
-            Tentar de novo
+            Tentar novamente
           </Button>
         </span>
         {asked && (
           <span className="text-xs">
-            O Keyhold abre numa aba nova, e esta pode ser fechada. Se nada acontecer, abra pelo menu
-            de aplicativos.
+            O Keyhold é aberto em uma nova aba, e esta pode ser fechada. Caso nada aconteça, abra o
+            Keyhold pelo menu de aplicativos.
           </span>
         )}
       </span>
@@ -159,19 +159,19 @@ function OpenFromBookmark() {
       }
     } catch {
       setState('failed')
-      setMessage('O Keyhold não está rodando. Abra pelo atalho ou pelo terminal.')
+      setMessage('O Keyhold não está em execução. Abra pelo atalho ou pelo terminal.')
     }
   }
 
   return (
-    <Notice title={state === 'opened' ? 'Abri o Keyhold numa aba nova' : 'Abrir o Keyhold'}>
+    <Notice title={state === 'opened' ? 'Keyhold aberto em uma nova aba' : 'Abrir o Keyhold'}>
       {state === 'opened' ? (
-        'Pode fechar esta aba. A credencial da sessão vai só para a aba nova, nunca para um endereço salvo.'
+        'Esta aba pode ser fechada. A credencial da sessão é enviada apenas para a nova aba, nunca para um endereço salvo.'
       ) : (
         <span className="flex flex-col items-start gap-4">
           <span>
-            Esta aba não tem a credencial da sessão, que muda toda vez que o Keyhold abre. O botão
-            pede ao Keyhold para abrir a janela dele com ela.
+            Esta aba não possui a credencial da sessão, que muda sempre que o Keyhold é aberto. O
+            Keyhold abre uma nova aba já com a credencial.
           </span>
           <Button onClick={() => void open()} disabled={state === 'busy'}>
             {state === 'busy' && <Loader2 className="animate-spin" />}

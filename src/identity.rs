@@ -226,7 +226,7 @@ pub fn unlock(vault: &Store, attempt: UnlockAttempt) -> Result<SecretKey> {
         let kek = crypto::derive_key(&normalised, &recovery_salt, params)?;
 
         unwrap_key(&kek, &recovery_wrapped, AAD_RECOVERY)
-            .map_err(|_| anyhow!("that recovery key does not open this vault"))?
+            .map_err(|_| anyhow!("a chave de recuperação não abre este cofre"))?
     } else {
         let unlock_key = match protection {
             Protection::Password => {
@@ -244,7 +244,7 @@ pub fn unlock(vault: &Store, attempt: UnlockAttempt) -> Result<SecretKey> {
         // Nothing here compares a stored hash. The password is right when the key it derives opens
         // the wrapped vault key, and wrong when it does not — there is no other check to fool.
         unwrap_key(&unlock_key, &wrapped, AAD_VAULT_KEY)
-            .map_err(|_| anyhow!("that master password does not open this vault"))?
+            .map_err(|_| anyhow!("a senha-mestra não abre este cofre"))?
     };
 
     if let Some(sealed) = totp_secret {
@@ -260,7 +260,7 @@ pub fn unlock(vault: &Store, attempt: UnlockAttempt) -> Result<SecretKey> {
         secret.zeroize();
 
         if !accepted {
-            bail!("that code is not right, or it has already expired");
+            bail!("o código não confere ou já expirou");
         }
     }
 

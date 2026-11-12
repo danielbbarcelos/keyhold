@@ -115,7 +115,7 @@ export function AlertBanner({ alert, onRemove, className }: { alert: Alert; onRe
         {alert.text && <span className="mt-0.5 block text-[13px] text-muted-foreground">{alert.text}</span>}
       </span>
       {onRemove && (
-        <Button variant="ghost" size="icon-xs" aria-label={`Tirar o alerta ${alert.title}`} title="Tirar este alerta" onClick={onRemove}>
+        <Button variant="ghost" size="icon-xs" aria-label={`Remover o alerta ${alert.title}`} title="Remover alerta" onClick={onRemove}>
           <X />
         </Button>
       )}
@@ -161,7 +161,7 @@ export function AlertForm({
   return (
     <div className="grid gap-3 rounded-xl border bg-raised p-3.5">
       <AlertBanner alert={{ title: title || 'Título do alerta', text, colour, icon }} className="bg-card" />
-      <Input value={title} autoFocus placeholder="Título, por exemplo: Não compartilhar com terceiros" onChange={(event) => setTitle(event.target.value)} />
+      <Input value={title} autoFocus placeholder="Ex.: Não compartilhar com terceiros" onChange={(event) => setTitle(event.target.value)} />
       <Textarea className="min-h-[60px]" value={text} placeholder="Descrição (opcional)" onChange={(event) => setText(event.target.value)} />
       <div className="flex flex-wrap items-center gap-1.5">
         {ICON_COLOURS.map((one) => (
@@ -255,7 +255,7 @@ export function AlertsEditor({ alerts, onChange }: { alerts: Alert[]; onChange: 
             if (keep) {
               void savePresets([...presets, made])
                 .then(() => onChange([...alerts, fromPreset(made)]))
-                .catch((cause) => toastError(cause, 'Não salvei o alerta padrão'))
+                .catch((cause) => toastError(cause, 'Não foi possível salvar o alerta padrão'))
             } else {
               onChange([...alerts, { colour: made.colour, icon: made.icon, title: made.title, text: made.text }])
             }
@@ -284,7 +284,7 @@ export function AlertsEditor({ alerts, onChange }: { alerts: Alert[]; onChange: 
             {presets.length > 0 && <DropdownMenuSeparator />}
             <DropdownMenuItem onSelect={() => setWriting(true)}>
               <Plus />
-              Alerta personalizado…
+              Alerta personalizado
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -298,15 +298,15 @@ export function AlertPresetsPanel() {
   const presets = usePresets()
   const [editing, setEditing] = useState<string | 'new' | null>(null)
 
-  const save = (next: AlertPreset[]) => void savePresets(next).catch((cause) => toastError(cause, 'Não salvei os alertas'))
+  const save = (next: AlertPreset[]) => void savePresets(next).catch((cause) => toastError(cause, 'Não foi possível salvar os alertas'))
 
   return (
     <section className="rounded-[14px] border bg-card">
       <div className="border-b px-5 py-4">
         <h3 className="text-[15px] font-semibold">Alertas padrão</h3>
         <p className="mt-1 max-w-2xl text-[13px] text-muted-foreground">
-          Avisos que você coloca no topo de um registro, como "Não compartilhar com terceiros". Mudar um alerta
-          aqui muda todos os registros que o usam. Ficam cifrados com a sua chave.
+          Avisos exibidos no topo de um registro, como “Não compartilhar com terceiros”. Alterar um alerta padrão
+          altera todos os registros que o usam. Os alertas são cifrados com a sua chave.
         </p>
       </div>
       <div className="grid gap-2 p-5">
@@ -348,7 +348,7 @@ export function AlertPresetsPanel() {
           </Button>
         )}
         <p className="text-xs text-faint">
-          Remover um alerta padrão não tira o aviso dos registros: eles passam a mostrar a cópia que guardaram.
+          Remover um alerta padrão não remove o aviso dos registros. Eles passam a exibir a cópia armazenada.
         </p>
       </div>
     </section>

@@ -90,7 +90,7 @@ export function MoveToVaultDialog({
 
       onDone()
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível mover.')
+      setError(cause instanceof ApiError ? cause.message : 'Não foi possível mover. Tente novamente.')
     } finally {
       setBusy(false)
     }
@@ -102,15 +102,15 @@ export function MoveToVaultDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Mover {what} para outro cofre</AlertDialogTitle>
           <AlertDialogDescription>
-            O conteúdo é decifrado e cifrado de novo sob a chave do cofre de destino, com o
-            histórico e os anexos junto. Nada sai do arquivo do Keyhold. Para um cofre AWS, use
-            "Copiar para…".
+            O conteúdo é decifrado e cifrado novamente com a chave do cofre de destino, junto com o
+            histórico e os anexos. Nada sai do arquivo do Keyhold. Para um cofre AWS, use “Copiar
+            para outro local”.
           </AlertDialogDescription>
         </AlertDialogHeader>
 
         {elsewhere.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Não há outro cofre para onde mover. Crie um em Ajustes.
+            Nenhum outro cofre disponível. Crie um em Ajustes.
           </p>
         ) : (
           <div className="space-y-4">
@@ -140,7 +140,7 @@ export function MoveToVaultDialog({
                   <SelectItem value="root">Raiz do cofre</SelectItem>
                   {folders.map((folder) => (
                     <SelectItem key={folder.id} value={folder.id}>
-                      {'— '.repeat(folder.depth)}
+                      {'\u00a0\u00a0\u00a0'.repeat(folder.depth)}
                       {folder.name}
                     </SelectItem>
                   ))}
@@ -154,7 +154,7 @@ export function MoveToVaultDialog({
               */}
             {target?.agent_access && (
               <p className="text-sm text-amber-600 dark:text-amber-500">
-                Um agente local pode enxergar o cofre {target.name}.
+                Um agente local pode visualizar o cofre {target.name}.
               </p>
             )}
 

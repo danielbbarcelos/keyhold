@@ -15,6 +15,10 @@
 
 ### Changed
 
+- **The interface's words**, rewritten to one writing guide: no dashes or semicolons, dialog titles
+  that state the action, destructive confirmations that name what is lost, errors that say what
+  did not happen and what to do, and one vocabulary (excluir, remover, arquivar, descartar). A
+  vault is now "arquivado", not "guardado". `npm run lint:copy` checks the mechanical rules.
 - Lists in Ajustes (vaults, agents, the trail switch) are bordered rows with dividers and hover,
   easier to aim at on a wide screen.
 

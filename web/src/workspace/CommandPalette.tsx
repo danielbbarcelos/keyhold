@@ -42,7 +42,7 @@ export function CommandPalette({ records, vaults, open, onOpenChange, onPick }: 
       <Command>
         <CommandInput placeholder="Buscar em todos os registros…" />
         <CommandList>
-          <CommandEmpty>Nada encontrado.</CommandEmpty>
+          <CommandEmpty>Nenhum registro encontrado.</CommandEmpty>
 
           {records.map((record) => (
             <CommandItem

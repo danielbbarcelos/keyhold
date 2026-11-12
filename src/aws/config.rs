@@ -105,7 +105,7 @@ pub fn load(store: &Store, master: &SecretKey) -> Result<AwsConfig> {
     };
 
     let sealed = from_base64url(&raw).context("a configuração da AWS está danificada")?;
-    let bytes = crypto::open(master, &sealed, AAD).context("a configuração da AWS não abriu")?;
+    let bytes = crypto::open(master, &sealed, AAD).context("não foi possível abrir a configuração da AWS")?;
 
     serde_json::from_slice(&bytes).context("a configuração da AWS não é legível")
 }

@@ -200,15 +200,15 @@ fn ask_on_desktop(other: &Marker, can_present: bool) -> Choice {
     let text = if can_present {
         format!(
             "O Keyhold já está aberto (PID {}).\n\nAbrir e continuar traz para a frente o cofre \
-             que já está destrancado — nada se perde.\n\nComeçar de novo encerra a instância \
-             atual: o cofre tranca e a chave que ele guarda é esquecida.",
+             que já está destrancado, sem perder nada.\n\nComeçar de novo encerra a instância \
+             atual: o cofre é trancado e a chave mantida por ela é descartada.",
             other.pid
         )
     } else {
         format!(
-            "O Keyhold já está aberto (PID {}), rodando uma versão diferente do programa — ela \
-             não sabe se trazer para a frente.\n\nComeçar de novo encerra a instância atual: o \
-             cofre tranca e a chave que ele guarda é esquecida.",
+            "O Keyhold já está aberto (PID {}), em uma versão diferente do programa, que não pode \
+             ser trazida para a frente.\n\nComeçar de novo encerra a instância atual: o cofre é \
+             trancado e a chave mantida por ela é descartada.",
             other.pid
         )
     };
@@ -296,7 +296,7 @@ fn ask_on_desktop(other: &Marker, can_present: bool) -> Choice {
     // forward is not destructive, so that is what happens — and it is said out loud.
     if can_present {
         announce(&format!(
-            "O Keyhold já estava aberto (PID {}). Trouxe a janela para o seu navegador.",
+            "O Keyhold já estava aberto (PID {}). A janela foi trazida para o seu navegador.",
             other.pid
         ));
 
@@ -325,8 +325,8 @@ fn ask_on_desktop(other: &Marker, can_present: bool) -> Choice {
 pub fn present(other: &Marker) -> Result<()> {
     if !same_build(other.pid) {
         bail!(
-            "o Keyhold aberto no PID {} é de outra versão do programa e não sabe se trazer para a \
-             frente. Encerre e comece de novo.",
+            "o Keyhold aberto no PID {} é de outra versão do programa e não pode ser trazido para \
+             a frente. Encerre e comece de novo.",
             other.pid
         );
     }
@@ -744,14 +744,14 @@ pub fn close(pid: i32) -> Result<()> {
     let target = processes()
         .into_iter()
         .find(|one| one.pid == pid)
-        .ok_or_else(|| anyhow::anyhow!("não há um Keyhold com o PID {pid} nesta máquina"))?;
+        .ok_or_else(|| anyhow::anyhow!("nenhum Keyhold com o PID {pid} nesta máquina"))?;
 
     if target.is_this_one {
-        bail!("esta é a instância que está desenhando esta janela — use Trancar agora, ou feche-a");
+        bail!("esta é a instância desta janela. Use Trancar agora ou feche a janela");
     }
 
     if !terminate(pid) {
-        bail!("não foi possível pedir ao PID {pid} que encerrasse");
+        bail!("não foi possível pedir o encerramento do PID {pid}");
     }
 
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -764,7 +764,7 @@ pub fn close(pid: i32) -> Result<()> {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    bail!("o PID {pid} não respondeu ao pedido de encerrar")
+    bail!("o PID {pid} não respondeu ao pedido de encerramento")
 }
 
 fn is_keyhold(pid: i32) -> bool {

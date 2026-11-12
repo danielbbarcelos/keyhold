@@ -98,10 +98,10 @@ export function DatePicker({
         />
         <span className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center">
           {value && (
-            <Tip label="Tirar a data"><button
+            <Tip label="Remover a data"><button
               type="button"
              
-              aria-label="Tirar a data"
+              aria-label="Remover a data"
               onClick={() => onChange('')}
               className="grid size-7 place-items-center rounded-md text-faint hover:bg-hover hover:text-foreground"
             >

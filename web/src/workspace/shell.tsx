@@ -203,7 +203,7 @@ function AwsSession({ onAccounts }: { onAccounts: () => void }) {
                     {gone
                       ? `expirou às ${clock(login.expires_at)}`
                       : login.renews && login.expires_at - now > 600
-                        ? 'renova sozinha enquanto o Keyhold estiver aberto'
+                        ? 'renovada automaticamente enquanto o Keyhold estiver aberto'
                         : `expira às ${clock(login.expires_at)}`}
                   </span>
                 </span>
@@ -286,8 +286,8 @@ function LockButton({
         </b>
         <p className="mt-1 text-xs text-muted-foreground">
           {seconds === null
-            ? 'O cofre só tranca quando você mandar ou fechar o Keyhold.'
-            : 'Sem nenhum clique ou tecla no Keyhold. O relógio corre no programa, não nesta janela.'}
+            ? 'O cofre só é trancado manualmente ou ao fechar o Keyhold.'
+            : 'Sem nenhum clique ou tecla no Keyhold. O prazo é contado pelo Keyhold, não por esta janela.'}
         </p>
         <Button className="mt-3.5 w-full" onClick={onLock}>
           <Lock />
@@ -520,7 +520,7 @@ export function VaultSwitcher({
             className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-sm hover:bg-hover"
           >
             <Copy className="size-4 text-muted-foreground" />
-            Copiar este cofre para…
+            Copiar este cofre
           </button>
         )}
       </PopoverContent>

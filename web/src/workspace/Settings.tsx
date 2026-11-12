@@ -115,7 +115,7 @@ const SECTIONS: Array<{ id: string; label: string; icon: LucideIcon | typeof Aws
   { id: 'alertas', label: 'Alertas', icon: ShieldAlert },
   { id: 'gerador', label: 'Gerador de senhas', icon: WandSparkles },
   { id: 'aws', label: 'Contas AWS', icon: AwsNavMark },
-  { id: 'chaves', label: 'Trocar a chave', icon: RefreshCw },
+  { id: 'chaves', label: 'Troca de chave', icon: RefreshCw },
   { id: 'lixeira', label: 'Lixeira', icon: Trash2 },
   { id: 'trilha', label: 'Trilha', icon: ScrollText },
   { id: 'exportar', label: 'Exportar e importar', icon: ArrowLeftRight },
@@ -243,7 +243,7 @@ function AppearanceSettings({
     <Card className="py-6">
       <CardHeader className="px-6">
         <CardTitle>Aparência</CardTitle>
-        <CardDescription>Vale para este Keyhold. Nada disso fica no conteúdo dos cofres.</CardDescription>
+        <CardDescription>Aplica-se a este Keyhold e não é gravada no conteúdo dos cofres.</CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-7 px-6">
@@ -422,20 +422,20 @@ function AutoLock({ policy, onChanged }: { policy: LockPolicy; onChanged: () => 
           <Badge>recomendado</Badge>
         </CardTitle>
         <CardDescription>
-          O relógio corre no Keyhold, não nesta janela — uma aba fechada ou congelada não estica o
-          prazo. Você pode desligar os dois, e o cofre então só tranca quando você mandar.
+          O prazo é contado pelo Keyhold, não por esta janela. Uma aba fechada ou congelada não prolonga
+          o prazo. Sem as duas trancas, o cofre só é trancado manualmente.
         </CardDescription>
       </CardHeader>
 
       <CardContent className="px-6">
         <Choices
-          label="Trancar depois de parado por"
+          label="Trancar após inatividade de"
           hint="Sem nenhum clique ou tecla no Keyhold"
           current={policy.idle_seconds}
           onPick={(value) => void save({ idle_seconds: value })}
         />
         <Choices
-          label="Trancar com a janela escondida por"
+          label="Trancar com a janela oculta por"
           hint="Aba em segundo plano ou janela minimizada"
           current={policy.hidden_seconds}
           onPick={(value) => void save({ hidden_seconds: value })}
@@ -532,7 +532,7 @@ function SecondFactor({ status, onChanged }: { status: Status; onChanged: () => 
       await action()
       setError('')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
     } finally {
       setBusy(false)
     }
@@ -547,16 +547,16 @@ function SecondFactor({ status, onChanged }: { status: Status; onChanged: () => 
           <Badge variant="secondary">opcional</Badge>
         </CardTitle>
         <CardDescription>
-          Um código do seu app autenticador, pedido junto com a senha. Protege contra quem descobriu
-          a sua senha mas não tem o seu telefone. Não protege o arquivo do cofre: quem levar o
-          arquivo e quebrar a senha leva o segredo do código junto.
+          Um código do app autenticador, solicitado junto com a senha. Protege contra quem descobriu a
+          sua senha, mas não possui o seu telefone. Não protege o arquivo do cofre: quem obtiver o
+          arquivo e quebrar a senha obtém também o segredo do código.
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-4 px-6">
         {on ? (
           <div className="space-y-2">
-            <Label htmlFor="off-code">Para desligar, informe um código atual</Label>
+            <Label htmlFor="off-code">Informe um código atual para desligar</Label>
             <div className="flex items-center gap-2">
               <Input
                 id="off-code"
@@ -591,7 +591,7 @@ function SecondFactor({ status, onChanged }: { status: Status; onChanged: () => 
             />
 
             <p className="text-sm text-muted-foreground">
-              Se preferir digitar: <span className="tracking-wider text-foreground">{secret}</span>
+              Para digitar manualmente: <span className="tracking-wider text-foreground">{secret}</span>
             </p>
 
             <div className="flex items-center gap-2">
@@ -658,7 +658,7 @@ function MasterPassword({ status, onChanged }: { status: Status; onChanged: () =
       setError('')
       onChanged()
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.')
+      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
       setDone('')
     }
   }
@@ -673,8 +673,8 @@ function MasterPassword({ status, onChanged }: { status: Status; onChanged: () =
         </CardTitle>
         <CardDescription>
           {hasPassword
-            ? 'Trocar a senha não mexe em nada que está guardado: o Keyhold reembrulha uma chave só.'
-            : 'Este cofre abre sem senha. Definir uma agora passa a proteger o arquivo por criptografia, e não só por permissão de arquivo.'}
+            ? 'Trocar a senha não altera o conteúdo dos cofres. Apenas uma chave é cifrada novamente.'
+            : 'Este cofre abre sem senha. Com uma senha definida, o arquivo passa a ser protegido por criptografia, e não apenas por permissão de arquivo.'}
         </CardDescription>
       </CardHeader>
 
@@ -730,8 +730,9 @@ function Rotation({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged: ()
           Trocar a chave de um cofre
         </CardTitle>
         <CardDescription>
-          Gera uma chave nova para o cofre e reembrulha tudo que dependia da antiga. Nada guardado é
-          re-cifrado, então é barato — dá para fazer por suspeita, sem esperar uma certeza.
+          Gera uma nova chave para o cofre e cifra novamente as chaves que dependiam da antiga. O
+          conteúdo não é cifrado novamente, por isso a troca é rápida e pode ser feita por simples
+          suspeita.
         </CardDescription>
       </CardHeader>
 
@@ -759,10 +760,10 @@ function Rotation({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged: ()
       <AlertDialog open={rotating !== null} onOpenChange={(open) => !open && setRotating(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Trocar a chave de {rotating?.name}?</AlertDialogTitle>
+            <AlertDialogTitle>Trocar a chave de {rotating?.name}</AlertDialogTitle>
             <AlertDialogDescription>
-              Tudo que está no cofre continua legível — só os envelopes mudam. A troca acontece de
-              uma vez só: ou todos os registros passam para a chave nova, ou nenhum passa.
+              O conteúdo do cofre continua legível e apenas os envelopes das chaves mudam. A troca é
+              feita de uma só vez: todos os registros passam para a nova chave, ou nenhum passa.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -811,13 +812,13 @@ function Retention({ days, onChanged }: { days: number; onChanged: () => void })
           Lixeira
         </CardTitle>
         <CardDescription>
-          Excluir um registro não apaga nada de imediato: ele espera aqui, e some no primeiro
-          destranque depois do prazo. Com "Nunca", nada é apagado sem você mandar.
+          Um registro excluído fica na lixeira e é removido permanentemente no primeiro destranque
+          após o prazo. Com o prazo em “Nunca”, a lixeira só é esvaziada manualmente.
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-2 px-6">
-        <Label>Guardar o que foi excluído por</Label>
+        <Label>Manter registros excluídos por</Label>
         <div className="flex flex-wrap gap-1.5">
           {RETENTION_CHOICES.map(([label, value]) => (
             <Button
@@ -851,8 +852,8 @@ function TrailSettings({ on, onChanged }: { on: boolean; onChanged: () => void }
           Trilha
         </CardTitle>
         <CardDescription>
-          Destrancar, criar, alterar e excluir são sempre registrados — é o que permite conferir
-          depois se alguma coisa aconteceu sem você. Revelar e copiar um segredo é opcional.
+          Destrancar, criar, alterar e excluir são sempre registrados, o que permite conferir depois
+          se algo aconteceu sem você. Registrar a revelação e a cópia de um segredo é opcional.
         </CardDescription>
       </CardHeader>
 
@@ -872,7 +873,7 @@ function TrailSettings({ on, onChanged }: { on: boolean; onChanged: () => void }
 
         {!on && (
           <p className="text-sm text-muted-foreground">
-            Com isto desligado, não haverá como responder depois o que um assistente leu.
+            Desligado, não é possível saber depois o que um assistente leu.
           </p>
         )}
       </CardContent>
@@ -901,10 +902,10 @@ function DesktopKnock() {
         Avisar na área de trabalho
         <span className="mt-1 block text-sm text-muted-foreground">
           {state === 'granted'
-            ? 'Um pedido aparece como notificação do sistema, com o processo e o campo, nunca com o valor.'
+            ? 'Cada pedido é exibido como notificação do sistema, com o processo e o campo, nunca com o valor.'
             : state === 'denied'
-              ? 'O navegador está bloqueando as notificações deste endereço. Libere nas permissões do site para voltar a receber.'
-              : 'Um pedido expira em 90 segundos. Sem isto, ele só aparece se esta janela estiver à vista.'}
+              ? 'O navegador está bloqueando as notificações deste endereço. Libere nas permissões do site para voltar a recebê-las.'
+              : 'Um pedido expira em 90 segundos. Sem notificação, ele só é exibido quando esta janela está visível.'}
         </span>
       </Label>
 
@@ -972,15 +973,15 @@ function StandingGrants({ onChanged }: { onChanged: () => void }) {
   return (
     <div className="space-y-3 border-t pt-4">
       <div className="flex items-center justify-between gap-4">
-        <Label>Permissões valendo</Label>
+        <Label>Permissões ativas</Label>
         <Button variant="outline" size="sm" onClick={() => void revoke()}>
           Revogar todas
         </Button>
       </div>
 
       <p className="text-sm text-muted-foreground">
-        Enquanto uma destas estiver de pé, o pedido correspondente não abre nenhuma pergunta. O uso
-        continua indo para a trilha.
+        Enquanto uma permissão estiver ativa, o pedido correspondente é atendido sem nova aprovação. O
+        uso continua registrado na trilha.
       </p>
 
       <ul className="space-y-1">
@@ -1010,7 +1011,7 @@ function StandingGrants({ onChanged }: { onChanged: () => void }) {
 
 function untilWhen(grant: AgentGrant): string {
   if (grant.scope.kind === 'always') {
-    return 'Sem prazo, só acaba quando você revogar'
+    return 'Sem prazo, válida até ser revogada'
   }
 
   if (grant.scope.kind === 'while-running') {
@@ -1026,7 +1027,7 @@ function untilWhen(grant: AgentGrant): string {
         ? `${Math.floor(left / 3600)} h`
         : `${Math.max(1, Math.floor(left / 60))} min`
 
-  return `Até ${at.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} — faltam ${remaining}`
+  return `Até ${at.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} (faltam ${remaining})`
 }
 
 /**
@@ -1070,8 +1071,8 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
           {surface?.listening ? <Badge>ligado</Badge> : <Badge variant="secondary">desligado</Badge>}
         </CardTitle>
         <CardDescription>
-          Um assistente rodando nesta máquina pode procurar e pedir segredos dos cofres marcados
-          aqui. Cada pedido de valor vira uma pergunta nesta janela, com o processo e o PID à vista.
+          Um assistente em execução nesta máquina pode buscar e solicitar segredos dos cofres marcados
+          abaixo. Cada pedido de valor exige aprovação nesta janela, com o processo e o PID visíveis.
         </CardDescription>
       </CardHeader>
 
@@ -1079,27 +1080,27 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
         <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm">
           <p className="font-medium">Como um assistente usa uma credencial sem lê-la</p>
           <p className="text-muted-foreground">
-            Ele executa o comando através do Keyhold, e o segredo entra numa variável de ambiente do
-            processo — nunca no texto da conversa:
+            O assistente executa o comando pelo Keyhold, e o segredo vai para uma variável de ambiente
+            do processo, nunca para o texto da conversa:
           </p>
           <code className="block rounded-md border bg-background px-3 py-2 text-xs">
             keyhold run "Banco de dados" Senha -- psql "$KEYHOLD_SECRET"
           </code>
           <p className="text-muted-foreground">
-            Para quando é <span className="text-foreground">você</span> quem precisa da senha, ele
-            usa <span className="text-foreground">keyhold_copy</span>: o valor vai para a sua área de
-            transferência e ele recebe só a confirmação.
+            Quando <span className="text-foreground">você</span> precisa da senha, o assistente usa{' '}
+            <span className="text-foreground">keyhold_copy</span>: o valor vai para a sua área de
+            transferência e ele recebe apenas a confirmação.
           </p>
         </div>
 
         <div className="divide-y overflow-hidden rounded-xl border">
         <div className="flex items-start justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-hover">
           <Label htmlFor="agent-reveal" className="flex flex-1 cursor-pointer flex-col items-start gap-1 font-normal">
-            Deixar o assistente ler valores
+            Permitir que o assistente leia valores
             <span className="mt-1 block text-sm text-muted-foreground">
-              Desligado, ele nunca recebe uma senha — e por isso não tem como escrevê-la na conversa.
-              Ligado, o valor entra no histórico da sessão dele assim que chega, e nada aqui decide o
-              que ele faz depois.
+              Desligado, o assistente nunca recebe uma senha e, por isso, não pode escrevê-la na
+              conversa. Ligado, o valor entra no histórico da sessão do assistente assim que é
+              entregue, e o Keyhold não controla o que ele faz depois.
             </span>
           </Label>
           <Switch
@@ -1124,14 +1125,14 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
 
         {marked === 0 && (
           <p className="text-sm text-muted-foreground">
-            Marque ao menos um cofre abaixo antes de abrir a porta.
+            Marque ao menos um cofre abaixo para aceitar pedidos.
           </p>
         )}
 
         <DesktopKnock />
 
         <div className="space-y-2 border-t pt-4">
-          <Label>Cofres ao alcance</Label>
+          <Label>Cofres disponíveis ao assistente</Label>
 
           <div className="divide-y overflow-hidden rounded-xl border">
           {vaults
@@ -1163,10 +1164,10 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
 
         {surface && (
           <div className="space-y-2 border-t pt-4">
-            <Label>Ligar o Claude Code a este cofre</Label>
+            <Label>Conectar o Claude Code a este cofre</Label>
             <p className="text-sm text-muted-foreground">
-              Rode isto uma vez no terminal. O Keyhold não mexe na configuração de outro programa
-              sozinho.
+              Execute este comando uma vez no terminal. O Keyhold não altera a configuração de outros
+              programas.
             </p>
 
             <div className="flex items-center gap-2">
@@ -1210,7 +1211,7 @@ function GeneratorSettings({ recipe, onChanged }: { recipe?: Recipe; onChanged: 
       <div className="border-b px-5 py-4">
         <h3 className="text-[15px] font-semibold">Gerador de senhas</h3>
         <p className="mt-1 max-w-2xl text-[13px] text-muted-foreground">
-          O ponto de partida do gerador. Dá para ajustar a cada senha, no próprio diálogo.
+          As opções iniciais do gerador. Elas podem ser ajustadas a cada senha, no próprio gerador.
         </p>
       </div>
       <div className="grid max-w-xl gap-5 p-5">
@@ -1234,7 +1235,7 @@ function GeneratorSettings({ recipe, onChanged }: { recipe?: Recipe; onChanged: 
             Salvar como padrão
           </Button>
           <Button variant="ghost" onClick={() => setDraft(DEFAULT_RECIPE)}>
-            Voltar ao do Keyhold
+            Voltar ao padrão do Keyhold
           </Button>
           {saved && <span className="text-[13px] text-mint">Salvo</span>}
         </div>

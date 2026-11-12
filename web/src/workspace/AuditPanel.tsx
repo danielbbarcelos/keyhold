@@ -30,13 +30,13 @@ const LABELS: Record<string, string> = {
   'record.created': 'Registro criado',
   'record.updated': 'Registro alterado',
   'record.deleted': 'Registro excluído',
-  'record.destroyed': 'Registro apagado para sempre',
+  'record.destroyed': 'Registro excluído permanentemente',
   'record.restored': 'Registro restaurado',
   'record.copied': 'Registro copiado de outro cofre',
   'secret.revealed': 'Segredo revelado',
   'secret.copied': 'Segredo copiado',
   'instance.closed': 'Instância encerrada',
-  'agent.granted': 'Permissão dada a um agente',
+  'agent.granted': 'Permissão concedida a um agente',
   'agent.grant.revoked': 'Permissão de agente revogada',
   'identity.protection.changed': 'Proteção do cofre alterada',
   'identity.second-factor.changed': 'Segundo fator alterado',
@@ -60,7 +60,7 @@ const SHORT: Record<string, string> = {
   'record.updated': 'Alterou',
   'record.moved': 'Moveu',
   'record.deleted': 'Excluiu',
-  'record.destroyed': 'Apagou de vez',
+  'record.destroyed': 'Excluiu permanentemente',
   'record.restored': 'Restaurou',
   'record.copied': 'Copiou',
   'agent.granted': 'Permitiu',
@@ -125,7 +125,7 @@ export function AuditPanel({
             {integrity.intact ? <CircleCheck className="size-3.5" /> : <CircleX className="size-3.5" />}
             {integrity.intact
               ? `Corrente íntegra, ${integrity.checked} ${integrity.checked === 1 ? 'linha' : 'linhas'}`
-              : `A corrente quebra na linha ${integrity.broken_at}`}
+              : `Corrente quebrada na linha ${integrity.broken_at}`}
           </span>
         ) : (
           <Button
@@ -141,16 +141,16 @@ export function AuditPanel({
             }}
           >
             <ShieldQuestion />
-            Conferir a corrente
+            Conferir corrente
           </Button>
         )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
         {!events ? (
-          <p className="p-6 text-sm text-faint">Lendo a trilha…</p>
+          <p className="p-6 text-sm text-faint">Carregando a trilha…</p>
         ) : shown.length === 0 ? (
-          <p className="px-5 py-10 text-center text-sm text-faint">Nada registrado aqui ainda.</p>
+          <p className="px-5 py-10 text-center text-sm text-faint">Nenhum evento registrado.</p>
         ) : (
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-card">
@@ -196,7 +196,7 @@ export function AuditPanel({
                       {event.actor.kind === 'agent' ? (
                         <span className="inline-flex items-center gap-1.5">
                           <Bot className="size-3.5 text-faint" />
-                          {event.actor.process} (pid {event.actor.pid})
+                          {event.actor.process} (PID {event.actor.pid})
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1.5">
@@ -211,7 +211,7 @@ export function AuditPanel({
                           {where}
                         </RecordLink>
                       ) : (
-                        where || (event.scope ? 'registro que não existe mais' : '')
+                        where || (event.scope ? 'registro excluído' : '')
                       )}
                     </td>
                   </tr>

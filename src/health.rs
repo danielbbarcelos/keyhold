@@ -39,16 +39,16 @@ fn predictable(value: &str) -> Option<&'static str> {
     // so checking the common-sequence list first would report every all-letter password as a
     // keyboard run — true, and less useful than saying it has no digits or symbols at all.
     if value.chars().all(|c| c.is_ascii_digit()) {
-        return Some("só números");
+        return Some("apenas números");
     }
 
     if value.chars().all(|c| c.is_alphabetic()) {
-        return Some("só letras");
+        return Some("apenas letras");
     }
 
     for common in ["senha", "password", "qwerty", "asdf", "zxcv", "1234", "admin", "abcd"] {
         if lower.contains(common) {
-            return Some("contém uma sequência comum");
+            return Some("uma sequência comum");
         }
     }
 
@@ -157,13 +157,13 @@ pub fn examine(store: &Store, master: &SecretKey, vault_id: &str) -> Result<Vaul
 
         if record.header.compromised_at.is_some() {
             issues.push(Issue::Compromised);
-            reasons.push("Você marcou este segredo como comprometido.".to_string());
+            reasons.push("Este segredo foi marcado como comprometido.".to_string());
         }
 
         if let Some(due) = &record.header.rotation_due_at {
             if parse_date(due).map(|when| when <= now).unwrap_or(false) {
                 issues.push(Issue::Rotation);
-                reasons.push("A data que você marcou para trocar já passou.".to_string());
+                reasons.push("A data de troca já passou.".to_string());
             }
         }
 
@@ -175,16 +175,16 @@ pub fn examine(store: &Store, master: &SecretKey, vault_id: &str) -> Result<Vaul
 
             if secret.chars().count() < SHORT_LENGTH {
                 push_once(&mut issues, &mut reasons, Issue::Weak,
-                    format!("Tem menos de {SHORT_LENGTH} caracteres."));
+                    format!("A senha tem menos de {SHORT_LENGTH} caracteres."));
             }
 
             if classes(secret) == 1 {
                 push_once(&mut issues, &mut reasons, Issue::Weak,
-                    "Usa um só tipo de caractere.".to_string());
+                    "A senha usa apenas um tipo de caractere.".to_string());
             }
 
             if let Some(shape) = predictable(secret) {
-                push_once(&mut issues, &mut reasons, Issue::Weak, format!("É {shape}."));
+                push_once(&mut issues, &mut reasons, Issue::Weak, format!("A senha segue um padrão previsível: {shape}."));
             }
 
             let title = record.payload.title.to_lowercase();
@@ -205,7 +205,7 @@ pub fn examine(store: &Store, master: &SecretKey, vault_id: &str) -> Result<Vaul
 
                 if days >= STALE_DAYS {
                     issues.push(Issue::Stale);
-                    reasons.push(format!("Não muda há {days} dias."));
+                    reasons.push(format!("A senha não é trocada há {days} dias."));
                 }
             }
         }
@@ -359,8 +359,8 @@ mod tests {
 
         for (title, password, expected) in [
             ("Ano", "Verao2024!", "palavra com números"),
-            ("Digitos", "839201847362", "só números"),
-            ("Letras", "abcdefghijklm", "só letras"),
+            ("Digitos", "839201847362", "apenas números"),
+            ("Letras", "abcdefghijklm", "apenas letras"),
             ("Comum", "MinhaSenha123456", "sequência comum"),
         ] {
             add(&store, &master, &vault, title, password);

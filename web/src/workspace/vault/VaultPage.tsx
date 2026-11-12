@@ -192,7 +192,7 @@ export function VaultPage({
       if (login) await renew(login)
       else onAccounts()
     } catch (cause) {
-      toastError(cause, 'Não consegui ler as contas AWS')
+      toastError(cause, 'Não foi possível carregar as contas AWS')
     }
   }
 
@@ -243,7 +243,7 @@ export function VaultPage({
       } else if (cause instanceof ApiError && cause.aws) {
         setUnavailable({ message: cause.message, code: cause.aws })
       } else {
-        toastError(cause, 'Não consegui ler o cofre')
+        toastError(cause, 'Não foi possível carregar o cofre')
       }
     }
   }, [vault.id])
@@ -280,7 +280,7 @@ export function VaultPage({
       const found = await api.openRecord(id)
       setOpen(found.record)
     } catch (cause) {
-      toastError(cause, 'Esse registro não abriu')
+      toastError(cause, 'Não foi possível abrir o registro')
       onSelect(null)
     }
   }, [onSelect])
@@ -351,14 +351,14 @@ export function VaultPage({
     try {
       if (payloadChanged) {
         const saved = await api.saveRecord(id, editing.payload, aws ? open.version : undefined)
-        if (saved.warning) toast('Salvo, com um aviso', saved.warning, 'error')
+        if (saved.warning) toast('Registro salvo com um aviso', saved.warning, 'error')
         wrote = true
       }
       const newLeaf = aws ? renameOf(editing, before.payload.title) : null
       if (editing.folderId !== open.folder_id || newLeaf !== null) {
         const moved = await api.moveRecord(id, editing.folderId, undefined, newLeaf ?? undefined)
         if (moved.id) id = moved.id
-        if (moved.warning) toast('Movido, com um aviso', moved.warning, 'error')
+        if (moved.warning) toast('Registro movido com um aviso', moved.warning, 'error')
         wrote = true
       }
       if ((editing.rotation ?? null) !== (open.rotation_due_at?.slice(0, 10) ?? null)) {
@@ -383,14 +383,14 @@ export function VaultPage({
         } catch {
           /* the toast below still explains */
         }
-        toastError(cause, 'Outra pessoa salvou antes. Salvar de novo substitui a versão dela.')
+        toastError(cause, 'O registro foi alterado em outro lugar. Salvar novamente substitui aquela versão.')
       } else if (wrote) {
-        toastError(cause, 'Salvei em parte: o conteúdo foi gravado, o resto não')
+        toastError(cause, 'O conteúdo foi salvo, mas o restante não foi gravado')
         setEditing(null)
         if (id !== open.id) onSelect({ kind: 'record', id })
         else void reloadOpen()
       } else {
-        toastError(cause, 'Não salvei')
+        toastError(cause, 'Não foi possível salvar o registro')
       }
     } finally {
       setSaving(false)
@@ -418,7 +418,7 @@ export function VaultPage({
       onSelect({ kind: 'record', id: made.record.id })
       toast('Registro criado', payload.title)
     } catch (cause) {
-      toastError(cause, 'Não criei o registro')
+      toastError(cause, 'Não foi possível criar o registro')
     } finally {
       setSaving(false)
     }
@@ -431,11 +431,11 @@ export function VaultPage({
 
     try {
       const saved = await api.saveRecord(open.id, payload, aws ? open.version : undefined)
-      if (saved.warning) toast('Salvo, com um aviso', saved.warning, 'error')
+      if (saved.warning) toast('Registro salvo com um aviso', saved.warning, 'error')
       await reloadOpen()
-      toast('Alerta retirado', open.payload.title)
+      toast('Alerta removido', open.payload.title)
     } catch (cause) {
-      toastError(cause, 'Não tirei o alerta')
+      toastError(cause, 'Não foi possível remover o alerta')
     }
   }
 
@@ -462,7 +462,7 @@ export function VaultPage({
 
     try {
       const moved = await api.moveRecord(id, folderId)
-      if (moved.warning) toast('Movido, com um aviso', moved.warning, 'error')
+      if (moved.warning) toast('Registro movido com um aviso', moved.warning, 'error')
       await refresh()
       if (moved.id && moved.id !== id) {
         if (open?.id === id) onSelect({ kind: 'record', id: moved.id })
@@ -471,7 +471,7 @@ export function VaultPage({
       }
       toast('Registro movido', folderPath(folders, folderId) || 'Raiz do cofre')
     } catch (cause) {
-      toastError(cause, 'Não movi o registro')
+      toastError(cause, 'Não foi possível mover o registro')
     }
   }
 
@@ -517,7 +517,7 @@ export function VaultPage({
     for (const id of recordIds) {
       try {
         const answer = await api.moveRecord(id, folderId)
-        if (answer.warning) toast('Movido, com um aviso', answer.warning, 'error')
+        if (answer.warning) toast('Registro movido com um aviso', answer.warning, 'error')
         moved++
       } catch {
         failed++
@@ -538,7 +538,7 @@ export function VaultPage({
 
     const where = folderPath(folders, folderId) || 'Raiz do cofre'
     if (moved) toast(`${moved} ${moved === 1 ? 'item movido' : 'itens movidos'}`, where)
-    if (failed) toast(`${failed} ${failed === 1 ? 'item não foi movido' : 'itens não foram movidos'}`, 'Tente de novo, um de cada vez, para ver o motivo.', 'error')
+    if (failed) toast(`${failed} ${failed === 1 ? 'item não foi movido' : 'itens não foram movidos'}`, 'Tente novamente, um de cada vez, para visualizar o motivo.', 'error')
   }
 
   /** Every folder under `folderId`, at any depth. */
@@ -591,7 +591,7 @@ export function VaultPage({
     if (onlyRecords) {
       entries.push({
         kind: 'item',
-        label: 'Copiar para…',
+        label: 'Copiar para outro local',
         icon: Copy,
         onSelect: run(() =>
           setCopying({
@@ -617,7 +617,7 @@ export function VaultPage({
       const folder = folders.find((one) => one.id === pickedFolders[0])
       entries.push({
         kind: 'item',
-        label: 'Copiar para…',
+        label: 'Copiar para outro local',
         icon: Copy,
         onSelect: run(() => setCopying({ vaultId: vault.id, folderId: pickedFolders[0], what: `a pasta ${folder?.name ?? ''}` })),
       })
@@ -626,7 +626,7 @@ export function VaultPage({
     entries.push({ kind: 'separator' })
     entries.push({
       kind: 'item',
-      label: 'Excluir…',
+      label: 'Excluir',
       icon: Trash2,
       destructive: true,
       onSelect: run(() => {
@@ -692,8 +692,8 @@ export function VaultPage({
       target.records.length && `${target.records.length} ${target.records.length === 1 ? 'registro' : 'registros'}`,
       target.folders.length && `${target.folders.length} ${target.folders.length === 1 ? 'pasta' : 'pastas'}`,
     ].filter(Boolean)
-    toast(aws ? 'Apagados da AWS' : 'Excluídos', parts.join(' e '))
-    if (failed) toast(`${failed} ${failed === 1 ? 'item não foi excluído' : 'itens não foram excluídos'}`, 'Tente de novo, um de cada vez, para ver o motivo.', 'error')
+    toast(aws ? 'Excluídos permanentemente da AWS' : 'Excluídos', parts.join(' e '))
+    if (failed) toast(`${failed} ${failed === 1 ? 'item não foi excluído' : 'itens não foram excluídos'}`, 'Tente novamente, um de cada vez, para visualizar o motivo.', 'error')
   }
 
   async function sendToTrash(id: string) {
@@ -702,8 +702,8 @@ export function VaultPage({
       if (open?.id === id) onSelect(null)
       await refresh()
       toast(
-        aws ? 'Apagado da AWS' : 'Foi para a lixeira',
-        aws ? 'O parâmetro não existe mais na conta.' : 'Dá para restaurar de lá enquanto o prazo não vencer.',
+        aws ? 'Registro excluído permanentemente' : 'Registro excluído',
+        aws ? 'O parâmetro foi removido da conta AWS.' : 'O registro está na lixeira e pode ser restaurado enquanto o prazo não vencer.',
       )
     } catch (cause) {
       toastError(cause)
@@ -719,7 +719,7 @@ export function VaultPage({
     ...folderTab(folder),
     {
       kind: 'item',
-      label: 'Registro novo aqui',
+      label: 'Novo registro nesta pasta',
       icon: Plus,
       onSelect: () => startCreating(emptyPayload(), folder.id),
     },
@@ -736,7 +736,7 @@ export function VaultPage({
       })),
     },
     { kind: 'item', label: 'Mover', icon: MoveRight, onSelect: () => setFolderAction({ what: 'move', folder }) },
-    { kind: 'item', label: 'Copiar para…', icon: Copy, onSelect: () => setCopying({ vaultId: vault.id, folderId: folder.id, what: `a pasta ${folder.name}` }) },
+    { kind: 'item', label: 'Copiar para outro local', icon: Copy, onSelect: () => setCopying({ vaultId: vault.id, folderId: folder.id, what: `a pasta ${folder.name}` }) },
     { kind: 'separator' },
     { kind: 'item', label: 'Excluir', icon: Trash2, destructive: true, onSelect: () => setFolderAction({ what: 'delete', folder }) },
   ]
@@ -745,15 +745,15 @@ export function VaultPage({
   const awsFolderEntries = (folder: FolderNode): MenuEntry[] => [
     {
       kind: 'item',
-      label: 'Registro novo aqui',
+      label: 'Novo registro nesta pasta',
       icon: Plus,
       onSelect: () => startCreating(emptyPayload(), folder.id),
     },
     { kind: 'item', label: 'Subpasta', icon: FolderPlus, onSelect: () => setAsking({ parentId: folder.id }) },
     { kind: 'item', label: 'Renomear', icon: Pencil, onSelect: () => setFolderAction({ what: 'rename', folder }) },
-    { kind: 'item', label: 'Copiar para…', icon: Copy, onSelect: () => setCopying({ vaultId: vault.id, folderId: folder.id, what: `a pasta ${folder.name}` }) },
+    { kind: 'item', label: 'Copiar para outro local', icon: Copy, onSelect: () => setCopying({ vaultId: vault.id, folderId: folder.id, what: `a pasta ${folder.name}` }) },
     { kind: 'separator' },
-    { kind: 'item', label: 'Excluir a pasta vazia', icon: Trash2, destructive: true, onSelect: () => setFolderAction({ what: 'delete', folder }) },
+    { kind: 'item', label: 'Excluir pasta vazia', icon: Trash2, destructive: true, onSelect: () => setFolderAction({ what: 'delete', folder }) },
   ]
 
   const recordEntries = (record: RecordPreview): MenuEntry[] => [
@@ -761,7 +761,7 @@ export function VaultPage({
     { kind: 'separator' },
     {
       kind: 'item',
-      label: record.favourite ? 'Tirar dos favoritos' : 'Favoritar',
+      label: record.favourite ? 'Remover dos favoritos' : 'Favoritar',
       icon: Star,
       onSelect: () => void api.favouriteRecord(record.id, !record.favourite).then(refresh),
     },
@@ -783,14 +783,14 @@ export function VaultPage({
       : [{ kind: 'item' as const, label: 'Mover para outro cofre', icon: Vault, onSelect: () => setMovingToVault({ id: record.id, title: record.title }) }]),
     {
       kind: 'item',
-      label: 'Copiar para…',
+      label: 'Copiar para outro local',
       icon: Copy,
       onSelect: () => setCopying({ vaultId: vault.id, recordIds: [record.id], what: `“${record.title}”` }),
     },
     { kind: 'separator' },
     {
       kind: 'item',
-      label: aws ? 'Apagar de vez' : 'Mandar para a lixeira',
+      label: aws ? 'Excluir permanentemente' : 'Excluir',
       icon: Trash2,
       destructive: true,
       onSelect: () => setDeleting({ id: record.id, title: record.title }),
@@ -811,7 +811,7 @@ export function VaultPage({
           <>
             <span className="hidden items-center gap-1.5 text-xs text-faint lg:flex">
               <Lock className="size-3.5" />
-              Selado antes de tocar o disco
+              Cifrado antes de gravar no disco
             </span>
             <Button variant="outline" onClick={() => guard(stopEditing)}>
               Cancelar
@@ -876,7 +876,7 @@ export function VaultPage({
         <div className="grid h-full place-items-center rounded-[14px] border border-dashed p-8 text-center">
           <div className="max-w-sm space-y-3">
             <b className="block text-[15px] font-semibold">
-              {unavailable.code === 'session_expired' ? 'A sessão da AWS acabou' : 'O cofre na AWS não respondeu'}
+              {unavailable.code === 'session_expired' ? 'A sessão da AWS expirou' : 'O cofre na AWS não respondeu'}
             </b>
             <p className="text-sm text-muted-foreground">{unavailable.message}</p>
             <div className="flex justify-center gap-2">
@@ -891,7 +891,7 @@ export function VaultPage({
                 </>
               ) : (
                 <Button variant="outline" onClick={() => void refresh()}>
-                  Tentar de novo
+                  Tentar novamente
                 </Button>
               )}
             </div>
@@ -991,7 +991,7 @@ export function VaultPage({
         <div className="max-w-xs space-y-3">
           <p className="text-sm text-muted-foreground">
             {records.length === 0
-              ? 'Este cofre está vazio. Comece pelo primeiro registro.'
+              ? 'Este cofre está vazio. Crie o primeiro registro.'
               : 'Escolha um registro ou uma pasta na árvore. Ctrl P busca em todos os cofres.'}
           </p>
           {records.length === 0 && (
@@ -1028,7 +1028,7 @@ export function VaultPage({
             void api
               .setCompromised(id, false)
               .then(() => (open?.id === id ? reloadOpen() : refresh()))
-              .then(() => toast('Marca de comprometido retirada'))
+              .then(() => toast('Marca de comprometido removida'))
               .catch((cause) => toastError(cause))
           }
           selection={selection}
@@ -1086,7 +1086,7 @@ export function VaultPage({
               .createFolder(vault.id, name, parentId, colour, segment)
               .then(refresh)
               .then(() => toast('Pasta criada', name))
-              .catch((cause) => toastError(cause, 'Não criei a pasta'))
+              .catch((cause) => toastError(cause, 'Não foi possível criar a pasta'))
           }}
           onCancel={() => setAsking(null)}
         />
@@ -1138,12 +1138,12 @@ export function VaultPage({
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {aws ? `Apagar “${deleting.title}” de vez?` : `Mandar “${deleting.title}” para a lixeira?`}
+                {aws ? 'Excluir registro permanentemente' : 'Excluir registro'}
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {aws
-                  ? 'Um cofre na AWS não tem lixeira: o parâmetro é apagado da conta agora, para todo mundo que tem acesso a ele.'
-                  : 'Dá para restaurar de lá enquanto o prazo da lixeira não vencer.'}
+                  ? `“${deleting.title}” será excluído permanentemente da conta AWS, para todos que possuem acesso ao parâmetro. Cofres na AWS não têm lixeira. Esta ação não pode ser desfeita.`
+                  : `“${deleting.title}” será movido para a lixeira e poderá ser restaurado enquanto o prazo não vencer.`}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -1156,7 +1156,7 @@ export function VaultPage({
                   void sendToTrash(id)
                 }}
               >
-                {aws ? 'Apagar de vez' : 'Mandar para a lixeira'}
+                {aws ? 'Excluir permanentemente' : 'Excluir registro'}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -1175,13 +1175,13 @@ export function VaultPage({
                     bulkDeleting.folders.length &&
                       `${bulkDeleting.folders.length} ${bulkDeleting.folders.length === 1 ? 'pasta' : 'pastas'}`,
                   ].filter(Boolean)
-                  return `Excluir ${parts.join(' e ')}?`
+                  return `Excluir ${parts.join(' e ')}`
                 })()}
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {aws
-                  ? 'Um cofre na AWS não tem lixeira: os parâmetros são apagados da conta agora, para todo mundo que tem acesso a eles. As pastas selecionadas vão junto com tudo o que está dentro delas.'
-                  : 'Os registros vão para a lixeira, de onde dá para restaurar enquanto o prazo não vencer. As pastas selecionadas são excluídas, com as subpastas.'}
+                  ? 'Cofres na AWS não têm lixeira: os parâmetros serão excluídos permanentemente da conta, para todos que possuem acesso a eles. As pastas selecionadas serão excluídas com todo o conteúdo. Esta ação não pode ser desfeita.'
+                  : 'Os registros serão movidos para a lixeira e poderão ser restaurados enquanto o prazo não vencer. As pastas selecionadas serão excluídas, com as subpastas.'}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -1194,7 +1194,7 @@ export function VaultPage({
                   void deleteMany(target)
                 }}
               >
-                {aws ? 'Apagar de vez' : 'Excluir'}
+                {aws ? 'Excluir permanentemente' : 'Excluir'}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -1205,16 +1205,16 @@ export function VaultPage({
         <AlertDialog open onOpenChange={(isOpen) => !isOpen && setAskingJson(false)}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>O parâmetro vai virar JSON</AlertDialogTitle>
+              <AlertDialogTitle>Gravar o parâmetro como JSON</AlertDialogTitle>
               <AlertDialogDescription>
-                Hoje este registro é só uma senha, gravada na AWS como o valor puro do parâmetro, que é o que os
-                aplicativos leem. Com o que você acrescentou (alerta, ícone, observação ou outro campo), o Keyhold
-                precisa gravar o valor no formato JSON dele, e quem lê esse parâmetro esperando só a senha deixa de
+                Este registro é apenas uma senha, gravada na AWS como o valor puro do parâmetro, que é o que os
+                aplicativos leem. Com o que foi acrescentado (alerta, ícone, observação ou outro campo), o Keyhold
+                precisa gravar o valor em formato JSON, e quem lê o parâmetro esperando apenas a senha deixa de
                 funcionar.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Voltar e ajustar</AlertDialogCancel>
+              <AlertDialogCancel>Continuar editando</AlertDialogCancel>
               <AlertDialogAction
                 className="bg-destructive text-white hover:bg-destructive/90"
                 onClick={() => {
@@ -1234,11 +1234,11 @@ export function VaultPage({
           <AlertDialogContent className="data-[size=default]:max-w-[calc(100%-2rem)] data-[size=default]:sm:max-w-2xl">
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {movingAws.items.length > 1 ? `Mover ${movingAws.items.length} itens na AWS?` : 'Mover na AWS?'}
+                {movingAws.items.length > 1 ? `Mover ${movingAws.items.length} itens na AWS` : 'Mover na AWS'}
               </AlertDialogTitle>
               <AlertDialogDescription>
-                No Parameter Store, a pasta é parte do nome. Mover grava cada parâmetro com o nome novo e apaga o antigo,
-                e o histórico de versões do nome antigo vai junto. Quem lê pelo nome antigo para de achar.
+                No Parameter Store, a pasta faz parte do nome. Mover grava cada parâmetro com o novo nome e exclui o antigo,
+                junto com o histórico de versões do nome antigo. Quem lê pelo nome antigo deixa de encontrá-lo.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <MovePreview moves={awsMoves(movingAws.items, movingAws.folderId)} />

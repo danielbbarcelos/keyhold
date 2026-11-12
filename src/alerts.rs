@@ -46,14 +46,14 @@ fn starters() -> Vec<Preset> {
             colour: "rose".into(),
             icon: "shield-alert".into(),
             title: "Não compartilhar com terceiros".into(),
-            text: "Este acesso é pessoal. Não envie a senha por mensagem nem a passe para outra pessoa.".into(),
+            text: "Este acesso é pessoal. Não envie a senha por mensagem nem a compartilhe com terceiros.".into(),
         },
         Preset {
             id: "uso-interno".into(),
             colour: "amber".into(),
             icon: "building-2".into(),
             title: "Uso interno".into(),
-            text: "Só para a equipe. Não use fora dos sistemas da empresa.".into(),
+            text: "Apenas para a equipe. Não use fora dos sistemas da empresa.".into(),
         },
     ]
 }
@@ -89,7 +89,7 @@ pub fn load(store: &Store, master: &SecretKey) -> Result<Vec<Preset>> {
     };
 
     let sealed = from_base64url(&raw).context("os alertas padrão estão danificados")?;
-    let bytes = crypto::open(master, &sealed, AAD).context("os alertas padrão não abriram")?;
+    let bytes = crypto::open(master, &sealed, AAD).context("não foi possível abrir os alertas padrão")?;
 
     serde_json::from_slice(&bytes).context("os alertas padrão não são legíveis")
 }

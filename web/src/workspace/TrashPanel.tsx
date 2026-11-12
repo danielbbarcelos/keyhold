@@ -41,12 +41,12 @@ export function TrashPanel({ title, records, retentionDays, onChanged, vaultId }
   )
 
   const left = (archivedAt: string) => {
-    if (retentionDays <= 0) return 'fica até você apagar'
+    if (retentionDays <= 0) return 'até ser excluído'
     const gone = new Date(archivedAt.endsWith('Z') ? archivedAt : `${archivedAt}Z`)
     gone.setDate(gone.getDate() + retentionDays)
     const days = Math.max(0, Math.ceil((gone.getTime() - Date.now()) / 86_400_000))
 
-    return days === 0 ? 'some no próximo destranque' : `some em ${days} ${days === 1 ? 'dia' : 'dias'}`
+    return days === 0 ? 'removido no próximo destranque' : `removido em ${days} ${days === 1 ? 'dia' : 'dias'}`
   }
 
   return (
@@ -56,8 +56,8 @@ export function TrashPanel({ title, records, retentionDays, onChanged, vaultId }
           <h3 className="text-[15px] font-semibold">{title}</h3>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
             {retentionDays > 0
-              ? `Registros excluídos esperam aqui por ${retentionDays} dias e somem no primeiro destranque depois disso.`
-              : 'A limpeza automática está desligada: o que é excluído fica aqui até você mandar apagar.'}
+              ? `Registros excluídos ficam aqui por ${retentionDays} dias e são removidos permanentemente no primeiro destranque após esse prazo.`
+              : 'A limpeza automática está desligada. Os registros excluídos ficam aqui até serem removidos manualmente.'}
           </p>
         </div>
         {records.length > 0 && vaultId && (
@@ -104,7 +104,7 @@ export function TrashPanel({ title, records, retentionDays, onChanged, vaultId }
                         void api
                           .archiveRecord(record.id, false)
                           .then(onChanged)
-                          .catch((cause) => toastError(cause, 'Não restaurei'))
+                          .catch((cause) => toastError(cause, 'Não foi possível restaurar'))
                       }>
                       <RotateCcw />
                       Restaurar
@@ -112,7 +112,7 @@ export function TrashPanel({ title, records, retentionDays, onChanged, vaultId }
                     <Button
                       variant="ghost"
                       size="icon"
-                      aria-label="Apagar definitivamente"
+                      aria-label="Excluir permanentemente"
                       onClick={() => setConfirming({ what: 'one', id: record.id, title: record.title })}
                     >
                       <Trash2 />
@@ -130,13 +130,19 @@ export function TrashPanel({ title, records, retentionDays, onChanged, vaultId }
           <AlertDialogHeader>
             <AlertDialogTitle>
               {confirming?.what === 'all'
-                ? 'Apagar tudo o que está na lixeira?'
-                : 'Apagar definitivamente?'}
+                ? 'Esvaziar lixeira'
+                : 'Excluir permanentemente'}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {confirming?.what === 'one' && <strong>{confirming.title}: </strong>}
-              {confirming?.what === 'one' ? 'i' : 'I'}sto não tem volta. O conteúdo cifrado e
-              todas as versões antigas deixam de existir, e nem a senha-mestra traz de volta.
+              {confirming?.what === 'one' ? (
+                <>
+                  <strong>{confirming.title}</strong> será excluído permanentemente, com o conteúdo
+                  cifrado e todas as versões anteriores.
+                </>
+              ) : (
+                'Todos os registros da lixeira serão excluídos permanentemente, com o conteúdo cifrado e todas as versões anteriores.'
+              )}{' '}
+              Esta ação não pode ser desfeita. Nem a senha-mestra recupera o conteúdo.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -155,7 +161,7 @@ export function TrashPanel({ title, records, retentionDays, onChanged, vaultId }
                 })
               }}
             >
-              Apagar
+              {confirming?.what === 'all' ? 'Esvaziar lixeira' : 'Excluir permanentemente'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

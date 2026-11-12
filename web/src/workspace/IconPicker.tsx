@@ -23,7 +23,7 @@ export function IconPicker({
   icon,
   kind,
   onChange,
-  label = 'Trocar o ícone',
+  label = 'Trocar ícone',
   trigger,
   onClear,
   clearLabel = 'Voltar ao padrão',
@@ -54,7 +54,7 @@ export function IconPicker({
 
   async function usePicture(blob: Blob | null | undefined) {
     if (!blob || !blob.type.startsWith('image/')) {
-      toast('Isso não é uma imagem', 'Use PNG, JPEG, WebP ou SVG.', 'error')
+      toast('O arquivo não é uma imagem', 'Use PNG, JPEG, WebP ou SVG.', 'error')
 
       return
     }
@@ -64,7 +64,7 @@ export function IconPicker({
       onChange({ name: shown.name, colour: shown.colour, image })
       setOpen(false)
     } catch {
-      toast('Não consegui usar essa imagem', 'Tente outra, ou um arquivo menor.', 'error')
+      toast('Não foi possível usar a imagem', 'Tente outra imagem ou um arquivo menor.', 'error')
     }
   }
 
@@ -100,7 +100,7 @@ export function IconPicker({
           <Input
             autoFocus
             className="h-[34px] pl-9"
-            placeholder="Buscar ícone"
+            placeholder="Buscar…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -165,8 +165,8 @@ export function IconPicker({
             )}
           >
             <ImageUp className="size-[18px] text-faint" />
-            <b className="text-[13px] font-semibold text-foreground">Usar uma imagem sua</b>
-            Solte, cole ou escolha do disco.
+            <b className="text-[13px] font-semibold text-foreground">Usar imagem própria</b>
+            Arraste, cole ou escolha um arquivo.
           </button>
 
           {shown.image && (
@@ -176,7 +176,7 @@ export function IconPicker({
               className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs text-muted-foreground hover:bg-hover hover:text-foreground"
             >
               <Trash2 className="size-3.5" />
-              Tirar a imagem e voltar ao ícone
+              Remover a imagem e voltar ao ícone
             </button>
           )}
 

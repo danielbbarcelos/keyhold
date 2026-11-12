@@ -60,8 +60,8 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
           Cofres
         </CardTitle>
         <CardDescription>
-          Guardar um cofre o esconde da lista e é reversível. Excluir não é: leva junto tudo que
-          está dentro, incluindo o histórico e a lixeira.
+          Um cofre arquivado não é exibido na lista e pode ser restaurado. Excluir um cofre é
+          irreversível e remove todo o conteúdo, incluindo o histórico e a lixeira.
         </CardDescription>
       </CardHeader>
 
@@ -73,14 +73,14 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
               <VaultInitial vault={vault} />
               <span className="truncate text-sm">{vault.name}</span>
               {vault.kind === 'aws' && <AwsMark className="size-4" title="Cofre AWS" />}
-              {vault.archived && <Badge variant="secondary">guardado</Badge>}
+              {vault.archived && <Badge variant="secondary">arquivado</Badge>}
             </span>
 
             <span className="flex shrink-0 items-center gap-1">
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Editar o cofre"
+                aria-label="Editar cofre"
                 onClick={() => setRenaming(vault)}
               >
                 <Pencil />
@@ -98,7 +98,7 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={vault.archived ? 'Trazer de volta' : 'Guardar'}
+                aria-label={vault.archived ? 'Restaurar' : 'Arquivar'}
                 onClick={() => void api.archiveVault(vault.id, !vault.archived).then(onChanged)}
               >
                 {vault.archived ? <ArchiveRestore /> : <Archive />}
@@ -107,7 +107,7 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Excluir o cofre"
+                aria-label="Excluir cofre"
                 onClick={() => setDeleting(vault)}
               >
                 <Trash2 />
@@ -174,9 +174,9 @@ function RenameDialog({
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Editar o cofre</AlertDialogTitle>
+          <AlertDialogTitle>Editar cofre</AlertDialogTitle>
           <AlertDialogDescription>
-            O nome e o ícone ficam cifrados como o resto: quem ler o arquivo não vê nem isto.
+            O nome e o ícone são cifrados como o restante do cofre e não ficam visíveis no arquivo.
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -184,7 +184,7 @@ function RenameDialog({
           <div className="flex items-center gap-3">
             <IconPicker
               icon={icon}
-              label="Escolher o ícone do cofre"
+              label="Escolher ícone do cofre"
               onChange={setIcon}
               onClear={() => setIcon(null)}
               clearLabel="Voltar às iniciais"
@@ -201,10 +201,10 @@ function RenameDialog({
                 onCheckedChange={(on) => setRenameWithTitle(on === true)}
               />
               <span className="grid gap-0.5">
-                <span className="font-medium">Ao renomear, mudar o nome na AWS também</span>
+                <span className="font-medium">Renomear também na AWS por padrão</span>
                 <span className="text-xs text-faint">
-                  Só o ponto de partida: ao trocar o título de um registro ou o nome de uma pasta, a caixa já
-                  vem marcada. Mudar o nome na AWS apaga o parâmetro antigo e o histórico dele.
+                  Ao trocar o título de um registro ou o nome de uma pasta, a opção já vem marcada. Renomear
+                  na AWS exclui o parâmetro antigo e o histórico dele.
                 </span>
               </span>
             </label>
@@ -269,13 +269,13 @@ function DeleteDialog({
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Excluir o cofre {vault.name}?</AlertDialogTitle>
+          <AlertDialogTitle>Excluir cofre {vault.name}</AlertDialogTitle>
           <AlertDialogDescription>
             {total === null
-              ? 'Conferindo o que há dentro…'
+              ? 'Conferindo o conteúdo…'
               : total === 0
-                ? 'Este cofre está vazio.'
-                : `Isto apaga ${total} ${total === 1 ? 'registro' : 'registros'}${
+                ? 'O cofre está vazio e será excluído. Esta ação não pode ser desfeita.'
+                : `${total === 1 ? 'Será excluído 1 registro' : `Serão excluídos ${total} registros`}${
                     counts && counts.archived_records > 0
                       ? ` (${counts.archived_records} na lixeira)`
                       : ''
@@ -283,7 +283,7 @@ function DeleteDialog({
                     counts && counts.folders > 0
                       ? ` e ${counts.folders} ${counts.folders === 1 ? 'pasta' : 'pastas'}`
                       : ''
-                  }, com todo o histórico. Nem a senha-mestra traz de volta.`}
+                  }, com todo o histórico. Nem a senha-mestra recupera o conteúdo. Esta ação não pode ser desfeita.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -313,7 +313,7 @@ function DeleteDialog({
                 .catch((cause) => setError(describe(cause)))
             }
           >
-            Excluir para sempre
+            Excluir cofre
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -322,5 +322,5 @@ function DeleteDialog({
 }
 
 function describe(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'Não foi possível falar com o Keyhold.'
+  return cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.'
 }
