@@ -76,6 +76,23 @@ fn connect() -> Result<impl Read + Write> {
     Ok(pipe)
 }
 
+/// What every assistant that connects is told at the start, and again wherever it is about to act:
+/// a secret is used through `keyhold_run`, never read and never written into a command.
+pub const INSTRUCTIONS: &str = "Keyhold é o cofre de senhas do usuário. REGRA: nunca escreva uma \
+    senha, chave ou token em um comando, arquivo, mensagem ou resumo, e nunca monte um comando com a \
+    senha escrita (por exemplo MYSQL_PWD='...' mysql ...). Para USAR uma credencial, chame \
+    keyhold_run: passe o comando SEM a senha e, em `variable`, o nome da variável de ambiente que o \
+    programa lê (MYSQL_PWD para mysql, PGPASSWORD para psql, AWS_SECRET_ACCESS_KEY para a CLI da \
+    AWS). Se o programa exige a senha como argumento, escreva {{secret}} no lugar dela. O Keyhold \
+    coloca a senha só no processo filho, e você recebe apenas a saída. Se o usuário precisa da senha, \
+    chame keyhold_copy. Campos secretos nunca são devolvidos a você. Usuário, endereço e outros \
+    campos que não são secretos podem ser lidos com keyhold_get, com a aprovação do usuário.";
+
+/// Appended to what search and describe return, where the next step is decided.
+const REMINDER: &str = "\n\n[Keyhold] Para usar uma senha, chame keyhold_run com o comando sem a \
+    senha e o nome da variável que o programa lê em `variable` (MYSQL_PWD, PGPASSWORD…), ou \
+    {{secret}} onde a senha for argumento. Nunca escreva uma senha em um comando.";
+
 /// What the tools look like to an agent.
 ///
 /// `keyhold_get` is only offered when the vault allows values to be read. A tool that is not in the
@@ -115,11 +132,15 @@ fn tools(may_reveal: bool, may_copy: bool) -> Value {
         json!({
             "name": "keyhold_run",
             "description":
-                "PREFIRA ESTA FERRAMENTA quando precisar USAR uma credencial. Executa um comando com \
-                 o segredo em uma variável de ambiente do processo filho e devolve a saída. O valor \
-                 nunca entra nesta conversa, então nunca vai parar no histórico da sessão. Exemplo: \
-                 rodar `psql \"$DB_URL\"` com o campo Senha em DB_URL. A pessoa aprova o pedido na \
-                 janela do Keyhold.",
+                "É A FORMA DE USAR UMA SENHA. Executa um comando com o segredo em uma variável de \
+                 ambiente do processo filho e devolve a saída. O valor nunca entra nesta conversa \
+                 nem aparece no comando. Passe o comando SEM a senha e escolha em `variable` o nome \
+                 que o programa lê: MYSQL_PWD (mysql), PGPASSWORD (psql), AWS_SECRET_ACCESS_KEY \
+                 (CLI da AWS) ou outro. Se o programa exige a senha como argumento, escreva \
+                 {{secret}} no lugar dela e o Keyhold a coloca só na hora de executar. NUNCA escreva \
+                 a senha no comando, como em MYSQL_PWD='...' mysql: o Keyhold recusa o comando que a \
+                 contém. Exemplo: command=[\"mysql\",\"-h\",\"HOST\",\"-u\",\"USUARIO\",\"-e\",\"SELECT 1\"], \
+                 variable=\"MYSQL_PWD\", field=\"Senha\". O usuário aprova o pedido na janela do Keyhold.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -164,11 +185,11 @@ fn tools(may_reveal: bool, may_copy: bool) -> Value {
         listed.push(json!({
             "name": "keyhold_get",
             "description":
-                "Devolve o valor de um campo. ÚLTIMO RECURSO: use apenas quando keyhold_run e \
-                 keyhold_copy não resolverem, porque o valor passa a fazer parte desta conversa e \
-                 fica no histórico da sessão. NUNCA escreva o valor em arquivo, commit, log, \
-                 mensagem ou resumo, e não o repita de volta para a pessoa — ela já tem o cofre. A \
-                 pessoa aprova cada pedido na janela do Keyhold.",
+                "Devolve o valor de um campo que NÃO é secreto (usuário, endereço, texto), como o \
+                 host e o usuário para montar um comando. Campos secretos (senha, chave, PIN, \
+                 cartão) NUNCA são devolvidos: para usá-los, chame keyhold_run. O valor passa a \
+                 fazer parte desta conversa: não o escreva em arquivo, commit ou resumo. O usuário \
+                 aprova cada pedido na janela do Keyhold.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -224,7 +245,7 @@ fn render(response: Response) -> Value {
                     })
                     .collect();
 
-                (lines.join("\n"), false)
+                (format!("{}{REMINDER}", lines.join("\n")), false)
             }
         }
         Response::Fields { title, fields } => {
@@ -240,7 +261,7 @@ fn render(response: Response) -> Value {
                 })
                 .collect();
 
-            (format!("{title}:\n{}", lines.join("\n")), false)
+            (format!("{title}:\n{}{REMINDER}", lines.join("\n")), false)
         }
         Response::Copied { field, seconds } => (
             format!(
@@ -251,9 +272,8 @@ fn render(response: Response) -> Value {
         ),
         Response::Value { value } => (
             format!(
-                "{value}\n\n[Keyhold] Este valor saiu do cofre local e agora faz parte desta \
-                 conversa. Use-o só na chamada imediata; não o escreva em arquivo, commit, log ou \
-                 resumo."
+                "{value}\n\n[Keyhold] Este valor agora faz parte desta conversa. Use-o só na \
+                 chamada imediata; não o escreva em arquivo, commit, log ou resumo."
             ),
             false,
         ),
@@ -395,7 +415,8 @@ pub fn serve() -> Result<()> {
             "initialize" => Ok(json!({
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "keyhold", "version": env!("CARGO_PKG_VERSION") }
+                "serverInfo": { "name": "keyhold", "version": env!("CARGO_PKG_VERSION") },
+                "instructions": INSTRUCTIONS
             })),
             "tools/list" => {
                 // Ask the vault what it currently allows, so the list reflects the policy rather

@@ -992,7 +992,7 @@ function StandingGrants({ onChanged }: { onChanged: () => void }) {
           >
             <div className="min-w-0 space-y-0.5">
               <p className="truncate text-sm">
-                <span className="text-foreground">{grant.field}</span>
+                <span className="text-foreground">{grant.field === '*' ? 'todos os campos' : grant.field}</span>
                 <span className="text-muted-foreground"> de </span>
                 <span className="text-foreground">{grant.record_title || grant.record_id}</span>
               </p>
@@ -1096,11 +1096,11 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
         <div className="divide-y overflow-hidden rounded-xl border">
         <div className="flex items-start justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-hover">
           <Label htmlFor="agent-reveal" className="flex flex-1 cursor-pointer flex-col items-start gap-1 font-normal">
-            Permitir que o assistente leia valores
+            Permitir que o assistente leia campos comuns
             <span className="mt-1 block text-sm text-muted-foreground">
-              Desligado, o assistente nunca recebe uma senha e, por isso, não pode escrevê-la na
-              conversa. Ligado, o valor entra no histórico da sessão do assistente assim que é
-              entregue, e o Keyhold não controla o que ele faz depois.
+              Vale para campos como usuário, host e URL. Senhas e outros campos secretos nunca são
+              entregues ao assistente, mesmo ligado: ele só consegue usá-los dentro de um comando, e
+              o Keyhold apaga o valor da saída antes de devolvê-la.
             </span>
           </Label>
           <Switch

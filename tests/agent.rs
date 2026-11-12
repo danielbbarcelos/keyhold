@@ -51,12 +51,15 @@ fn fixture() -> Fixture {
         &Payload {
             title: "Produção".into(),
             username: "deploy".into(),
-            fields: vec![Field {
-                label: "Senha".into(),
-                kind: "password".into(),
-                value: "hunter2".into(),
-                ..Default::default()
-            }],
+            fields: vec![
+                Field {
+                    label: "Senha".into(),
+                    kind: "password".into(),
+                    value: "hunter2".into(),
+                    ..Default::default()
+                },
+                Field { label: "Host".into(), kind: "text".into(), value: "db.interno".into(), ..Default::default() },
+            ],
             ..Payload::default()
         },
     )
@@ -211,7 +214,7 @@ async fn a_record_outside_the_marked_vaults_is_refused_even_by_id() {
         other => panic!("an unmarked record was described: {other:?}"),
     }
 
-    match app.ask(Request::Get { record: app.record.clone(), field: "Senha".into() }).await {
+    match app.ask(Request::Get { record: app.record.clone(), field: "Host".into() }).await {
         Response::Refused { .. } => {}
         other => panic!("an unmarked record handed over a value: {other:?}"),
     }
@@ -229,7 +232,7 @@ async fn a_value_is_only_handed_over_after_somebody_says_yes() {
 
         tokio::spawn(async move {
             keyhold::agent::handle_for_tests(
-                Request::Get { record, field: "Senha".into() },
+                Request::Get { record, field: "Host".into() },
                 &state,
             )
             .await
@@ -247,14 +250,14 @@ async fn a_value_is_only_handed_over_after_somebody_says_yes() {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     };
 
-    assert_eq!(waiting[0].field, "Senha");
+    assert_eq!(waiting[0].field, "Host");
     assert_eq!(waiting[0].record_title, "Produção");
     assert_eq!(waiting[0].intent, "get");
 
     app.state.agent.answer(&waiting[0].id, true);
 
     match asking.await.unwrap() {
-        Response::Value { value } => assert_eq!(value, "hunter2"),
+        Response::Value { value } => assert_eq!(value, "db.interno"),
         other => panic!("unexpected: {other:?}"),
     }
 }
@@ -271,7 +274,7 @@ async fn a_refusal_is_a_refusal() {
 
         tokio::spawn(async move {
             keyhold::agent::handle_for_tests(
-                Request::Get { record, field: "Senha".into() },
+                Request::Get { record, field: "Host".into() },
                 &state,
             )
             .await
@@ -349,11 +352,11 @@ async fn a_grant_covers_the_next_request_for_the_same_field_and_nothing_else() {
     app.allow_reveal();
 
     // A yes that stands for five minutes.
-    assert!(matches!(ask_and_answer(&app, "Senha", true, 5).await, Response::Value { .. }));
+    assert!(matches!(ask_and_answer(&app, "Host", true, 5).await, Response::Value { .. }));
 
     // The same field now answers without asking again — which is the whole point of a grant, and
     // is checked by the absence of a new question rather than by waiting on one.
-    let again = app.ask(Request::Get { record: app.record.clone(), field: "Senha".into() }).await;
+    let again = app.ask(Request::Get { record: app.record.clone(), field: "Host".into() }).await;
 
     assert!(matches!(again, Response::Value { .. }));
     assert!(app.state.agent.waiting().is_empty(), "a granted field asked again");
@@ -392,7 +395,7 @@ async fn revoking_takes_every_standing_yes_away() {
     app.allow_agents();
     app.allow_reveal();
 
-    ask_and_answer(&app, "Senha", true, 5).await;
+    ask_and_answer(&app, "Host", true, 5).await;
     assert_eq!(app.standing(), 1);
 
     app.revoke_everything();
@@ -404,7 +407,7 @@ async fn revoking_takes_every_standing_yes_away() {
 
     let asking = tokio::spawn(async move {
         keyhold::agent::handle_for_tests(
-            Request::Get { record, field: "Senha".into() },
+            Request::Get { record, field: "Host".into() },
             &state,
         )
         .await
@@ -492,7 +495,7 @@ async fn a_locked_vault_answers_nothing_at_all() {
         Request::Status,
         Request::Search { query: String::new() },
         Request::Describe { record: app.record.clone() },
-        Request::Get { record: app.record.clone(), field: "Senha".into() },
+        Request::Get { record: app.record.clone(), field: "Host".into() },
     ] {
         match app.ask(request).await {
             Response::Refused { reason } => assert!(reason.contains("trancado"), "{reason}"),
@@ -509,7 +512,7 @@ async fn a_value_is_refused_outright_until_reading_is_switched_on() {
     app.allow_agents();
 
     // The default. No approval question is even raised: there is nothing to approve.
-    let refused = app.ask(Request::Get { record: app.record.clone(), field: "Senha".into() }).await;
+    let refused = app.ask(Request::Get { record: app.record.clone(), field: "Host".into() }).await;
 
     match refused {
         Response::Refused { reason } => {
@@ -539,7 +542,7 @@ async fn switching_reading_on_lets_a_value_through_the_usual_approval() {
     let record = app.record.clone();
 
     let asking = tokio::spawn(async move {
-        keyhold::agent::handle_for_tests(Request::Get { record, field: "Senha".into() }, &state)
+        keyhold::agent::handle_for_tests(Request::Get { record, field: "Host".into() }, &state)
             .await
     });
 
@@ -556,7 +559,7 @@ async fn switching_reading_on_lets_a_value_through_the_usual_approval() {
     app.state.agent.answer(&waiting[0].id, true);
 
     match asking.await.unwrap() {
-        Response::Value { value } => assert_eq!(value, "hunter2"),
+        Response::Value { value } => assert_eq!(value, "db.interno"),
         other => panic!("unexpected: {other:?}"),
     }
 }
@@ -579,4 +582,119 @@ async fn status_tells_the_agent_what_it_is_allowed_to_do() {
         Response::Status { may_reveal, .. } => assert!(may_reveal),
         other => panic!("unexpected: {other:?}"),
     }
+}
+
+// ── a secret is used, never shown ───────────────────────────────────────────────────────────────
+
+/// Send a request, say yes to whatever it asks, and hand back the answer.
+async fn approved(app: &Fixture, request: Request) -> Response {
+    let asking = {
+        let state = app.state.clone();
+        tokio::spawn(async move { keyhold::agent::handle_for_tests(request, &state).await })
+    };
+
+    loop {
+        if asking.is_finished() {
+            return asking.await.unwrap();
+        }
+
+        let waiting = app.state.agent.waiting();
+        if let Some(one) = waiting.first() {
+            app.state.agent.answer(&one.id, true);
+            return asking.await.unwrap();
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_secret_field_is_never_handed_over_even_with_reading_switched_on() {
+    let app = fixture();
+    app.allow_agents();
+    app.allow_reveal();
+
+    let answer = app.ask(Request::Get { record: app.record.clone(), field: "Senha".into() }).await;
+
+    match answer {
+        Response::Refused { reason } => {
+            assert!(reason.contains("keyhold_run"), "{reason}");
+            assert!(!reason.contains("hunter2"));
+        }
+        other => panic!("a secret left the vault: {other:?}"),
+    }
+
+    assert!(app.state.agent.waiting().is_empty(), "nobody should be asked about a secret");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn run_refuses_a_command_that_already_carries_the_secret() {
+    let app = fixture();
+    app.allow_agents();
+
+    let answer = approved(
+        &app,
+        Request::Run {
+            record: app.record.clone(),
+            field: "Senha".into(),
+            command: vec!["mysql".into(), "-phunter2".into()],
+            variable: "MYSQL_PWD".into(),
+        },
+    )
+    .await;
+
+    match answer {
+        Response::Refused { reason } => assert!(reason.contains("{{secret}}"), "{reason}"),
+        other => panic!("a command with the password in it ran: {other:?}"),
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn the_placeholder_reaches_the_command_and_the_output_never_shows_the_value() {
+    let app = fixture();
+    app.allow_agents();
+
+    let answer = approved(
+        &app,
+        Request::Run {
+            record: app.record.clone(),
+            field: "Senha".into(),
+            command: vec![
+                "sh".into(),
+                "-c".into(),
+                "printf '%s|%s|' \"$1\" \"$MYSQL_PWD\"; printf '%s' \"$1\" >&2".into(),
+                "sh".into(),
+                "{{secret}}".into(),
+            ],
+            variable: "MYSQL_PWD".into(),
+        },
+    )
+    .await;
+
+    match answer {
+        Response::Ran { code, stdout, stderr } => {
+            assert_eq!(code, 0);
+            assert!(!stdout.contains("hunter2") && !stderr.contains("hunter2"), "{stdout} {stderr}");
+            assert_eq!(stdout, "[valor do Keyhold]|[valor do Keyhold]|");
+            assert_eq!(stderr, "[valor do Keyhold]");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn redaction_catches_the_usual_encodings_of_a_value() {
+    let value = "s3cr et/+";
+    let printed = format!(
+        "plain {value} b64 {} url {} hex {}",
+        "czNjciBldC8r", "s3cr%20et%2F%2B", "73336372206574 2f2b".replace(' ', "")
+    );
+
+    let clean = keyhold::agent::redact(&printed, value);
+    assert!(!clean.contains(value), "{clean}");
+    assert!(!clean.contains("czNjciBldC8r"), "{clean}");
+    assert!(!clean.contains("s3cr%20et%2F%2B"), "{clean}");
+    assert!(!clean.contains("733363722065742f2b"), "{clean}");
 }

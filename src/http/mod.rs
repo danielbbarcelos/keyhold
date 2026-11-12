@@ -689,6 +689,9 @@ async fn agent_requests(
 #[derive(Deserialize)]
 struct Answered {
     allowed: bool,
+    /// Make the permission cover every field of the record, not only the one asked about.
+    #[serde(default)]
+    all_fields: bool,
     /// How long the yes lasts. Absent means "just this once".
     #[serde(default)]
     window: Option<Window>,
@@ -745,8 +748,9 @@ async fn answer_agent_request(
 
     let store = state.store.lock().unwrap();
 
+    let field = if body.all_fields { crate::grants::ALL_FIELDS } else { asked.field.as_str() };
     let written = state.lock.with_key(|key| {
-        crate::grants::grant(&store, key, &asked.record_id, &asked.field, scope.clone())
+        crate::grants::grant(&store, key, &asked.record_id, field, scope.clone())
     });
 
     match written {
@@ -761,7 +765,7 @@ async fn answer_agent_request(
                 None,
                 audit::Outcome::Allowed,
                 Detail::new()
-                    .with("field", asked.field.as_str())
+                    .with("field", if body.all_fields { "todos os campos" } else { asked.field.as_str() })
                     .with("window", describe_window(&scope).as_str()),
             );
 

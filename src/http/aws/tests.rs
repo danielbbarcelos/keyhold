@@ -2103,10 +2103,29 @@ async fn an_agent_reaches_an_aws_vault_switched_on_for_it_and_still_asks() {
     assert!(fields.iter().all(|f| !f.label.is_empty()));
 
     let field = fields[0].label.clone();
+    assert!(fields[0].secret, "a database password is a secret field");
+
+    // A secret never comes back as a value, from an AWS vault exactly as from a local one.
+    let refused =
+        crate::agent::handle_for_tests(Request::Get { record: h.id("/app/prod/db"), field: field.clone() }, &h.state)
+            .await;
+    match refused {
+        Response::Refused { reason } => assert!(reason.contains("keyhold_run"), "{reason}"),
+        other => panic!("a secret left an AWS vault: {other:?}"),
+    }
+    assert!(h.state.agent.waiting().is_empty());
+
+    // It is used instead: handed to a process, still behind a yes.
+    let command = if cfg!(windows) {
+        vec!["powershell".into(), "-NoProfile".into(), "-Command".into(), "[Console]::Write($env:DB_PWD.Length)".into()]
+    } else {
+        vec!["sh".into(), "-c".into(), "printf '%s' \"${#DB_PWD}\"".into()]
+    };
     let state = h.state.clone();
     let id = h.id("/app/prod/db");
     let asking = tokio::spawn(async move {
-        crate::agent::handle_for_tests(Request::Get { record: id, field }, &state).await
+        crate::agent::handle_for_tests(Request::Run { record: id, field, command, variable: "DB_PWD".into() }, &state)
+            .await
     });
 
     let waiting = loop {
@@ -2119,7 +2138,10 @@ async fn an_agent_reaches_an_aws_vault_switched_on_for_it_and_still_asks() {
     h.state.agent.answer(&waiting[0].id, true);
 
     match asking.await.unwrap() {
-        Response::Value { value } => assert_eq!(value, "hunter2"),
-        other => panic!("no value: {other:?}"),
+        Response::Ran { code, stdout, .. } => {
+            assert_eq!(code, 0);
+            assert_eq!(stdout, "7");
+        }
+        other => panic!("did not run: {other:?}"),
     }
 }

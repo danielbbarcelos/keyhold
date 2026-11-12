@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Security
+
+- **A secret never reaches an assistant**, from a local vault or an AWS one, whatever the switch in
+  Ajustes says. `keyhold_get` refuses passwords, PINs, cards and hidden fields without even asking;
+  they are used through `keyhold_run`, in an environment variable (`MYSQL_PWD`, `PGPASSWORD`) or in
+  a `{{secret}}` argument filled in at execution. A command that already carries the value is
+  refused, and the value is erased from the output (plain, base64, URL and hex) before it goes
+  back. Every MCP client receives these rules when it connects, and again with each search.
+
 ### New
 
 - **A Windows installer**, `KeyholdSetup.exe`: per user, no administrator, Start menu entry,
@@ -12,6 +21,8 @@
 - **Renewing an expired AWS session from the vault**: the code and the AWS page come up right
   there, and the vault reloads once AWS says yes.
 - Every button with only an icon names its action in a tooltip.
+- **One question per burst**: requests from the same assistant for the same record come up in one
+  dialog, and a lasting yes can cover every field of that record.
 
 ### Changed
 
@@ -19,6 +30,8 @@
   that state the action, destructive confirmations that name what is lost, errors that say what
   did not happen and what to do, and one vocabulary (excluir, remover, arquivar, descartar). A
   vault is now "arquivado", not "guardado". `npm run lint:copy` checks the mechanical rules.
+- How long a yes lasts is picked in a searchable list, and the approval dialog no longer spills
+  out of its frame.
 - Lists in Ajustes (vaults, agents, the trail switch) are bordered rows with dividers and hover,
   easier to aim at on a wide screen.
 

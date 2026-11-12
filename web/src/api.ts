@@ -694,8 +694,8 @@ export const api = {
       looking ? '/api/agent/requests?looking=true' : '/api/agent/requests',
     ),
 
-  answerAgentRequest: (id: string, allowed: boolean, window: GrantWindow = { kind: 'once' }) =>
-    call<{ answered: boolean }>('POST', `/api/agent/requests/${id}`, { allowed, window }),
+  answerAgentRequest: (id: string, allowed: boolean, window: GrantWindow = { kind: 'once' }, allFields = false) =>
+    call<{ answered: boolean }>('POST', `/api/agent/requests/${id}`, { allowed, window, all_fields: allFields }),
 
   agentGrants: () => call<{ grants: AgentGrant[] }>('GET', '/api/agent/grants'),
 

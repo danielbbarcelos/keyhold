@@ -19,8 +19,9 @@
 //!
 //! # What a permission covers
 //!
-//! One field of one record. Not a record, not a vault, not "everything this process asks for":
-//! the question named a field, and the answer should not quietly mean more than the question did.
+//! One field of one record, unless the person chose "todos os campos deste registro": then the
+//! field is [`ALL_FIELDS`] and the permission covers every field of that one record. Never a vault,
+//! never "everything this process asks for": the answer means what the question showed.
 //!
 //! # The three windows
 //!
@@ -85,6 +86,9 @@ fn aad(id: &str) -> Vec<u8> {
     format!("keyhold:agent-grant:v1|{id}").into_bytes()
 }
 
+/// The field of a permission that covers every field of its record.
+pub const ALL_FIELDS: &str = "*";
+
 /// Record a permission, replacing whatever stood for the same field.
 ///
 /// Replacing rather than adding: two windows over one field is a question about which one wins, and
@@ -129,7 +133,7 @@ pub fn allows(store: &Store, key: &SecretKey, record_id: &str, field: &str) -> b
     let mut allowed = false;
 
     for (id, one) in rows {
-        if one.field != field {
+        if one.field != field && one.field != ALL_FIELDS {
             continue;
         }
 
@@ -464,5 +468,26 @@ mod tests {
             !String::from_utf8_lossy(&raw).contains("Senha"),
             "the field's label is in the clear on disk"
         );
+    }
+
+    #[test]
+    fn a_permission_for_every_field_covers_every_field_of_that_record_only() {
+        let f = fixture();
+        let other = records::create(
+            &f.store,
+            &f.key,
+            &vaults::list_vaults(&f.store, &f.key).unwrap()[0].id,
+            None,
+            "login",
+            &Payload { title: "Outro".into(), fields: vec![Field::new("Senha", "password", "x")], ..Payload::default() },
+        )
+        .unwrap()
+        .id;
+
+        grant(&f.store, &f.key, &f.record, ALL_FIELDS, Scope::Always).unwrap();
+
+        assert!(allows(&f.store, &f.key, &f.record, "Senha"));
+        assert!(allows(&f.store, &f.key, &f.record, "Usuário"));
+        assert!(!allows(&f.store, &f.key, &other, "Senha"), "another record is another question");
     }
 }

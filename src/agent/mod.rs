@@ -453,10 +453,21 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
                 note_agent(state, peer, audit::action::SECRET_REVEALED, &record, &field, false);
 
                 return Response::refused(
-                    "este cofre não entrega valores a um assistente. Use keyhold_copy para colocar o \
-                     valor na área de transferência do usuário, ou keyhold_run para executar um \
-                     comando com ele.",
+                    "este cofre não entrega valores a um assistente. Para usar uma senha, chame \
+                     keyhold_run com o comando sem a senha: ela vai em uma variável de ambiente. \
+                     Para o usuário colar em outro lugar, chame keyhold_copy.",
                 );
+            }
+
+            // A secret never leaves as a value, whatever is switched on and whatever the person
+            // would answer: it would be in the conversation the moment it arrived, and from there
+            // in a command line, a log, a summary. The question is not even asked.
+            if let Some((kind, _)) = field_of(state, &record, &field).await {
+                if records::is_secret_kind(&kind) && kind != "totp" {
+                    note_agent(state, peer, audit::action::SECRET_REVEALED, &record, &field, false);
+
+                    return Response::refused(SECRET_NEVER_RETURNED);
+                }
             }
 
             match approved(state, peer, &record, &field, "get").await {
@@ -635,21 +646,33 @@ async fn describe(state: &Arc<AppState>, record_id: &str) -> Response {
     }
 }
 
-async fn value_of(state: &Arc<AppState>, record_id: &str, field: &str) -> Option<String> {
+/// What a secret field's `get` answers: no, and the way to do what was wanted.
+const SECRET_NEVER_RETURNED: &str = "campos secretos (senha, chave, PIN, cartão) nunca são \
+    entregues a um assistente, nem com aprovação. Chame keyhold_run: execute o comando SEM a senha e \
+    informe em `variable` o nome da variável que o programa lê (por exemplo MYSQL_PWD para mysql, \
+    PGPASSWORD para psql). O Keyhold coloca a senha nessa variável do processo e devolve só a saída. \
+    Se o usuário é quem precisa da senha, chame keyhold_copy.";
+
+/// A field's kind and value, from the file or from AWS. `username` is the record's own line.
+async fn field_of(state: &Arc<AppState>, record_id: &str, field: &str) -> Option<(String, String)> {
     let payload = payload_of(state, record_id).await.ok()?;
 
     if field == "username" {
-        return Some(payload.username()).filter(|s| !s.is_empty());
+        return Some(("text".to_string(), payload.username())).filter(|(_, value)| !value.is_empty());
     }
 
     let one = payload.fields.iter().find(|one| one.label.eq_ignore_ascii_case(field))?;
 
     // A 2FA field hands out the code of the moment, never the secret that makes codes.
     if one.kind == "totp" {
-        return crate::totp::code_for_field(&one.value, now_seconds()).map(|(code, _)| code);
+        return crate::totp::code_for_field(&one.value, now_seconds()).map(|(code, _)| ("totp".to_string(), code));
     }
 
-    Some(one.value.clone())
+    Some((one.kind.clone(), one.value.clone()))
+}
+
+async fn value_of(state: &Arc<AppState>, record_id: &str, field: &str) -> Option<String> {
+    field_of(state, record_id, field).await.map(|(_, value)| value)
 }
 
 /// Ask the person, unless they already said yes for this field.
@@ -812,21 +835,87 @@ fn knock_text(request: &PendingRequest) -> String {
 /// only what the command printed, which is the whole point of preferring this over handing the
 /// value to a model.
 fn run_with(command: &[String], variable: &str, value: &str) -> Response {
-    let variable = if variable.trim().is_empty() { "KEYHOLD_SECRET" } else { variable };
+    let variable = if variable.trim().is_empty() { "KEYHOLD_SECRET" } else { variable.trim() };
 
-    let output = std::process::Command::new(&command[0])
-        .args(&command[1..])
+    let valid = variable
+        .chars()
+        .enumerate()
+        .all(|(at, c)| c == '_' || c.is_ascii_alphabetic() || (at > 0 && c.is_ascii_digit()));
+    if !valid {
+        return Response::refused("o nome da variável de ambiente só pode ter letras, números e _");
+    }
+
+    // The value is already in the command's environment; the arguments are the assistant's own text
+    // and must not carry it. A command line that contains the value is the leak this tool exists to
+    // prevent, so it is refused before anything runs. Where a program takes the secret as an
+    // argument, the assistant writes `{{secret}}` and the value is put there only now, here, so the
+    // conversation and the command it shows never hold it.
+    if !value.is_empty() && command.iter().any(|argument| argument.contains(value)) {
+        return Response::refused(
+            "o comando contém a senha escrita nele. Execute o comando sem a senha: ela já está na \
+             variável de ambiente informada em `variable`. Se o programa exige a senha como \
+             argumento, escreva {{secret}} no lugar dela.",
+        );
+    }
+
+    let arguments: Vec<String> = command.iter().map(|argument| argument.replace("{{secret}}", value)).collect();
+
+    let output = std::process::Command::new(&arguments[0])
+        .args(&arguments[1..])
         .env(variable, value)
         .output();
 
     match output {
-        Err(error) => Response::refused(format!("não foi possível executar: {error}")),
+        Err(error) => Response::refused(format!("não foi possível executar: {}", redact(&error.to_string(), value))),
         Ok(output) => Response::Ran {
             code: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            stdout: redact(&String::from_utf8_lossy(&output.stdout), value),
+            stderr: redact(&String::from_utf8_lossy(&output.stderr), value),
         },
     }
+}
+
+/// What a command printed, without the value it was given. A program that echoes its environment
+/// (`printenv`, `env`, a failed login that quotes the password) would otherwise hand the secret to
+/// the assistant by the back door. Plain, base64, URL-encoded, JSON-escaped and hex forms go.
+pub fn redact(output: &str, value: &str) -> String {
+    use crate::encoding::{base64_standard, base64url};
+
+    if value.is_empty() {
+        return output.to_string();
+    }
+
+    let url_encoded: String = value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            other => format!("%{other:02X}"),
+        })
+        .collect();
+    let hex: String = value.bytes().map(|b| format!("{b:02x}")).collect();
+    let json_escaped = serde_json::to_string(value).map(|s| s.trim_matches('"').to_string()).unwrap_or_default();
+
+    let mut forms = vec![
+        value.to_string(),
+        base64_standard(value.as_bytes()),
+        base64url(value.as_bytes()),
+        url_encoded.to_lowercase(),
+        url_encoded,
+        hex.to_uppercase(),
+        hex,
+        json_escaped,
+    ];
+    forms.retain(|form| !form.is_empty());
+    // Longest first, so a form that contains another is not left half replaced.
+    forms.sort_by_key(|form| std::cmp::Reverse(form.len()));
+    forms.dedup();
+
+    let mut out = output.to_string();
+    for form in forms {
+        out = out.replace(&form, "[valor do Keyhold]");
+    }
+
+    out
 }
 
 fn note_agent(
