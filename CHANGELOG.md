@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.2
 
 A security review of the whole project, and Windows starting on a machine that has nothing else
 installed.
