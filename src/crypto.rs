@@ -100,9 +100,28 @@ impl KdfParams {
             );
         }
 
+        // And a ceiling: a file that asks for all the memory in the machine, or for a derivation
+        // that never ends, takes Keyhold down instead of opening.
+        if self.memory_kib > ARGON2_MAX_MEMORY_KIB
+            || self.iterations > ARGON2_MAX_ITERATIONS
+            || self.parallelism > ARGON2_MAX_PARALLELISM
+        {
+            bail!(
+                "this vault asks for a key derivation larger than Keyhold accepts \
+                 ({} KiB / {} passes); it may have been tampered with",
+                self.memory_kib,
+                self.iterations
+            );
+        }
+
         Ok(())
     }
 }
+
+/// 1 GiB, 64 passes, 16 lanes: far above anything Keyhold writes, far below what breaks a machine.
+const ARGON2_MAX_MEMORY_KIB: u32 = 1024 * 1024;
+const ARGON2_MAX_ITERATIONS: u32 = 64;
+const ARGON2_MAX_PARALLELISM: u32 = 16;
 
 pub fn random_bytes(len: usize) -> Vec<u8> {
     let mut bytes = vec![0u8; len];

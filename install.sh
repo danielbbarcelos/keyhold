@@ -82,14 +82,14 @@ build_frontend() {
   fi
 
   info "Building the interface..."
-  (cd "$SOURCE_DIR/web" && npm install --silent --no-audit --no-fund && npm run build >/dev/null)
+  (cd "$SOURCE_DIR/web" && npm ci --ignore-scripts --silent --no-audit --no-fund && npm run build >/dev/null)
   ok "interface built"
 }
 
 build_binary() {
   # The bundle is compiled in, so this has to happen after the frontend build.
   info "Compiling Keyhold (this takes a minute the first time)..."
-  (cd "$SOURCE_DIR" && cargo build --release --quiet)
+  (cd "$SOURCE_DIR" && cargo build --release --locked --quiet)
 
   mkdir -p "$BIN_DIR"
   install -m 755 "$SOURCE_DIR/target/release/$APP_BIN" "$BIN_DIR/$APP_BIN"

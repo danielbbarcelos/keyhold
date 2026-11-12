@@ -996,7 +996,14 @@ function StandingGrants({ onChanged }: { onChanged: () => void }) {
                 <span className="text-muted-foreground"> de </span>
                 <span className="text-foreground">{grant.record_title || grant.record_id}</span>
               </p>
-              <p className="text-xs text-muted-foreground">{untilWhen(grant)}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {grant.intent === 'run'
+                  ? `usar em comandos de ${grant.program ?? 'qualquer programa'}`
+                  : grant.intent === 'copy'
+                    ? 'copiar para a área de transferência'
+                    : 'ler o valor'}
+                , {untilWhen(grant)}
+              </p>
             </div>
 
             <Button variant="ghost" size="sm" onClick={() => void revoke(grant.id)}>

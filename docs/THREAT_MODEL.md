@@ -35,6 +35,14 @@ a password you rotated after it leaked.
 **Defence.** AES-GCM with additional authenticated data binding each payload to its record identity
 and its version number. Decryption fails; it does not return an older plaintext.
 
+**Limit, known and open.** This holds when only the payload is swapped. The version number itself is
+a plain column, so somebody who rewrites the payload *and* its version in the same row does get the
+older record to open. The same is true of the plain flags beside it (which vaults an agent may see,
+the lock clocks, whether reads are logged): they can be edited in the file by anyone who can write
+it. Closing this needs a manifest sealed under the vault key, and is on the roadmap. The trail's
+hash chain has the same limit: it shows an accidental or clumsy edit, not one by somebody who
+recomputes the chain.
+
 ### T4 · Script running on the interface page
 
 The single most dangerous thing that can happen to a browser-based vault: the page that renders
@@ -106,15 +114,32 @@ message, a file. This is not a failure of the agent — it is what having the va
 never handing the value over:
 
 - `keyhold_run` and `keyhold run` execute a command with the secret in the child process's
-  environment. The agent composes the command and reads its output; the value is never in its
-  context, so it cannot be repeated from there.
+  environment. The agent composes the command and reads its output; the value is not in its
+  context unless the command puts it there.
 - `keyhold_copy` puts a value on the person's clipboard and returns only a confirmation, for the
-  case where a human — not the model — is the one who needs it.
-- Reading a value outright is **off by default**. With it off the tool is not listed and the request
-  is refused, so there is no path from a vault to a transcript.
+  case where a human, not the model, is the one who needs it.
+- A secret field (password, PIN, card, hidden) is **never returned as a value**, whatever is
+  switched on. Reading the other fields is off by default.
 
-The environment is used rather than the command line for the same reason throughout: `/proc/*/cmdline`
-is readable by every process of this user, and `/proc/*/environ` is not.
+**What this does and does not stop.** It stops the ordinary leak: a cooperative assistant that would
+otherwise paste a password into a command or a summary. It does not stop an assistant that sets out
+to read the value: the command is the assistant's, and a command can reverse, encode, store or send
+what it is given. Blanking the value out of the output only catches a program that echoes it as it
+is. The same holds for `keyhold_copy` when the assistant has a shell: the clipboard is readable by
+anything running as this user. The control against that is the person, which is why:
+
+- the approval dialog shows the **exact command**, and the trail records it;
+- a lasting yes is for **one use and one program** of one record (a yes to `mysql` is not a yes to
+  `sh`, a yes to reading a host name is not a yes to running anything), and the permission is
+  sealed to its record so the file cannot be edited to point it elsewhere;
+- a command runs for at most five minutes and one megabyte of output.
+
+Approving `sh -c` or any interpreter, for any length of time, is approving whatever that
+interpreter is told to do with the value.
+
+The environment is used rather than the command line because a command line is visible to every
+user of the machine (`ps`), and the environment only to processes of this user. The `{{secret}}`
+placeholder exists for programs that take a secret only as an argument, and has that cost.
 
 ### What the file still shows
 
@@ -137,9 +162,13 @@ vault or folder name, or which field of which record an agent was ever given.
 It lives in memory and in the URL fragment, and the fragment reaches two places outside this
 process: the `xdg-open` helper's `/proc/<pid>/cmdline` while it runs, and — when Keyhold was started
 from the desktop shortcut — `~/.local/state/keyhold/app.log`, because that log is where the URL can
-be read when the browser did not open. Both are `0600` inside a `0700` directory, the launcher
-truncates the log on every start so only the current run's token is on disk, and every token dies
-with the process that made it.
+be read when the browser did not open. The log is `0600` inside a `0700` directory and is rotated
+once (`app.log.1`) on every start. The browser also keeps the address, fragment included, in its
+history and session files, and shows it in its own command line when Keyhold opened it. Every token
+dies with the process that made it, but while that process lives, **anything running as this user
+that reads those places can act as the interface**, an assistant with a shell included. That is the
+same-user limit stated under "What Keyhold does not defend against", and the reason a one-time
+code in place of the token in the address is on the roadmap.
 
 ### A20 · The one thing that leaves the machine: an AWS vault's content, to its own account
 
@@ -198,7 +227,10 @@ What that exception rests on, and what it does not claim:
   compiled-in roots, with redirects off (a signed request is never replayed to another host), with
   any system proxy ignored, and HTTPS only: the endpoint overrides the tests use do not exist in a
   release build.
-- **The agent surface does not reach AWS vaults** yet: an assistant sees only local vaults.
+- **The agent surface reaches an AWS vault only when it is switched on for agents**, with the same
+  approval and trail as a local one. Titles and names in a shared account are written by whoever
+  can write parameters there: an assistant is told to treat them as data, and a person should read
+  them the same way.
 
 ## What Keyhold does not defend against
 

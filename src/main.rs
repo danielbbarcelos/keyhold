@@ -57,7 +57,7 @@ enum Cmd {
 
     /// Run a command with a secret from the vault in its environment.
     ///
-    ///     keyhold run "Banco de dados" Senha -- psql "$KEYHOLD_SECRET"
+    ///     keyhold run "Banco de dados" Senha --variable PGPASSWORD -- psql -h db -U app
     ///
     /// The value goes to the command and nowhere else — not to a terminal, not to whatever is
     /// reading this terminal. keyhold asks you to approve it first.
@@ -125,6 +125,13 @@ async fn main() -> Result<()> {
 }
 
 async fn serve(cli: Cli) -> Result<()> {
+    // A crash must not leave the vault key in a core file on disk.
+    #[cfg(unix)]
+    unsafe {
+        let none = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        libc::setrlimit(libc::RLIMIT_CORE, &none);
+    }
+
     // Registered before anything can know this process exists: the default action for `USR1` is to
     // kill it, and the marker `claim` writes is what makes another instance able to send one.
     let show_yourself = show_yourself_signal();

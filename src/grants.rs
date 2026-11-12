@@ -19,9 +19,10 @@
 //!
 //! # What a permission covers
 //!
-//! One field of one record, unless the person chose "todos os campos deste registro": then the
-//! field is [`ALL_FIELDS`] and the permission covers every field of that one record. Never a vault,
-//! never "everything this process asks for": the answer means what the question showed.
+//! One field of one record, for one kind of use (reading it, copying it, or running one program
+//! with it). If the person chose "todos os campos deste registro", every field of that one record,
+//! still for that one use. Never a vault, never "everything this process asks for": the answer
+//! means what the question showed.
 //!
 //! # The three windows
 //!
@@ -70,41 +71,91 @@ pub struct Grant {
     pub record_id: String,
     /// The record's title, opened for the list. Absent if the record is gone.
     pub record_title: String,
+    /// The field's label, or [`ALL_FIELDS`] when the permission covers the whole record.
     pub field: String,
+    /// `get`, `copy` or `run`: what the permission lets happen to the value.
+    pub intent: String,
+    /// For `run`, the program the permission is for.
+    pub program: Option<String>,
     pub scope: Scope,
     pub created_at: String,
+}
+
+/// What a permission is for: which field, to do what with it.
+///
+/// A yes to reading a host name is not a yes to running a command with the password, and a yes to
+/// `mysql` is not a yes to `sh`. The permission means what the question showed, so the question's
+/// intent and program are part of it.
+#[derive(Clone, Debug)]
+pub struct Cover<'a> {
+    pub field: &'a str,
+    pub all_fields: bool,
+    pub intent: &'a str,
+    pub program: Option<&'a str>,
 }
 
 /// The sealed half: everything that would say too much in a plain column.
 #[derive(Serialize, Deserialize)]
 struct Sealed {
     field: String,
+    #[serde(default)]
+    all_fields: bool,
+    intent: String,
+    #[serde(default)]
+    program: Option<String>,
     scope: Scope,
 }
 
-fn aad(id: &str) -> Vec<u8> {
-    format!("keyhold:agent-grant:v1|{id}").into_bytes()
+impl Sealed {
+    fn same_cover(&self, cover: &Cover) -> bool {
+        self.all_fields == cover.all_fields
+            && (self.all_fields || self.field == cover.field)
+            && self.intent == cover.intent
+            && self.program.as_deref() == cover.program
+    }
 }
 
-/// The field of a permission that covers every field of its record.
+/// The record is part of what is authenticated: a row moved to another record does not open, so a
+/// permission cannot be re-pointed by editing the file.
+fn aad(id: &str, record_id: &str) -> Vec<u8> {
+    format!("keyhold:agent-grant:v2|{id}|{record_id}").into_bytes()
+}
+
+/// How a permission for every field shows in a list. Only a label: what decides is a flag sealed
+/// with the permission, so a field that happens to be called this gets nothing from it.
 pub const ALL_FIELDS: &str = "*";
 
-/// Record a permission, replacing whatever stood for the same field.
+/// Record a permission to read one field. See [`grant_for`] for the general form.
+pub fn grant(store: &Store, key: &SecretKey, record_id: &str, field: &str, scope: Scope) -> Result<String> {
+    grant_for(store, key, record_id, &Cover { field, all_fields: false, intent: "get", program: None }, scope)
+}
+
+/// Record a permission, replacing whatever stood for the same thing.
 ///
 /// Replacing rather than adding: two windows over one field is a question about which one wins, and
 /// the answer somebody just gave is the one they meant.
-pub fn grant(
+pub fn grant_for(
     store: &Store,
     key: &SecretKey,
     record_id: &str,
-    field: &str,
+    cover: &Cover,
     scope: Scope,
 ) -> Result<String> {
-    revoke_field(store, key, record_id, field)?;
+    for (id, sealed) in sealed_for(store, record_id)? {
+        if open_one(key, &id, record_id, &sealed).map(|one| one.same_cover(cover)).unwrap_or(false) {
+            store.conn().execute("DELETE FROM agent_grants WHERE id = ?1", params![&id])?;
+        }
+    }
 
     let id = new_id();
-    let body = serde_json::to_vec(&Sealed { field: field.to_string(), scope })?;
-    let sealed = crypto::seal(key, &body, &aad(&id))?;
+    let body = serde_json::to_vec(&Sealed {
+        field: if cover.all_fields { String::new() } else { cover.field.to_string() },
+        all_fields: cover.all_fields,
+        intent: cover.intent.to_string(),
+        program: cover.program.map(str::to_string),
+        scope,
+    })?;
+    let sealed = crypto::seal(key, &body, &aad(&id, record_id))?;
 
     store.conn().execute(
         "INSERT INTO agent_grants (id, record_id, sealed, created_at)
@@ -115,11 +166,23 @@ pub fn grant(
     Ok(id)
 }
 
-/// Whether a standing permission covers this field right now.
+/// Whether a standing permission lets this field be read right now.
+pub fn allows(store: &Store, key: &SecretKey, record_id: &str, field: &str) -> bool {
+    allows_use(store, key, record_id, field, "get", None)
+}
+
+/// Whether a standing permission covers this use of this field right now.
 ///
 /// A window that has closed is deleted on the way past. Cleaning up here rather than on a timer
 /// means it happens exactly when it matters and never while the vault is locked.
-pub fn allows(store: &Store, key: &SecretKey, record_id: &str, field: &str) -> bool {
+pub fn allows_use(
+    store: &Store,
+    key: &SecretKey,
+    record_id: &str,
+    field: &str,
+    intent: &str,
+    program: Option<&str>,
+) -> bool {
     let found = match sealed_for(store, record_id) {
         Ok(found) => found,
         Err(_) => return false,
@@ -127,13 +190,17 @@ pub fn allows(store: &Store, key: &SecretKey, record_id: &str, field: &str) -> b
 
     let rows = found
         .into_iter()
-        .filter_map(|(id, sealed)| open_one(key, &id, &sealed).map(|one| (id, one)))
+        .filter_map(|(id, sealed)| open_one(key, &id, record_id, &sealed).map(|one| (id, one)))
         .collect::<Vec<_>>();
 
     let mut allowed = false;
 
     for (id, one) in rows {
-        if one.field != field && one.field != ALL_FIELDS {
+        if one.intent != intent || one.program.as_deref() != program {
+            continue;
+        }
+
+        if !one.all_fields && one.field != field {
             continue;
         }
 
@@ -167,7 +234,7 @@ pub fn list(store: &Store, key: &SecretKey) -> Result<Vec<Grant>> {
     let mut standing = Vec::new();
 
     for (id, record_id, sealed, created_at) in rows {
-        let Some(one) = open_one(key, &id, &sealed) else {
+        let Some(one) = open_one(key, &id, &record_id, &sealed) else {
             continue;
         };
 
@@ -180,16 +247,24 @@ pub fn list(store: &Store, key: &SecretKey) -> Result<Vec<Grant>> {
         // An AWS record is not in the file: its parameter name stands in for the title.
         let record_title = match crate::aws::mapping::decode_id(&record_id) {
             Some((_, _, name)) => name,
-            None => crate::records::open(store, key, &record_id)
-                .map(|record| record.payload.title)
-                .unwrap_or_default(),
+            None => match crate::records::open(store, key, &record_id) {
+                Ok(record) => record.payload.title,
+                // The record is gone, and so is anything said about it.
+                Err(_) => {
+                    let _ = store.conn().execute("DELETE FROM agent_grants WHERE id = ?1", params![&id]);
+
+                    continue;
+                }
+            },
         };
 
         standing.push(Grant {
             id,
             record_id,
             record_title,
-            field: one.field,
+            field: if one.all_fields { ALL_FIELDS.to_string() } else { one.field },
+            intent: one.intent,
+            program: one.program,
             scope: one.scope,
             created_at,
         });
@@ -213,16 +288,6 @@ pub fn revoke_all(store: &Store) -> Result<usize> {
     Ok(store.conn().execute("DELETE FROM agent_grants", [])?)
 }
 
-fn revoke_field(store: &Store, key: &SecretKey, record_id: &str, field: &str) -> Result<()> {
-    for (id, sealed) in sealed_for(store, record_id)? {
-        if open_one(key, &id, &sealed).map(|one| one.field == field).unwrap_or(false) {
-            store.conn().execute("DELETE FROM agent_grants WHERE id = ?1", params![&id])?;
-        }
-    }
-
-    Ok(())
-}
-
 fn sealed_for(store: &Store, record_id: &str) -> Result<Vec<(String, Vec<u8>)>> {
     let mut statement =
         store.conn().prepare("SELECT id, sealed FROM agent_grants WHERE record_id = ?1")?;
@@ -236,8 +301,8 @@ fn sealed_for(store: &Store, record_id: &str) -> Result<Vec<(String, Vec<u8>)>> 
     Ok(rows)
 }
 
-fn open_one(key: &SecretKey, id: &str, sealed: &[u8]) -> Option<Sealed> {
-    let body = crypto::open(key, sealed, &aad(id)).ok()?;
+fn open_one(key: &SecretKey, id: &str, record_id: &str, sealed: &[u8]) -> Option<Sealed> {
+    let body = crypto::open(key, sealed, &aad(id, record_id)).ok()?;
 
     serde_json::from_slice(&body).ok()
 }
@@ -484,10 +549,53 @@ mod tests {
         .unwrap()
         .id;
 
-        grant(&f.store, &f.key, &f.record, ALL_FIELDS, Scope::Always).unwrap();
+        grant_for(&f.store, &f.key, &f.record, &Cover { field: "", all_fields: true, intent: "get", program: None }, Scope::Always).unwrap();
 
         assert!(allows(&f.store, &f.key, &f.record, "Senha"));
         assert!(allows(&f.store, &f.key, &f.record, "Usuário"));
         assert!(!allows(&f.store, &f.key, &other, "Senha"), "another record is another question");
+    }
+
+    #[test]
+    fn a_yes_to_reading_is_not_a_yes_to_running_and_one_program_is_not_another() {
+        let f = fixture();
+
+        grant(&f.store, &f.key, &f.record, "Senha", Scope::Always).unwrap();
+        assert!(!allows_use(&f.store, &f.key, &f.record, "Senha", "run", Some("mysql")));
+
+        let mysql = Cover { field: "Senha", all_fields: false, intent: "run", program: Some("mysql") };
+        grant_for(&f.store, &f.key, &f.record, &mysql, Scope::Always).unwrap();
+
+        assert!(allows_use(&f.store, &f.key, &f.record, "Senha", "run", Some("mysql")));
+        assert!(!allows_use(&f.store, &f.key, &f.record, "Senha", "run", Some("sh")));
+        assert!(!allows_use(&f.store, &f.key, &f.record, "Senha", "copy", None));
+    }
+
+    #[test]
+    fn a_permission_moved_to_another_record_in_the_file_opens_nothing() {
+        let f = fixture();
+
+        grant(&f.store, &f.key, &f.record, "Senha", Scope::Always).unwrap();
+        f.store.conn().execute("UPDATE agent_grants SET record_id = 'outro'", []).unwrap();
+
+        assert!(!allows(&f.store, &f.key, "outro", "Senha"));
+    }
+
+    #[test]
+    fn a_field_called_star_is_only_a_field() {
+        let f = fixture();
+
+        grant(&f.store, &f.key, &f.record, ALL_FIELDS, Scope::Always).unwrap();
+
+        assert!(!allows(&f.store, &f.key, &f.record, "Senha"));
+    }
+
+    #[test]
+    fn a_record_that_is_not_a_row_of_this_file_can_hold_a_permission() {
+        let f = fixture();
+
+        grant(&f.store, &f.key, "um-registro-da-aws", "Senha", Scope::Always).unwrap();
+
+        assert!(allows(&f.store, &f.key, "um-registro-da-aws", "Senha"));
     }
 }

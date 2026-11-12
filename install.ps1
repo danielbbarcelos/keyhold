@@ -50,8 +50,8 @@ if ($SkipBuild) {
 } else {
     Info 'Building the interface...'
     Push-Location (Join-Path $Source 'web')
-    npm install --silent --no-audit --no-fund
-    if ($LASTEXITCODE -ne 0) { Fail 'npm install failed' }
+    npm ci --ignore-scripts --silent --no-audit --no-fund
+    if ($LASTEXITCODE -ne 0) { Fail 'npm ci failed' }
     npm run build | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail 'the interface did not build' }
     Pop-Location
@@ -60,7 +60,7 @@ if ($SkipBuild) {
 
 Info 'Compiling Keyhold (this takes a minute the first time)...'
 Push-Location $Source
-cargo build --release --quiet
+cargo build --release --locked --quiet
 if ($LASTEXITCODE -ne 0) { Fail 'cargo build failed' }
 Pop-Location
 }
@@ -90,10 +90,13 @@ if (($userPath -split ';') -notcontains $BinDir) {
 if (-not $SkipShortcut) {
     New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
 
-    # A hidden PowerShell starts Keyhold without a console window, and keeps its
-    # output (which carries the session address) in a log only you can read.
-    $log = Join-Path $StateDir 'app.log'
-    $launch = "-NoProfile -WindowStyle Hidden -Command `"Start-Process -FilePath '$Exe' -ArgumentList '--present' -WindowStyle Hidden -RedirectStandardOutput '$log' -RedirectStandardError '$log.err'`""
+    # keyhold-launch.exe starts Keyhold with no console window and keeps its output (which
+    # carries the session address) in a log only you can read. It ignores its arguments, which
+    # matters below: whatever a keyhold:// link carries never becomes part of a command.
+    $Launcher = Join-Path $BinDir 'keyhold-launch.exe'
+    $builtLauncher = Join-Path (Split-Path $Built) 'keyhold-launch.exe'
+    if (-not (Test-Path $builtLauncher)) { Fail 'keyhold-launch.exe was not built; cannot install the shortcut. Use -SkipShortcut to install without it.' }
+    Copy-Item $builtLauncher $Launcher -Force
 
     # The icon, as an .ico made from the PNG.
     $icon = Join-Path $BinDir 'keyhold.ico'
@@ -114,20 +117,19 @@ if (-not $SkipShortcut) {
     $menu = Join-Path ([Environment]::GetFolderPath('Programs')) 'Keyhold.lnk'
     $shell = New-Object -ComObject WScript.Shell
     $link = $shell.CreateShortcut($menu)
-    $link.TargetPath = (Get-Command powershell).Source
-    $link.Arguments = $launch
+    $link.TargetPath = $Launcher
     $link.IconLocation = $icon
     $link.Description = 'A password vault that lives entirely on this machine'
     $link.Save()
     Ok 'Start menu entry installed'
 
     # keyhold:// opens Keyhold (start, or bring the running one forward). Any page
-    # can link to it, and that is all a page gets: the address is never passed on.
+    # can link to it, and that is all a page gets: the launcher ignores the address.
     $classes = 'HKCU:\Software\Classes\keyhold'
     New-Item -Path "$classes\shell\open\command" -Force | Out-Null
     Set-ItemProperty -Path $classes -Name '(Default)' -Value 'URL:Keyhold'
     Set-ItemProperty -Path $classes -Name 'URL Protocol' -Value ''
-    Set-ItemProperty -Path "$classes\shell\open\command" -Name '(Default)' -Value "`"$((Get-Command powershell).Source)`" $launch"
+    Set-ItemProperty -Path "$classes\shell\open\command" -Name '(Default)' -Value "`"$Launcher`""
     Ok 'keyhold:// links open Keyhold'
 }
 

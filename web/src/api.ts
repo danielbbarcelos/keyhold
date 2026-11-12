@@ -167,8 +167,10 @@ export interface AgentRequest {
   record_id: string
   record_title: string
   field: string
-  /** `get` — the value enters the conversation; `run` — it does not. */
+  /** `get`, the value enters the conversation; `copy`, it goes to the clipboard; `run`, to a command. */
   intent: string
+  /** For `run`, the command exactly as it will be executed. */
+  command: string[] | null
   asked_at: number
 }
 
@@ -184,6 +186,10 @@ export interface AgentGrant {
   record_id: string
   record_title: string
   field: string
+  /** `get`, `copy` or `run`: what the permission lets happen to the value. */
+  intent: string
+  /** For `run`, the program the permission is for. */
+  program: string | null
   scope: GrantScope
   created_at: string
 }

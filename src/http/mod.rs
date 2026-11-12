@@ -129,6 +129,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/open-window", post(open_window))
         .nest("/api", api)
         .fallback(serve_asset)
+        // An attachment travels as base64 inside JSON: 25 MB of file is about 34 MB of body.
+        .layer(axum::extract::DefaultBodyLimit::max(crate::attachments::MAX_BYTES / 3 * 4 + 1024 * 1024))
         .layer(middleware::from_fn(security_headers))
         // Outermost, so it also covers the routes that answer without a token.
         .layer(middleware::from_fn(only_this_machine))
@@ -463,6 +465,11 @@ struct LogReads {
 }
 
 async fn set_log_reads(State(state): State<Arc<AppState>>, Json(body): Json<LogReads>) -> Answer {
+    // A decision about how the vault is protected belongs to somebody who can open it.
+    if state.lock.with_key(|_| ()).is_none() {
+        return Err(locked());
+    }
+
     let store = state.store.lock().unwrap();
 
     let saved = settings::set_log_reads(&store, body.on).map_err(bad_request)?;
@@ -748,9 +755,16 @@ async fn answer_agent_request(
 
     let store = state.store.lock().unwrap();
 
-    let field = if body.all_fields { crate::grants::ALL_FIELDS } else { asked.field.as_str() };
+    // The permission is for what the question showed: this record, this use, and for a command,
+    // this program. A different use or a different program asks again.
+    let cover = crate::grants::Cover {
+        field: asked.field.as_str(),
+        all_fields: body.all_fields,
+        intent: asked.intent.as_str(),
+        program: asked.command.as_ref().and_then(|argv| argv.first()).map(String::as_str),
+    };
     let written = state.lock.with_key(|key| {
-        crate::grants::grant(&store, key, &asked.record_id, field, scope.clone())
+        crate::grants::grant_for(&store, key, &asked.record_id, &cover, scope.clone())
     });
 
     match written {
@@ -762,10 +776,13 @@ async fn answer_agent_request(
                 &state.lock,
                 audit::Actor::You,
                 audit::action::AGENT_GRANTED,
-                None,
+                Some(asked.record_id.as_str()),
                 audit::Outcome::Allowed,
                 Detail::new()
                     .with("field", if body.all_fields { "todos os campos" } else { asked.field.as_str() })
+                    .with("intent", asked.intent.as_str())
+                    .with("program", cover.program.unwrap_or(""))
+                    .with("asked_by", asked.peer.describe())
                     .with("window", describe_window(&scope).as_str()),
             );
 
@@ -799,6 +816,11 @@ async fn set_agent_may_reveal(
     State(state): State<Arc<AppState>>,
     Json(body): Json<MayReveal>,
 ) -> Answer {
+    // A decision about how the vault is protected belongs to somebody who can open it.
+    if state.lock.with_key(|_| ()).is_none() {
+        return Err(locked());
+    }
+
     let store = state.store.lock().unwrap();
 
     let saved = settings::set_agent_may_reveal(&store, body.on).map_err(bad_request)?;
@@ -890,6 +912,11 @@ async fn set_retention(
     State(state): State<Arc<AppState>>,
     Json(body): Json<Retention>,
 ) -> Answer {
+    // A decision about how the vault is protected belongs to somebody who can open it.
+    if state.lock.with_key(|_| ()).is_none() {
+        return Err(locked());
+    }
+
     let store = state.store.lock().unwrap();
 
     let saved = settings::set_retention_days(&store, body.days).map_err(bad_request)?;
@@ -914,6 +941,11 @@ async fn set_lock_policy(
     State(state): State<Arc<AppState>>,
     Json(policy): Json<LockPolicy>,
 ) -> Answer {
+    // A decision about how the vault is protected belongs to somebody who can open it.
+    if state.lock.with_key(|_| ()).is_none() {
+        return Err(locked());
+    }
+
     let store = state.store.lock().unwrap();
 
     let saved = settings::set_lock_policy(&store, policy).map_err(bad_request)?;
@@ -996,6 +1028,18 @@ async fn enable_second_factor(
 
     let store = state.store.lock().unwrap();
 
+    // Replacing a factor that exists would let whoever is at an unlocked machine swap in their own
+    // and lock the owner out. It is turned off first, and that asks for a code from the current one.
+    let existing: Option<Vec<u8>> = store
+        .conn()
+        .query_row("SELECT totp_secret FROM identity WHERE id = 1", [], |row| row.get(0))
+        .map_err(bad_request)?;
+    if existing.is_some() {
+        return Err(bad_request(
+            "este cofre já tem um segundo fator. Desative o atual, com um código dele, antes de configurar outro",
+        ));
+    }
+
     state
         .lock
         .with_key(|key| identity::enable_second_factor(&store, key, &secret))
@@ -1039,8 +1083,21 @@ async fn disable_second_factor(
         .ok_or_else(locked)?
         .map_err(bad_request)?;
 
-    if !totp::verify(&secret, code, identity::now_seconds()) {
-        return Err(bad_request("o código não confere"));
+    // The same count as a wrong password: a six-digit code is guessable by anything that may try
+    // without limit.
+    {
+        let mut failures = state.failures.lock().unwrap();
+        if *failures >= MAX_FAILURES {
+            return Err(Failure(
+                StatusCode::TOO_MANY_REQUESTS,
+                "muitas tentativas sem sucesso. Feche o Keyhold e abra novamente".into(),
+                None,
+            ));
+        }
+        if !totp::verify(&secret, code, identity::now_seconds()) {
+            *failures += 1;
+            return Err(bad_request("o código não confere"));
+        }
     }
 
     identity::disable_second_factor(&store).map_err(bad_request)?;

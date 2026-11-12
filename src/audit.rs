@@ -268,6 +268,16 @@ pub fn record(
         .with_key(|key| seal_private(key, seq, &private))
         .transpose()?;
 
+    // No key: the line is written in the clear, so it may only say what is no secret. A failed
+    // unlock and a lock are keyless by nature and name nothing. Anything else got here because the
+    // vault locked between the act and the note, and loses its who, where and what.
+    let keyless = matches!(action, action::UNLOCK_FAILED | action::LOCK);
+    let (actor_text, scope, detail) = if sealed.is_none() && !keyless {
+        (actor_text.split(':').next().unwrap_or("you").to_string(), None, "{}".to_string())
+    } else {
+        (actor_text, scope, detail)
+    };
+
     let hash = match &sealed {
         Some(sealed) => hash_sealed(seq, &at, action, result.as_text(), sealed, &prev_hash),
         None => hash_of(seq, &at, &actor_text, action, scope, result.as_text(), &detail, &prev_hash),

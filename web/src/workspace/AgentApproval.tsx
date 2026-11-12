@@ -65,7 +65,7 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
   // a row for one decision is how people learn to click "Permitir" without reading.
   const [group, setGroup] = useState<AgentRequest[]>([])
   const [window_, setWindow] = useState('once')
-  const [everyField, setEveryField] = useState(true)
+  const [everyField, setEveryField] = useState(false)
   const [picking, setPicking] = useState(false)
 
   // The knock currently on the desktop, and the request it belongs to. Both are refs rather than
@@ -137,7 +137,9 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
 
   const choices = [
     WINDOWS[0],
-    ...(request.peer.parent_pid !== null
+    // Not offered for a process started by the system itself (PID 1): that one never closes, and
+    // "while it is open" would quietly mean "until you log out".
+    ...(request.peer.parent_pid !== null && request.peer.parent_pid > 1
       ? [
           {
             value: 'process',
@@ -168,16 +170,19 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
     })
 
   const runs = group.some((one) => one.intent === 'run')
-  const reads = group.some((one) => one.intent !== 'run')
+  const copies = group.some((one) => one.intent === 'copy')
+  const reads = group.some((one) => one.intent === 'get')
+  const kinds = [runs, copies, reads].filter(Boolean).length
+  const commands = group.filter((one) => one.command && one.command.length > 0)
   const fields = [...new Set(group.map((one) => one.field))]
   const who = request.peer.parent ?? request.peer.process
 
   return (
     <AlertDialog open>
-      <AlertDialogContent className="data-[size=default]:max-w-[calc(100%-2rem)] data-[size=default]:sm:max-w-md">
+      <AlertDialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto data-[size=default]:max-w-[calc(100%-2rem)] data-[size=default]:sm:max-w-md">
         <AlertDialogHeader className="min-w-0">
           <AlertDialogTitle className="break-words">
-            {who} pede para {runs && reads ? 'acessar' : runs ? 'usar' : 'ler'} {fields.length > 1 ? `${fields.length} campos` : 'um campo'}
+            {who} pede para {kinds > 1 ? 'acessar' : runs ? 'usar' : copies ? 'copiar' : 'ler'} {fields.length > 1 ? `${fields.length} campos` : 'um campo'}
           </AlertDialogTitle>
 
           <AlertDialogDescription asChild>
@@ -208,27 +213,48 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
                     <li key={one.id} className="flex min-w-0 items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-sm text-foreground">{one.field}</span>
                       <span className="shrink-0 rounded-full bg-stone-soft px-2.5 py-0.5 text-xs">
-                        {one.intent === 'run' ? 'executar comando' : 'ler valor'}
+                        {one.intent === 'run' ? 'executar comando' : one.intent === 'copy' ? 'copiar' : 'ler valor'}
                       </span>
                     </li>
                   ))}
                 </ul>
               </div>
 
-              {reads ? (
+              {commands.map((one) => (
+                <div key={one.id} className="space-y-1 text-left">
+                  <span className="text-[13px] font-medium text-foreground">Comando com {one.field}</span>
+                  <pre className="max-h-32 overflow-auto rounded-xl border bg-raised p-3 font-mono text-xs break-all whitespace-pre-wrap text-foreground">
+                    {one.command!.join(' ')}
+                  </pre>
+                </div>
+              ))}
+
+              {runs && (
+                <p className="flex items-start gap-2 rounded-xl bg-amber-soft p-3 text-left text-foreground">
+                  <Terminal className="mt-0.5 size-4 shrink-0 text-amber" />
+                  <span>
+                    O comando recebe o valor e pode fazer qualquer coisa com ele, inclusive mostrar ou enviar. Leia o
+                    comando antes de permitir. O Keyhold só apaga da saída o valor escrito por extenso.
+                  </span>
+                </p>
+              )}
+
+              {copies && (
+                <p className="flex items-start gap-2 rounded-xl bg-amber-soft p-3 text-left text-foreground">
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber" />
+                  <span>
+                    O valor vai para a sua área de transferência por alguns segundos. Qualquer programa aberto com o seu
+                    usuário consegue ler o que está nela, inclusive o assistente.
+                  </span>
+                </p>
+              )}
+
+              {reads && (
                 <p className="flex items-start gap-2 rounded-xl bg-amber-soft p-3 text-left text-foreground">
                   <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber" />
                   <span>
                     O valor de um campo comum entra na conversa do assistente. Senhas e outros campos secretos nunca são
-                    entregues: só podem ser usados em um comando.
-                  </span>
-                </p>
-              ) : (
-                <p className="flex items-start gap-2 rounded-xl border p-3 text-left">
-                  <Terminal className="mt-0.5 size-4 shrink-0" />
-                  <span>
-                    O valor é enviado a uma variável de ambiente do comando e{' '}
-                    <strong className="text-foreground">não entra na conversa</strong> do assistente.
+                    entregues por leitura.
                   </span>
                 </p>
               )}
@@ -284,7 +310,10 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
                   Todos os campos deste registro
                 </label>
 
-                <span className="block text-xs">{describeWindow(picked.value, fields, wholeRecord)}</span>
+                <span className="block text-xs">
+                  {describeWindow(picked.value, fields, wholeRecord)}
+                  {lasting && runs ? ` Só para comandos de ${programs(group)}: outro programa pede de novo.` : ''}
+                </span>
               </div>
             </div>
           </AlertDialogDescription>
@@ -322,4 +351,11 @@ function describeWindow(value: string, fields: string[], wholeRecord: boolean): 
   }
 
   return `Vale para ${what}. A permissão pode ser revogada antes em Ajustes.`
+}
+
+/** The programs a lasting yes to these commands would cover, as the person reads them. */
+function programs(group: AgentRequest[]): string {
+  const names = [...new Set(group.map((one) => one.command?.[0]).filter((name): name is string => !!name))]
+
+  return names.join(', ')
 }

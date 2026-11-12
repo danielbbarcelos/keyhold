@@ -63,8 +63,11 @@ pub struct PendingRequest {
     pub record_id: String,
     pub record_title: String,
     pub field: String,
-    /// `get` or `run` — what will happen to the value if this is allowed.
+    /// `get`, `copy` or `run`: what will happen to the value if this is allowed.
     pub intent: String,
+    /// For `run`, the command exactly as it will be executed. The person approving is approving
+    /// this: a command can do anything with the value it is given, including print or send it.
+    pub command: Option<Vec<String>>,
     pub asked_at: u64,
 }
 
@@ -351,7 +354,12 @@ where
             continue;
         }
 
+        // Read on every request: switching the integration off in Ajustes also ends the
+        // connections that were already open, not only the ones that would come.
+        let on = crate::settings::agent_surface(&state.store.lock().unwrap());
+
         let response = match serde_json::from_str::<Request>(&line) {
+            Ok(_) if !on => Response::refused("a integração com assistentes está desligada no Keyhold"),
             Ok(request) => handle(request, &state, &peer).await,
             Err(_) => Response::refused("pedido malformado"),
         };
@@ -470,7 +478,7 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
                 }
             }
 
-            match approved(state, peer, &record, &field, "get").await {
+            match approved(state, peer, &record, &field, "get", None).await {
                 Err(refusal) => refusal,
                 Ok(()) => match value_of(state, &record, &field).await {
                     Some(value) => {
@@ -484,7 +492,7 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
         }
 
         Request::Copy { record, field } => {
-            match approved(state, peer, &record, &field, "copy").await {
+            match approved(state, peer, &record, &field, "copy", None).await {
                 Err(refusal) => refusal,
                 Ok(()) => match value_of(state, &record, &field).await {
                     None => Response::refused("o campo não existe neste registro"),
@@ -512,14 +520,14 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
                 return Response::refused("nenhum comando para executar");
             }
 
-            match approved(state, peer, &record, &field, "run").await {
+            match approved(state, peer, &record, &field, "run", Some(&command)).await {
                 Err(refusal) => refusal,
                 Ok(()) => match value_of(state, &record, &field).await {
                     None => Response::refused("o campo não existe neste registro"),
                     Some(value) => {
-                        note_agent(state, peer, audit::action::SECRET_REVEALED, &record, &field, true);
+                        note_run(state, peer, &record, &field, &command);
 
-                        run_with(&command, &variable, &value)
+                        run_with(&command, &variable, &value).await
                     }
                 },
             }
@@ -682,6 +690,7 @@ async fn approved(
     record_id: &str,
     field: &str,
     intent: &str,
+    command: Option<&[String]>,
 ) -> std::result::Result<(), Response> {
     if !reachable(state, record_id) {
         note_agent(state, peer, audit::action::SECRET_REVEALED, record_id, field, false);
@@ -696,12 +705,27 @@ async fn approved(
 
         state
             .lock
-            .with_key(|key| crate::grants::allows(&store, key, record_id, field))
+            .with_key(|key| {
+                crate::grants::allows_use(
+                    &store,
+                    key,
+                    record_id,
+                    field,
+                    intent,
+                    command.and_then(|argv| argv.first()).map(String::as_str),
+                )
+            })
             .unwrap_or(false)
     };
 
     if standing {
         return Ok(());
+    }
+
+    // Asked only about something that exists. A question about a field the record does not have
+    // would put any text the client likes in front of the person, and a yes to it means nothing.
+    if field_of(state, record_id, field).await.is_none() {
+        return Err(Response::refused("o campo não existe neste registro"));
     }
 
     let title = payload_of(state, record_id).await.map(|payload| payload.title).unwrap_or_default();
@@ -715,6 +739,7 @@ async fn approved(
         record_title: title,
         field: field.to_string(),
         intent: intent.to_string(),
+        command: command.map(<[String]>::to_vec),
         asked_at: now_seconds(),
     });
 
@@ -828,13 +853,21 @@ fn knock_text(request: &PendingRequest) -> String {
     )
 }
 
+/// How long a command may run, and how much it may print, before Keyhold stops it. The command
+/// runs inside Keyhold: one that never ends, or never stops printing, would take Keyhold with it.
+const RUN_TIMEOUT_SECONDS: u64 = 300;
+const RUN_OUTPUT_LIMIT: u64 = 1024 * 1024;
+
 /// Run a command with the secret in the child's environment.
 ///
-/// The value goes in through the environment rather than the command line: `/proc/*/cmdline` is
-/// readable by every process of this user, and `/proc/*/environ` is not. It never comes back —
-/// only what the command printed, which is the whole point of preferring this over handing the
-/// value to a model.
-fn run_with(command: &[String], variable: &str, value: &str) -> Response {
+/// The value goes in through the environment rather than the command line: a command line shows in
+/// `ps` to every user of the machine, and the environment only to this user's own processes. It
+/// never comes back as such, only what the command printed, with the value blanked out. That
+/// blanking catches a program that echoes what it was given; it does not stop a command written to
+/// transform the value first. What stops that is the person reading the command before saying yes.
+async fn run_with(command: &[String], variable: &str, value: &str) -> Response {
+    use tokio::io::AsyncReadExt;
+
     let variable = if variable.trim().is_empty() { "KEYHOLD_SECRET" } else { variable.trim() };
 
     let valid = variable
@@ -860,17 +893,52 @@ fn run_with(command: &[String], variable: &str, value: &str) -> Response {
 
     let arguments: Vec<String> = command.iter().map(|argument| argument.replace("{{secret}}", value)).collect();
 
-    let output = std::process::Command::new(&arguments[0])
+    let spawned = tokio::process::Command::new(&arguments[0])
         .args(&arguments[1..])
         .env(variable, value)
-        .output();
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn();
 
-    match output {
-        Err(error) => Response::refused(format!("não foi possível executar: {}", redact(&error.to_string(), value))),
-        Ok(output) => Response::Ran {
-            code: output.status.code().unwrap_or(-1),
-            stdout: redact(&String::from_utf8_lossy(&output.stdout), value),
-            stderr: redact(&String::from_utf8_lossy(&output.stderr), value),
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(error) => {
+            return Response::refused(format!("não foi possível executar: {}", redact(&error.to_string(), value)))
+        }
+    };
+
+    let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
+        return Response::refused("não foi possível ler a saída do comando");
+    };
+
+    let work = async {
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+
+        let (mut limited_out, mut limited_err) = (stdout.take(RUN_OUTPUT_LIMIT), stderr.take(RUN_OUTPUT_LIMIT));
+        let _ = tokio::join!(limited_out.read_to_end(&mut out), limited_err.read_to_end(&mut err));
+
+        // Whatever is still printing past the limit is stopped rather than waited for.
+        if out.len() as u64 >= RUN_OUTPUT_LIMIT || err.len() as u64 >= RUN_OUTPUT_LIMIT {
+            let _ = child.start_kill();
+        }
+
+        (child.wait().await, out, err)
+    };
+
+    match tokio::time::timeout(std::time::Duration::from_secs(RUN_TIMEOUT_SECONDS), work).await {
+        // Dropping the child here ends it: `kill_on_drop`.
+        Err(_) => Response::refused(format!(
+            "o comando passou de {RUN_TIMEOUT_SECONDS} segundos e foi encerrado"
+        )),
+        Ok((Err(error), _, _)) => {
+            Response::refused(format!("não foi possível executar: {}", redact(&error.to_string(), value)))
+        }
+        Ok((Ok(status), out, err)) => Response::Ran {
+            code: status.code().unwrap_or(-1),
+            stdout: redact(&String::from_utf8_lossy(&out), value),
+            stderr: redact(&String::from_utf8_lossy(&err), value),
         },
     }
 }
@@ -916,6 +984,27 @@ pub fn redact(output: &str, value: &str) -> String {
     }
 
     out
+}
+
+/// A command run with a secret, written down with the command itself: the trail has to be able to
+/// say what was done with the value, not only that it was used.
+fn note_run(state: &Arc<AppState>, peer: &Peer, record_id: &str, field: &str, command: &[String]) {
+    let store = state.store.lock().unwrap();
+    let shown: String = command.join(" ").chars().take(400).collect();
+
+    let _ = audit::record(
+        &store,
+        &state.lock,
+        audit::Actor::Agent { process: peer.process.clone(), pid: peer.pid },
+        audit::action::SECRET_REVEALED,
+        Some(record_id),
+        audit::Outcome::Allowed,
+        Detail::new()
+            .with("field", field)
+            .with("intent", "run")
+            .with("command", shown.as_str())
+            .with("asked_by", peer.describe()),
+    );
 }
 
 fn note_agent(

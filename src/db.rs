@@ -19,7 +19,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 
 /// The schema this binary understands. A file claiming more than this is not opened.
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 
 pub struct Store {
     conn: Connection,
@@ -355,6 +355,29 @@ impl Store {
                              (SELECT COALESCE(MAX(seq), 0) FROM audit_events));
 
                  UPDATE meta SET value = '9' WHERE key = 'schema_version';
+                 COMMIT;",
+            )?;
+        }
+
+        // Standing permissions for records that are not rows of this file (AWS parameters) could
+        // not be written: the table pointed at `records`. It no longer does. The permissions that
+        // existed are dropped rather than carried over, because what a permission covers changed
+        // with this version (one use, one program) and an old yes was a yes to more than that.
+        if found < 10 {
+            self.conn.execute_batch(
+                "BEGIN;
+                 DROP TABLE IF EXISTS agent_grants;
+
+                 CREATE TABLE agent_grants (
+                     id         TEXT PRIMARY KEY,
+                     record_id  TEXT NOT NULL,
+                     sealed     BLOB NOT NULL,
+                     created_at TEXT NOT NULL
+                 ) STRICT;
+
+                 CREATE INDEX agent_grants_by_record ON agent_grants (record_id);
+
+                 UPDATE meta SET value = '10' WHERE key = 'schema_version';
                  COMMIT;",
             )?;
         }

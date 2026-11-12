@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+A security review of the whole project, and Windows starting on a machine that has nothing else
+installed.
+
+### Security
+
+- **The approval dialog shows the exact command** an assistant wants to run with a secret, and the
+  trail records it. A command can do anything with the value it receives, and the dialog now says
+  so instead of promising the opposite.
+- **A lasting yes is for one use and one program**: reading a field is not running a command with
+  it, and a yes to `mysql` is not a yes to `sh`. Permissions are sealed to their record, so editing
+  the file cannot point one at another record. "Todos os campos deste registro" starts unchecked.
+  Existing permissions are dropped by this upgrade and asked again.
+- A command run with a secret is stopped after five minutes or one megabyte of output, and no
+  longer blocks Keyhold while it runs.
+- Lock clocks, read logging, trash retention and what an assistant may read can only be changed
+  with the vault open. A second factor cannot be replaced without a code from the current one,
+  and wrong codes when turning it off count like wrong passwords.
+- A question is only asked about a field that exists. Switching the integration off also ends
+  connections that were already open. "Enquanto estiver aberto" is not offered for a process
+  started by the system.
+- A vault file asking for an absurd key derivation is refused instead of taking Keyhold down, a
+  crash no longer writes a core file, and a trail line written at the instant of locking names
+  nothing.
+- `install.ps1` registered `keyhold://` behind PowerShell, where a crafted link could become a
+  command. It now uses the same launcher as the installer, which ignores the link.
+- Releases: build jobs only read the repository, actions are pinned to commits, npm install
+  scripts are off, and every download comes with `SHA256SUMS.txt` and a build provenance
+  attestation (`gh attestation verify`).
+
+### Fixed
+
+- **Windows**: Keyhold installed and then failed to start with "VCRUNTIME140.dll não foi
+  encontrado" on a machine without the Visual C++ runtime. The runtime is now inside the
+  executables, which also carry version information and the icon.
+- **A lasting permission for a record in an AWS vault could not be saved**, so every request asked
+  again.
+- Attachments above about 1.5 MB were refused by the server before reaching the 25 MB limit.
+
 ## 1.0.1
 
 Secrets used by coding assistants never show up in their conversation or in the commands they
