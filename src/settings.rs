@@ -113,6 +113,24 @@ pub fn set_log_reads(vault: &Store, on: bool) -> Result<bool> {
     Ok(on)
 }
 
+const FIELD_AUTOCOMPLETE: &str = "field_autocomplete";
+
+/// Whether the browser may offer to fill in and to save what is typed in a password or hidden
+/// field of a record.
+///
+/// Off by default. A browser that remembers what was typed into a vault keeps a second copy of the
+/// secret in its own store, outside this one and outside its lock; and a browser that fills a
+/// field in puts a password from somewhere else into a record nobody meant it for.
+pub fn field_autocomplete(vault: &Store) -> bool {
+    read(vault, FIELD_AUTOCOMPLETE).ok().flatten().map(|raw| raw == "true").unwrap_or(false)
+}
+
+pub fn set_field_autocomplete(vault: &Store, on: bool) -> Result<bool> {
+    write(vault, FIELD_AUTOCOMPLETE, if on { "true" } else { "false" })?;
+
+    Ok(on)
+}
+
 const APPEARANCE: &str = "appearance";
 
 /// How the interface looks: which theme and which accent colour.

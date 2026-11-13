@@ -45,7 +45,12 @@ export function useCustom(): { icons: CustomIcon[]; types: RecordType[]; loaded:
     return () => window.removeEventListener(CHANGED, again)
   }, [])
 
-  return { icons: icons ?? [], types: types ?? [], loaded: icons !== null && types !== null }
+  return { icons: sorted(icons ?? []), types: types ?? [], loaded: icons !== null && types !== null }
+}
+
+/** The library by name, so an icon is where somebody looks for it. */
+function sorted(list: CustomIcon[]): CustomIcon[] {
+  return [...list].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base', numeric: true }))
 }
 
 export async function saveIcons(next: CustomIcon[]): Promise<void> {

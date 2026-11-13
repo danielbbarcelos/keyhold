@@ -1,3 +1,4 @@
+import { secretInputProps, useFieldAutocomplete } from '../secretInput'
 import { useRef, useState } from 'react'
 import {
   CopyPlus,
@@ -325,6 +326,7 @@ function ValueEditor({ field, onChange }: { field: Field; onChange: (change: Par
       <div className="relative">
         <Textarea
           aria-label="Valor"
+          autoComplete="off"
           spellCheck={!type.secret}
           autoCorrect={type.secret ? 'off' : undefined}
           autoCapitalize={type.secret ? 'off' : undefined}
@@ -391,13 +393,13 @@ function SecretInput({
 }) {
   const [showing, setShowing] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const allow = useFieldAutocomplete()
 
   return (
     <div className="relative">
       <Input
         aria-label={placeholder ?? 'Valor'}
-        type={showing ? 'text' : 'password'}
-        autoComplete="new-password"
+        {...secretInputProps(showing, allow)}
         spellCheck={false}
         autoCorrect="off"
         autoCapitalize="off"

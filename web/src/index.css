@@ -314,3 +314,11 @@ button:disabled,
 :root[data-width='contida'] .kh-wide {
   padding-inline: max(1.5rem, calc((100% - 1280px) / 2));
 }
+
+/*
+ * A secret typed into a field that is not a password field (so the browser neither fills it in nor
+ * offers to save it): hidden the way a password field hides, without being one.
+ */
+input[data-concealed] {
+  -webkit-text-security: disc;
+}

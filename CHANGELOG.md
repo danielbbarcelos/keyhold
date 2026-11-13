@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### New
+
+- **Ajustes, Campos de senha**: whether the browser may fill in and save a record's password and
+  hidden fields. Off by default: those fields hide what is typed without being password fields,
+  so the browser and its password manager leave them alone.
+
+### Changed
+
+- Vaults are listed by name on Início, in the vault switcher and in Ajustes, and the icon library
+  by name in the picker and in Personalização.
+
 ### Fixed
 
 - **A picture as the icon of a record in an AWS vault** was refused: a parameter holds 8 KB, and

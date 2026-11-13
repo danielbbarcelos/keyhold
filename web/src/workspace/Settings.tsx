@@ -11,6 +11,7 @@ import {
   RefreshCw,
   ScrollText,
   ShieldCheck,
+  TextCursorInput,
   Timer,
   Trash2,
   Vault,
@@ -109,6 +110,7 @@ const SECTIONS: Array<{ id: string; label: string; icon: LucideIcon | typeof Aws
   { id: 'senha', label: 'Senha-mestra', icon: KeyRound },
   { id: 'cofres', label: 'Cofres', icon: Vault },
   { id: 'gerador', label: 'Gerador de senhas', icon: WandSparkles },
+  { id: 'campos', label: 'Campos de senha', icon: TextCursorInput },
   { id: 'aws', label: 'Contas AWS', icon: AwsNavMark },
   { id: 'chaves', label: 'Troca de chave', icon: RefreshCw },
   { id: 'lixeira', label: 'Lixeira', icon: Trash2 },
@@ -156,6 +158,7 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
     senha: <MasterPassword status={status} onChanged={onChanged} />,
     cofres: <VaultsPanel vaults={vaults} onChanged={onVaultsChanged} />,
     gerador: <GeneratorSettings recipe={status.generator} onChanged={onChanged} />,
+    campos: <FieldAutocomplete on={status.field_autocomplete ?? false} onChanged={onChanged} />,
     aws: <AwsAccounts vaults={vaults} />,
     chaves: <Rotation vaults={vaults} onChanged={onVaultsChanged} />,
     lixeira: <Retention days={status.retention_days} onChanged={onChanged} />,
@@ -869,6 +872,45 @@ function TrailSettings({ on, onChanged }: { on: boolean; onChanged: () => void }
             Desligado, não é possível saber depois o que um assistente leu.
           </p>
         )}
+      </CardContent>
+    </Card>
+  )
+}
+
+/** Whether the browser may fill in and save what is typed in a record's password and hidden fields. */
+function FieldAutocomplete({ on, onChanged }: { on: boolean; onChanged: () => void }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Campos de senha</CardTitle>
+        <CardDescription>
+          Como o navegador trata os campos de senha e os campos ocultos ao criar ou editar um registro.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="space-y-4 px-6">
+        <div className="divide-y overflow-hidden rounded-xl border">
+          <div className="flex items-start justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-hover">
+            <Label htmlFor="field-autocomplete" className="flex flex-1 cursor-pointer flex-col items-start gap-1 font-normal">
+              Permitir o preenchimento automático do navegador
+              <span className="mt-1 block text-sm text-muted-foreground">
+                Desligado, o navegador não sugere senhas salvas nesses campos nem oferece salvar o que você digita.
+                Ligado, eles funcionam como campos de senha comuns, e o navegador ou a extensão de senhas pode
+                preencher e guardar uma cópia fora do Keyhold.
+              </span>
+            </Label>
+            <Switch
+              id="field-autocomplete"
+              checked={on}
+              onCheckedChange={(next) =>
+                void api
+                  .setFieldAutocomplete(next)
+                  .then(onChanged)
+                  .catch((cause) => toastError(cause, 'Não foi possível salvar o ajuste'))
+              }
+            />
+          </div>
+        </div>
       </CardContent>
     </Card>
   )

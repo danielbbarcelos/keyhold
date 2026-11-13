@@ -11,12 +11,17 @@ import { Home, type Seen } from './Home'
 import { InstancesPanel } from './InstancesPanel'
 import { destinationFromLocation, rememberDestination, type Destination } from './nav'
 import { NewVaultDialog } from './NewVaultDialog'
+import { setFieldAutocomplete } from './secretInput'
 import { Settings } from './Settings'
 import { Body, Crumb, Rail, Title, TopBar, type Place } from './shell'
 import { toast, toastError, Toaster } from './toast'
 import type { Selection } from './vault/TreeCard'
 import { VaultPage } from './vault/VaultPage'
 import { VaultSkeleton } from './Skeletons'
+
+/** Names the way a person reads them: accents and case aside, "Cofre 2" before "Cofre 10". */
+const byName = (a: { name: string }, b: { name: string }) =>
+  a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base', numeric: true })
 
 /**
  * The workspace: one shell for every screen.
@@ -34,7 +39,10 @@ interface WorkspaceProps {
 export function Workspace({ status, onChanged }: WorkspaceProps) {
   // A tab opened with "Abrir em nova guia" starts where it was sent.
   const [start] = useState<Destination>(destinationFromLocation)
-  const [vaults, setVaults] = useState<VaultSummary[]>([])
+  // Always by name: on Início, in the switcher and in Ajustes a vault is found by reading down a
+  // list, and the order they were created in is an order nobody remembers.
+  const [unsorted, setVaults] = useState<VaultSummary[]>([])
+  const vaults = useMemo(() => [...unsorted].sort(byName), [unsorted])
   const [vaultsLoaded, setVaultsLoaded] = useState(false)
   const [records, setRecords] = useState<RecordPreview[]>([])
   // Vaults whose records could not be read (an AWS vault without a session): unknown, not empty.
@@ -119,6 +127,9 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   useEffect(() => {
     if (place !== 'vault') void refresh()
   }, [place, refresh])
+
+  // The record editor's secret inputs ask this on their own, several components down.
+  useEffect(() => setFieldAutocomplete(status.field_autocomplete ?? false), [status.field_autocomplete])
 
   // Locking is not a screen change: it takes the clipboard back too.
   useEffect(() => {

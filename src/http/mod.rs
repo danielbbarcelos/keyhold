@@ -98,6 +98,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/settings/appearance", put(set_appearance))
         .route("/settings/retention", put(set_retention))
         .route("/settings/log-reads", put(set_log_reads))
+        .route("/settings/field-autocomplete", put(set_field_autocomplete))
         .route("/settings/generator", put(set_generator))
         .route("/settings/layout", put(set_layout))
         .route("/alerts", get(alert_presets))
@@ -287,6 +288,7 @@ async fn status(State(state): State<Arc<AppState>>) -> Answer {
         "lock": lock,
         "retention_days": settings::retention_days(&store),
         "log_reads": settings::log_reads(&store),
+        "field_autocomplete": settings::field_autocomplete(&store),
         "appearance": settings::appearance(&store),
         "generator": settings::generator(&store),
         "layout": settings::layout(&store),
@@ -480,6 +482,15 @@ async fn set_log_reads(State(state): State<Arc<AppState>>, Json(body): Json<LogR
     let saved = settings::set_log_reads(&store, body.on).map_err(bad_request)?;
 
     Ok(Json(json!({ "log_reads": saved })))
+}
+
+/// Whether the browser may fill in and save a record's secret fields. A matter of how the editor
+/// behaves, like the appearance, so it does not need the vault open.
+async fn set_field_autocomplete(State(state): State<Arc<AppState>>, Json(body): Json<LogReads>) -> Answer {
+    let store = state.store.lock().unwrap();
+    let saved = settings::set_field_autocomplete(&store, body.on).map_err(bad_request)?;
+
+    Ok(Json(json!({ "field_autocomplete": saved })))
 }
 
 #[derive(Deserialize)]

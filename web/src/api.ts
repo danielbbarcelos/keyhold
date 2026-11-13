@@ -35,6 +35,8 @@ export interface Status {
   lock: LockState
   retention_days: number
   log_reads: boolean
+  /** Whether the browser may fill in and save a record's password and hidden fields. */
+  field_autocomplete?: boolean
   appearance: Appearance
   /** What "Gerar senha" starts from. */
   generator?: Recipe
@@ -742,6 +744,9 @@ export const api = {
 
   setLogReads: (on: boolean) =>
     call<{ log_reads: boolean }>('PUT', '/api/settings/log-reads', { on }),
+
+  setFieldAutocomplete: (on: boolean) =>
+    call<{ field_autocomplete: boolean }>('PUT', '/api/settings/field-autocomplete', { on }),
 
   /**
    * Tell the binary that a secret was looked at.
