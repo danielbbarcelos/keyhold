@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ExternalLink, Loader2, LogOut, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Copy, ExternalLink, Loader2, LogOut, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -439,13 +439,29 @@ export function DeviceDialog({
         </DialogHeader>
         <div className="grid place-items-center gap-3 rounded-xl border bg-raised py-5">
           <span className="font-mono text-2xl tracking-[0.2em]">{device.user_code}</span>
-          <Button
-            disabled={!device.verification_uri_complete.startsWith(['https', '//'].join(':'))}
-            onClick={() => window.open(device.verification_uri_complete, '_blank', 'noopener,noreferrer')}
-          >
-            <ExternalLink />
-            Abrir a página da AWS
-          </Button>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button
+              disabled={!device.verification_uri_complete.startsWith(['https', '//'].join(':'))}
+              onClick={() => window.open(device.verification_uri_complete, '_blank', 'noopener,noreferrer')}
+            >
+              <ExternalLink />
+              Abrir a página da AWS
+            </Button>
+            {/* For confirming in another browser or profile, the one already signed in to AWS. The
+                address is not a secret: it only works together with a login on AWS's own page. */}
+            <Button
+              variant="outline"
+              onClick={() =>
+                void navigator.clipboard
+                  .writeText(device.verification_uri_complete)
+                  .then(() => toast('Link copiado', 'Cole no navegador em que você entra na AWS.'))
+                  .catch((cause) => toastError(cause, 'Não foi possível copiar o link'))
+              }
+            >
+              <Copy />
+              Copiar link
+            </Button>
+          </div>
         </div>
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           {state === 'waiting' && (

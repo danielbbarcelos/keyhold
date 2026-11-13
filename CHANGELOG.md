@@ -20,6 +20,7 @@
   moved or cloned, instead of showing the old state until AWS answers.
 - Everything that can be clicked shows the pointer, menu items and options included.
 - The countdown ring of a 2FA code runs clockwise.
+- The AWS confirmation dialog can copy its link, to confirm in another browser.
 
 ## 1.0.2
 
