@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.0.4
+
+Pictures as icons in AWS vaults, vaults and icons listed by name, and a switch for the browser's
+autocomplete in password fields.
 
 ### New
 
