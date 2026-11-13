@@ -432,7 +432,7 @@ function IconLibrary() {
     let repeated = 0
     for (const picture of pictures) {
       try {
-        if (await addIcon(picture.name.replace(/\.[a-z0-9]+$/i, ''), await shrink(picture))) added += 1
+        if ((await addIcon(picture.name.replace(/\.[a-z0-9]+$/i, ''), await shrink(picture))).added) added += 1
         else repeated += 1
       } catch (cause) {
         toastError(cause, `Não foi possível adicionar ${picture.name}`)

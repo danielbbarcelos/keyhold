@@ -277,6 +277,8 @@ import type { LucideIcon } from 'lucide-react'
 import type { RecordIcon } from '../api'
 import { cn } from '@/lib/utils'
 
+import { useLibraryImage } from './custom'
+
 /**
  * The icons a record can wear, with the words people would search them by.
  *
@@ -587,7 +589,7 @@ const LEGACY: Record<string, RecordIcon> = {
 }
 
 export function iconOf(icon: RecordIcon | null | undefined, kind = 'item'): RecordIcon {
-  if (icon && (icon.image || icon.name)) {
+  if (icon && (icon.image || icon.ref || icon.name)) {
     return icon
   }
 
@@ -622,11 +624,13 @@ export function RecordTile({
   className?: string
 }) {
   const shown = iconOf(icon, kind)
+  // The library's own picture wins over the copy the record carries, which in AWS is a small one.
+  const picture = useLibraryImage(shown.ref) ?? shown.image
 
-  if (shown.image?.startsWith('data:image/')) {
+  if (picture?.startsWith('data:image/')) {
     return (
       <img
-        src={shown.image}
+        src={picture}
         alt=""
         className={cn('shrink-0 object-cover', SIZES[size], className)}
       />

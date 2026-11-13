@@ -119,6 +119,11 @@ pub struct Icon {
     /// A `data:image/...` address, already shrunk by the interface.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
+    /// The picture's id in the person's icon library, when it came from there. Where the library
+    /// has it, the interface shows that picture instead of `image`: a record in AWS can only carry
+    /// a small copy, and this is how the full one is found again on the machine that has it.
+    #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
 }
 
 /// The largest picture a record's icon may carry, as a data address.

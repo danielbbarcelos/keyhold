@@ -2145,3 +2145,32 @@ async fn an_agent_reaches_an_aws_vault_switched_on_for_it_and_still_asks() {
         other => panic!("did not run: {other:?}"),
     }
 }
+
+#[test]
+fn a_picture_that_does_not_fit_is_left_out_and_its_place_in_the_library_kept() {
+    use crate::records::{Field, Icon, Payload};
+
+    let picture = format!("data:image/png;base64,{}", "A".repeat(9000));
+    let with_picture = Payload {
+        title: "Slack".into(),
+        fields: vec![Field { label: "Senha".into(), kind: "password".into(), value: "hunter2".into(), ..Default::default() }],
+        icon: Some(Icon { name: "message-circle".into(), colour: "lilac".into(), image: Some(picture), reference: Some("abc".into()) }),
+        ..Payload::default()
+    };
+
+    let (kept, _, value, json) = super::prepared(&with_picture).ok().expect("the record fits without its picture");
+    let icon = kept.icon.expect("the icon stays");
+    assert!(json);
+    assert!(value.len() <= crate::aws::mapping::ADVANCED_LIMIT);
+    assert_eq!(icon.image, None);
+    assert_eq!(icon.reference.as_deref(), Some("abc"));
+    assert_eq!(icon.name, "message-circle");
+
+    // Nothing to leave out: too large stays too large.
+    let too_much = Payload {
+        title: "Grande".into(),
+        fields: vec![Field { label: "Chave".into(), kind: "password".into(), value: "x".repeat(9000), ..Default::default() }],
+        ..Payload::default()
+    };
+    assert!(super::prepared(&too_much).is_err());
+}

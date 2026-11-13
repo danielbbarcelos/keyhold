@@ -428,6 +428,8 @@ export interface RecordIcon {
   name: string
   colour: string
   image?: string
+  /** The picture's id in the icon library. Where the library has it, that picture is shown. */
+  ref?: string
 }
 
 export interface Payload {

@@ -825,7 +825,7 @@ mod tests {
             payload(vec![field("Usuário", "text", "ana"), field("Senha", "password", "x")]),
             payload(vec![card]),
             Payload {
-                icon: Some(Icon { name: "key".into(), colour: "ambar".into(), image: None }),
+                icon: Some(Icon { name: "key".into(), colour: "ambar".into(), image: None, reference: None }),
                 ..payload(vec![field("Senha", "password", "x")])
             },
             payload(vec![Field { primary: true, ..field("Senha", "password", "x") }]),

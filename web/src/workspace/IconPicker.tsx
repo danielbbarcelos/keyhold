@@ -60,7 +60,9 @@ export function IconPicker({
     [term],
   )
   const mine = term ? library.filter((one) => one.name.toLowerCase().includes(term)) : library
-  const kept = !shown.image || library.some((one) => one.image === shown.image)
+  const fromLibrary = library.find((one) => one.id === shown.ref) ?? library.find((one) => one.image === shown.image)
+  const hasPicture = Boolean(shown.image || fromLibrary)
+  const kept = !shown.image || fromLibrary !== undefined
 
   async function usePicture(blob: Blob | null | undefined, name = 'Imagem colada') {
     if (!blob || !blob.type.startsWith('image/')) {
@@ -71,12 +73,14 @@ export function IconPicker({
 
     try {
       const image = await shrink(blob)
-      onChange({ name: shown.name, colour: shown.colour, image })
       setTab('custom')
       // Kept for the next record that needs it. A failure here costs the reuse, not the icon.
-      void addIcon(name.replace(/\.[a-z0-9]+$/i, ''), image).catch((cause) =>
-        toastError(cause, 'O ícone foi aplicado, mas não foi guardado na biblioteca'),
-      )
+      const kept = await addIcon(name.replace(/\.[a-z0-9]+$/i, ''), image).catch((cause) => {
+        toastError(cause, 'O ícone foi aplicado, mas não foi guardado na biblioteca')
+
+        return null
+      })
+      onChange({ name: shown.name, colour: shown.colour, image, ...(kept ? { ref: kept.id } : {}) })
     } catch {
       toast('Não foi possível usar a imagem', 'Tente outra imagem ou um arquivo menor.', 'error')
     }
@@ -156,7 +160,7 @@ export function IconPicker({
                   onClick={() => onChange({ name, colour: shown.colour })}
                   className={cn(
                     'grid h-8 place-items-center rounded-lg text-muted-foreground hover:bg-hover hover:text-foreground',
-                    !shown.image && shown.name === name && 'bg-primary-soft text-primary-text ring-1 ring-primary',
+                    !hasPicture && shown.name === name && 'bg-primary-soft text-primary-text ring-1 ring-primary',
                   )}
                 >
                   <Icon className="size-4" />
@@ -179,7 +183,7 @@ export function IconPicker({
                   className={cn(
                     'size-[22px] rounded-full',
                     colour.dot,
-                    !shown.image && shown.colour === colour.value && 'ring-2 ring-foreground/60 ring-offset-2 ring-offset-popover',
+                    !hasPicture && shown.colour === colour.value && 'ring-2 ring-foreground/60 ring-offset-2 ring-offset-popover',
                   )}
                 />
               ))}
@@ -194,10 +198,10 @@ export function IconPicker({
                   type="button"
                   title={one.name}
                   aria-label={one.name}
-                  onClick={() => onChange({ name: shown.name, colour: shown.colour, image: one.image })}
+                  onClick={() => onChange({ name: shown.name, colour: shown.colour, image: one.image, ref: one.id })}
                   className={cn(
                     'grid aspect-square place-items-center rounded-[10px] p-1 hover:bg-hover',
-                    shown.image === one.image && 'bg-primary-soft ring-1 ring-primary',
+                    fromLibrary?.id === one.id && 'bg-primary-soft ring-1 ring-primary',
                   )}
                 >
                   <img src={one.image} alt="" className="size-full rounded-lg object-cover" />
@@ -252,21 +256,24 @@ export function IconPicker({
           </>
         )}
 
-        {(shown.image || tab === 'custom' || (onClear && icon && (icon.image || icon.name))) && (
+        {(hasPicture || tab === 'custom' || (onClear && icon && (icon.image || icon.name))) && (
           <div className="grid gap-0.5 border-t p-2">
             {shown.image && !kept && (
               <Row
                 icon={BookmarkPlus}
                 onClick={() =>
                   void addIcon('Sem nome', shown.image!)
-                    .then(() => toast('Ícone guardado na biblioteca'))
+                    .then((kept) => {
+                      onChange({ ...shown, ref: kept.id })
+                      toast('Ícone guardado na biblioteca')
+                    })
                     .catch((cause) => toastError(cause, 'Não foi possível guardar o ícone'))
                 }
               >
                 Guardar esta imagem na biblioteca
               </Row>
             )}
-            {shown.image && (
+            {hasPicture && (
               <Row icon={Trash2} onClick={() => onChange({ name: shown.name, colour: shown.colour })}>
                 Remover a imagem e voltar ao ícone
               </Row>
@@ -318,6 +325,52 @@ function Row({
       {children}
     </button>
   )
+}
+
+/** What a picture may weigh inside an AWS parameter, as a data address: the rest is for the fields. */
+const AWS_PICTURE = 2400
+
+/**
+ * A record as an AWS parameter can hold it: the same record, its picture made small.
+ *
+ * A parameter holds 8 KB, fields and notes included, and above 4 KB AWS bills it as an advanced
+ * one. A picture at the size the library keeps takes most or all of that. So the parameter gets a
+ * small copy, enough for whoever else opens the vault, and the picture's place in the library goes
+ * with it: on the machine that has the library, the full picture is what shows.
+ */
+export async function fitIconForAws<T extends { icon?: RecordIcon | null }>(payload: T): Promise<T> {
+  const image = payload.icon?.image
+  if (!payload.icon || !image || image.length <= AWS_PICTURE) return payload
+
+  for (const [side, quality] of [
+    [48, 0.8],
+    [40, 0.7],
+    [32, 0.6],
+  ] as const) {
+    const small = await redraw(image, side, 'image/webp', quality).catch(() => null)
+    if (small && small.length <= AWS_PICTURE) return { ...payload, icon: { ...payload.icon, image: small } }
+  }
+
+  // Not even a small copy fits: the record keeps its place in the library and its lucide icon.
+  const { image: _, ...rest } = payload.icon
+
+  return { ...payload, icon: rest }
+}
+
+async function redraw(source: string, side: number, type: string, quality: number): Promise<string> {
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const one = new Image()
+    one.onload = () => resolve(one)
+    one.onerror = reject
+    one.src = source
+  })
+
+  const canvas = document.createElement('canvas')
+  canvas.width = side
+  canvas.height = side
+  canvas.getContext('2d')!.drawImage(image, 0, 0, side, side)
+
+  return canvas.toDataURL(type, quality)
 }
 
 /**

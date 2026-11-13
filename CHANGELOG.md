@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A picture as the icon of a record in an AWS vault** was refused: a parameter holds 8 KB, and
+  the picture alone took that. The parameter now gets a small copy, for whoever else opens the
+  vault, with the picture's place in your icon library beside it, so on your machine the full
+  picture is what shows. A record copied into AWS whose picture does not fit goes without it
+  instead of failing.
+
 ## 1.0.3
 
 Keyhold made your own: record types, an icon library, more icons and colours, in a new

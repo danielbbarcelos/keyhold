@@ -935,7 +935,7 @@ mod tests {
             &store,
             &master,
             VaultMeta {
-                icon: Some(Icon { name: "briefcase".into(), colour: "lilac".into(), image: None }),
+                icon: Some(Icon { name: "briefcase".into(), colour: "lilac".into(), image: None, reference: None }),
                 ..meta("Trabalho")
             },
         )

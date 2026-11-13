@@ -53,14 +53,40 @@ export async function saveIcons(next: CustomIcon[]): Promise<void> {
   announce()
 }
 
-/** Keep a picture in the library. `false` when the very same picture was already there. */
-export async function addIcon(name: string, image: string): Promise<boolean> {
+/**
+ * Keep a picture in the library and say where it is: its id there, and whether it was added now
+ * (`false` when the very same picture was already kept).
+ */
+export async function addIcon(name: string, image: string): Promise<{ id: string; added: boolean }> {
   if (icons === null) await load()
-  if ((icons ?? []).some((one) => one.image === image)) return false
+  const already = (icons ?? []).find((one) => one.image === image)
+  if (already) return { id: already.id, added: false }
 
-  await saveIcons([...(icons ?? []), { id: crypto.randomUUID(), name: name.trim() || 'Sem nome', image }])
+  const id = crypto.randomUUID()
+  await saveIcons([...(icons ?? []), { id, name: name.trim() || 'Sem nome', image }])
 
-  return true
+  return { id, added: true }
+}
+
+/**
+ * The picture an icon points at in the library, when this machine has it.
+ *
+ * A record in AWS carries only a small copy of its picture (a parameter holds 8 KB, fields and
+ * notes included). The id it carries beside the copy is how the full picture is shown here.
+ */
+export function useLibraryImage(ref: string | undefined): string | undefined {
+  const [, tick] = useState(0)
+
+  useEffect(() => {
+    if (!ref) return
+    const again = () => tick((n) => n + 1)
+    window.addEventListener(CHANGED, again)
+    if (icons === null) void load()
+
+    return () => window.removeEventListener(CHANGED, again)
+  }, [ref])
+
+  return ref ? icons?.find((one) => one.id === ref)?.image : undefined
 }
 
 export async function saveTypes(next: RecordType[]): Promise<void> {

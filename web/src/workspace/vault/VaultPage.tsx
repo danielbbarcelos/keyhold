@@ -41,6 +41,7 @@ import { emptyPayload } from '../fields'
 import { DiscardDialog } from '../DiscardDialog'
 import { DeleteFolderDialog, MoveFolderDialog, RenameFolderDialog } from '../FolderDialogs'
 import type { MenuEntry } from '../menu'
+import { fitIconForAws } from '../IconPicker'
 import { MoveToVaultDialog } from '../MoveToVaultDialog'
 import { CopyDialog, type CopySource } from '../CopyDialog'
 import { NameDialog } from '../NameDialog'
@@ -369,7 +370,7 @@ export function VaultPage({
 
     try {
       if (payloadChanged) {
-        const saved = await api.saveRecord(id, editing.payload, aws ? open.version : undefined)
+        const saved = await api.saveRecord(id, aws ? await fitIconForAws(editing.payload) : editing.payload, aws ? open.version : undefined)
         if (saved.warning) toast('Registro salvo com um aviso', saved.warning, 'error')
         wrote = true
       }
@@ -430,7 +431,7 @@ export function VaultPage({
 
     try {
       const name = aws ? (editing.leaf ?? suggestName(payload.title)) : undefined
-      const made = await api.createRecord(vault.id, editing.folderId, payload, name)
+      const made = await api.createRecord(vault.id, editing.folderId, aws ? await fitIconForAws(payload) : payload, name)
       if (editing.rotation) await api.setRotationDue(made.record.id, editing.rotation).catch(() => undefined)
       stopEditing()
       await refresh()

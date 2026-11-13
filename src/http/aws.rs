@@ -1669,7 +1669,28 @@ fn prepared(payload: &Payload) -> Result<(Payload, String, String, bool), Failur
     let payload = payload.clone().normalise();
 
     let description = mapping::description_for(&payload.title).map_err(bad_request)?;
-    let (value, json) = mapping::encode_value(&payload).map_err(bad_request)?;
+
+    // A picture is the one thing in a record that can be left out and found again: when the value
+    // does not fit with it, the record is written without it, keeping the icon's name, colour and
+    // its place in the library. This is what lets a record copied from a local vault, where the
+    // picture is as large as it likes, land in a parameter at all.
+    let (payload, (value, json)) = match mapping::encode_value(&payload) {
+        Ok(encoded) => (payload, encoded),
+        Err(too_large) => {
+            let has_picture = payload.icon.as_ref().is_some_and(|icon| icon.image.is_some());
+            if !has_picture {
+                return Err(bad_request(too_large));
+            }
+
+            let mut lighter = payload;
+            if let Some(icon) = lighter.icon.as_mut() {
+                icon.image = None;
+            }
+            let encoded = mapping::encode_value(&lighter).map_err(|_| bad_request(too_large))?;
+
+            (lighter, encoded)
+        }
+    };
 
     Ok((payload, description, value, json))
 }

@@ -84,7 +84,7 @@ fn field(kind: &str, label: &str) -> TypeField {
 }
 
 fn lucide(name: &str, colour: &str) -> Icon {
-    Icon { name: name.into(), colour: colour.into(), image: None }
+    Icon { name: name.into(), colour: colour.into(), image: None, reference: None }
 }
 
 /// What somebody who never changed anything finds: the four kinds Keyhold always offered.
@@ -228,6 +228,7 @@ pub fn save_types(store: &Store, master: &SecretKey, types: Vec<RecordType>) -> 
                 name: clipped(&one.icon.name, 40),
                 colour: clipped(&one.icon.colour, 16),
                 image: one.icon.image,
+                reference: one.icon.reference.as_deref().map(|id| clipped(id, 64)),
             },
             fields,
         });
