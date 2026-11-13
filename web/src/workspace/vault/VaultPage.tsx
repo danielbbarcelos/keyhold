@@ -870,13 +870,13 @@ export function VaultPage({
       />
       <Button
         variant="ghost"
-        size="icon-sm"
-        className="-ml-1 shrink-0 text-faint hover:text-foreground"
-        aria-label="Editar cofre"
-        title="Editar cofre: nome, ícone e cor"
+        size="sm"
+        className="shrink-0 px-2 text-muted-foreground hover:text-foreground"
+        title="Nome, ícone e cor do cofre"
         onClick={() => setEditingVault(true)}
       >
         <Pencil />
+        Editar cofre
       </Button>
       {chain.map((folder, index) => (
         <Crumb

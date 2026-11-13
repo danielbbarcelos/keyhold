@@ -481,9 +481,13 @@ export function VaultSwitcher({
               className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-left text-sm hover:bg-hover"
             >
               <VaultInitial vault={vault} />
-              <span className="flex-1 truncate">{vault.name}</span>
-              {vault.kind === 'aws' && <AwsMark className="size-4" title="Cofre AWS" />}
-              {vault.id === current.id && <Check className="size-4 text-primary" />}
+              {/* The name gives way first; the check stays beside it and the AWS mark at the end,
+                  so the marks line up in one column whatever is picked. */}
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                <span className="truncate">{vault.name}</span>
+                {vault.id === current.id && <Check className="size-4 shrink-0 text-primary" />}
+              </span>
+              {vault.kind === 'aws' && <AwsMark className="size-4 shrink-0" title="Cofre AWS" />}
             </button>
             </TabMenu>
           ))}

@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.0.3
+
+Keyhold made your own: record types, an icon library, more icons and colours, in a new
+Personalização screen.
 
 ### New
 
@@ -11,7 +14,7 @@
 - **An icon library**: a picture used as an icon is kept, sealed, to be used again on any record
   or vault. The icon picker has two tabs, the system's icons and your own.
 - More than 270 icons to choose from, and fourteen colours instead of seven.
-- A pencil beside the vault's name edits its name, icon and colour without leaving the page.
+- "Editar cofre", beside the vault's name, changes its name, icon and colour without leaving the page.
 
 ### Changed
 
@@ -21,6 +24,8 @@
 - Everything that can be clicked shows the pointer, menu items and options included.
 - The countdown ring of a 2FA code runs clockwise.
 - The AWS confirmation dialog can copy its link, to confirm in another browser.
+- In the vault switcher the AWS mark is always at the end of the row, the check sits beside the
+  name, and a long name is cut instead of pushing them out.
 
 ## 1.0.2
 
