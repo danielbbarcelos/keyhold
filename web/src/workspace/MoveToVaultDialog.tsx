@@ -1,3 +1,4 @@
+import { FolderCombobox } from './FolderCombobox'
 import { useEffect, useState } from 'react'
 
 import {
@@ -132,20 +133,11 @@ export function MoveToVaultDialog({
 
             <div className="space-y-2">
               <Label>Pasta</Label>
-              <Select value={folderId} onValueChange={setFolderId}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="root">Raiz do cofre</SelectItem>
-                  {folders.map((folder) => (
-                    <SelectItem key={folder.id} value={folder.id}>
-                      {'\u00a0\u00a0\u00a0'.repeat(folder.depth)}
-                      {folder.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <FolderCombobox
+                folders={folders}
+                value={folderId === 'root' ? null : folderId}
+                onChange={(id) => setFolderId(id ?? 'root')}
+              />
             </div>
 
             {/*

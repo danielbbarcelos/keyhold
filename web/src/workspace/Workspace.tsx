@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api, type RecordPreview, type Status, type VaultSummary } from '../api'
 import { clearNow } from '../clipboard'
 import { AgentApproval } from './AgentApproval'
 import { AuditPanel } from './AuditPanel'
 import { CommandPalette } from './CommandPalette'
+import { Customise } from './Customise'
 import { DiscardDialog } from './DiscardDialog'
 import { Home, type Seen } from './Home'
 import { InstancesPanel } from './InstancesPanel'
@@ -54,7 +55,11 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   const [section, setSection] = useState('')
   // Which card Ajustes opens on; the counter makes a second "Abrir Contas AWS" land there again.
   const [settingsAt, setSettingsAt] = useState({
-    id: start.place === 'settings' && start.section ? start.section : 'aparencia',
+    id: start.place === 'settings' && start.section ? start.section : 'tranca',
+    n: 0,
+  })
+  const [customAt, setCustomAt] = useState({
+    id: start.place === 'custom' && start.section ? start.section : 'aparencia',
     n: 0,
   })
   const [dirty, setDirty] = useState(false)
@@ -149,10 +154,12 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       })
     } else if (place === 'settings') {
       rememberDestination({ place, section: settingsAt.id })
+    } else if (place === 'custom') {
+      rememberDestination({ place, section: customAt.id })
     } else {
       rememberDestination({ place })
     }
-  }, [place, vaultId, selection, settingsAt.id])
+  }, [place, vaultId, selection, settingsAt.id, customAt.id])
 
   const names = useMemo(() => {
     const out: Record<string, string> = {}
@@ -170,10 +177,26 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   }
 
   /** Ajustes, on one of its sections (the first one when none is said). */
-  function goSettings(id = 'aparencia') {
+  function goSettings(id = 'tranca') {
     setSettingsAt((current) => ({ id, n: current.n + 1 }))
     setPlace('settings')
   }
+
+  /** Personalização, on one of its sections. */
+  function goCustom(id = 'aparencia') {
+    setCustomAt((current) => ({ id, n: current.n + 1 }))
+    setPlace('custom')
+  }
+
+  // The icon picker lives deep inside dialogs and editors and asks for its library from there.
+  const goCustomRef = useRef<(id: string) => void>(() => undefined)
+  goCustomRef.current = (id) => guard(() => goCustom(id))
+  useEffect(() => {
+    const go = (event: Event) => goCustomRef.current((event as CustomEvent<string>).detail)
+    window.addEventListener('keyhold:customise', go)
+
+    return () => window.removeEventListener('keyhold:customise', go)
+  }, [])
 
   function openRecord(record: Pick<RecordPreview, 'id' | 'vault_id'>) {
     openVault(record.vault_id, { kind: 'record', id: record.id })
@@ -211,6 +234,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
           onVault={(id) => openVault(id)}
           onNewVault={() => setAskingVault(true)}
           onManageVaults={() => guard(() => goSettings('cofres'))}
+          onVaultsChanged={() => void refresh()}
           onSearch={search}
           onSeen={onSeen}
           onAccounts={() => guard(() => goSettings('aws'))}
@@ -248,6 +272,24 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
           <Body>
             <InstancesPanel />
           </Body>
+        </div>
+      )
+    }
+
+    if (place === 'custom') {
+      return (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <TopBar onSearch={search}>
+            <span>Personalização</span>
+            {section && <Crumb last>{section}</Crumb>}
+          </TopBar>
+          <Customise
+            initial={customAt.id}
+            request={customAt.n}
+            status={status}
+            onChanged={onChanged}
+            onSection={setSection}
+          />
         </div>
       )
     }
@@ -295,7 +337,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       <Rail
         place={place === 'vault' && !vault ? 'home' : place}
         status={status}
-        onGo={(next) => guard(() => (next === 'settings' ? goSettings() : setPlace(next)))}
+        onGo={(next) => guard(() => (next === 'settings' ? goSettings() : next === 'custom' ? goCustom() : setPlace(next)))}
         onSettings={(id) => guard(() => goSettings(id))}
         onLock={lock}
         onChanged={onChanged}

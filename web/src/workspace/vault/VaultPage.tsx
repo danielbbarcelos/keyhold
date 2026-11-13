@@ -54,6 +54,7 @@ import { RecordView } from '../record/RecordView'
 import { Crumb, TopBar, VaultSwitcher } from '../shell'
 import { toast, toastError } from '../toast'
 import { TrashPanel } from '../TrashPanel'
+import { EditVaultDialog } from '../VaultsPanel'
 import { FolderView } from './FolderView'
 import { folderChain, folderPath } from './paths'
 import { TreeCard, type Selection, type TreeFilter, type TreeMode } from './TreeCard'
@@ -72,6 +73,7 @@ export function VaultPage({
   onVault,
   onNewVault,
   onManageVaults,
+  onVaultsChanged,
   onSearch,
   onSeen,
   onAccounts,
@@ -85,6 +87,8 @@ export function VaultPage({
   onVault: (id: string) => void
   onNewVault: () => void
   onManageVaults: () => void
+  /** The vault's own name, icon or colour changed here: the workspace reads the list again. */
+  onVaultsChanged: () => void
   onSearch: () => void
   onSeen: (record: RecordPreview) => void
   /** Ajustes, at Contas AWS: where an expired AWS session is renewed. */
@@ -110,6 +114,13 @@ export function VaultPage({
   const [movingToVault, setMovingToVault] = useState<{ id: string; title: string } | null>(null)
   const [copying, setCopying] = useState<CopySource | null>(null)
   const [saving, setSaving] = useState(false)
+  // Something is being written or moved and the vault will be read again when it is done. In AWS
+  // that is a round trip or several, so the tree and the panel stand as skeletons meanwhile
+  // instead of showing the old state as if nothing were happening.
+  const [working, setWorking] = useState(0)
+  // "Clonar" reads the record before the editor can open.
+  const [preparing, setPreparing] = useState(false)
+  const [editingVault, setEditingVault] = useState(false)
   const [askingJson, setAskingJson] = useState(false)
   // "Excluir…" on the picked items: every record they reach, and the folders, deepest first.
   const [bulkDeleting, setBulkDeleting] = useState<{ records: string[]; folders: string[] } | null>(null)
@@ -120,6 +131,14 @@ export function VaultPage({
   // rather than an "empty vault" that is not empty.
   const [loaded, setLoaded] = useState(false)
   const aws = vault.kind === 'aws'
+  const busy = aws && (saving || working > 0)
+
+  /** Run something that ends in a fresh read of the vault, with the skeletons up while it runs. */
+  const work = <T,>(run: () => Promise<T>): Promise<T> => {
+    setWorking((n) => n + 1)
+
+    return run().finally(() => setWorking((n) => n - 1))
+  }
   const [origin, setOrigin] = useState('')
   const [leaving, setLeaving] = useState<(() => void) | null>(null)
   const dirty = editing !== null && JSON.stringify(editing) !== origin
@@ -440,6 +459,7 @@ export function VaultPage({
   }
 
   async function clone(id: string) {
+    setPreparing(true)
     try {
       const found = await api.openRecord(id)
       startCreating(
@@ -449,6 +469,8 @@ export function VaultPage({
       )
     } catch (cause) {
       toastError(cause)
+    } finally {
+      setPreparing(false)
     }
   }
 
@@ -503,7 +525,7 @@ export function VaultPage({
     if (recordIds.length === 0 && folderIds.length === 0) return
 
     if (recordIds.length === 1 && folderIds.length === 0) {
-      void moveTo(recordIds[0], folderId, confirmed)
+      void work(() => moveTo(recordIds[0], folderId, confirmed))
       return
     }
 
@@ -577,12 +599,12 @@ export function VaultPage({
         label: 'Mover para',
         icon: FolderInput,
         items: [
-          { label: 'Raiz do cofre', onSelect: run(() => void moveMany(top, null)) },
+          { label: 'Raiz do cofre', onSelect: run(() => void work(() => moveMany(top, null))) },
           ...folders
             .filter((folder) => !reached.has(folder.id))
             .map((folder) => ({
               label: `${'  '.repeat(folder.depth)}${folder.name}`,
-              onSelect: run(() => void moveMany(top, folder.id)),
+              onSelect: run(() => void work(() => moveMany(top, folder.id))),
             })),
         ],
       },
@@ -771,10 +793,10 @@ export function VaultPage({
       label: 'Mover para outra pasta',
       icon: FolderInput,
       items: [
-        { label: 'Raiz do cofre', onSelect: () => void moveTo(record.id, null) },
+        { label: 'Raiz do cofre', onSelect: () => void work(() => moveTo(record.id, null)) },
         ...folders.map((folder) => ({
           label: `${'  '.repeat(folder.depth)}${folder.name}`,
-          onSelect: () => void moveTo(record.id, folder.id),
+          onSelect: () => void work(() => moveTo(record.id, folder.id)),
         })),
       ],
     },
@@ -846,6 +868,16 @@ export function VaultPage({
         onManage={onManageVaults}
         onCopy={() => setCopying({ vaultId: vault.id, what: `o cofre ${vault.name}` })}
       />
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="-ml-1 shrink-0 text-faint hover:text-foreground"
+        aria-label="Editar cofre"
+        title="Editar cofre: nome, ícone e cor"
+        onClick={() => setEditingVault(true)}
+      >
+        <Pencil />
+      </Button>
       {chain.map((folder, index) => (
         <Crumb
           key={folder.id}
@@ -902,6 +934,10 @@ export function VaultPage({
 
     if (!loaded) {
       return openId ? <RecordSkeleton /> : <div className="h-full rounded-[14px] border border-dashed" />
+    }
+
+    if (busy || preparing) {
+      return <RecordSkeleton />
     }
 
     if (creating && editing) {
@@ -976,7 +1012,7 @@ export function VaultPage({
           }
           onReload={reloadOpen}
           onClone={() => void clone(open.id)}
-          onMoveToFolder={(folderId) => void moveTo(open.id, folderId)}
+          onMoveToFolder={(folderId) => void work(() => moveTo(open.id, folderId))}
           onMoveToVault={() => setMovingToVault({ id: open.id, title: open.payload.title })}
           onCopy={() => setCopying({ vaultId: vault.id, recordIds: [open.id], what: `“${open.payload.title}”` })}
           onTrash={() => setDeleting({ id: open.id, title: open.payload.title })}
@@ -1015,6 +1051,10 @@ export function VaultPage({
             Os registros deste cofre ficam disponíveis quando a sessão da AWS for renovada.
           </aside>
         ) : loaded ? (
+        <>
+        {/* Kept mounted while the skeleton stands in for it: which folders are closed, what was
+            typed in the search and what is picked all live inside the tree. */}
+        <div className={busy ? 'hidden' : 'contents'}>
         <TreeCard
           vaultId={vault.id}
           folders={folders}
@@ -1041,7 +1081,7 @@ export function VaultPage({
           onRecord={(id) => select({ kind: 'record', id })}
           onFolder={(id) => select({ kind: 'folder', id })}
           onTrash={() => select({ kind: 'trash' })}
-          onDrop={(items, folderId) => void moveMany(items, folderId)}
+          onDrop={(items, folderId) => void work(() => moveMany(items, folderId))}
           canMoveFolders
           pickedEntries={pickedEntries}
           folderEntries={folderEntries}
@@ -1051,6 +1091,9 @@ export function VaultPage({
             { kind: 'item', label: 'Novo registro na raiz', icon: Plus, onSelect: () => startCreating(emptyPayload(), null) },
           ]}
         />
+        </div>
+        {busy && <TreeSkeleton />}
+        </>
         ) : (
           <TreeSkeleton />
         )}
@@ -1060,6 +1103,18 @@ export function VaultPage({
       </div>
 
       {renewDialog}
+
+      {editingVault && (
+        <EditVaultDialog
+          vault={vault}
+          onDone={() => {
+            setEditingVault(false)
+            onVaultsChanged()
+            toast('Cofre salvo')
+          }}
+          onCancel={() => setEditingVault(false)}
+        />
+      )}
 
       <DiscardDialog
         open={leaving !== null}
@@ -1082,9 +1137,7 @@ export function VaultPage({
           onConfirm={(name, colour, segment) => {
             const parentId = asking.parentId
             setAsking(null)
-            void api
-              .createFolder(vault.id, name, parentId, colour, segment)
-              .then(refresh)
+            void work(() => api.createFolder(vault.id, name, parentId, colour, segment).then(refresh))
               .then(() => toast('Pasta criada', name))
               .catch((cause) => toastError(cause, 'Não foi possível criar a pasta'))
           }}
@@ -1104,7 +1157,7 @@ export function VaultPage({
               if (selection?.kind === 'folder' && selection.id === before) onSelect({ kind: 'folder', id: renamed.id })
               else if (selection?.kind === 'record') onSelect(null)
             }
-            void refresh()
+            void work(refresh)
           }}
           onCancel={() => setFolderAction(null)}
         />
@@ -1115,7 +1168,7 @@ export function VaultPage({
           folders={folders}
           onDone={() => {
             setFolderAction(null)
-            void refresh()
+            void work(refresh)
           }}
           onCancel={() => setFolderAction(null)}
         />
@@ -1127,7 +1180,7 @@ export function VaultPage({
           onDone={() => {
             if (selection?.kind === 'folder' && selection.id === folderAction.folder.id) onSelect(null)
             setFolderAction(null)
-            void refresh()
+            void work(refresh)
           }}
           onCancel={() => setFolderAction(null)}
         />
@@ -1153,7 +1206,7 @@ export function VaultPage({
                 onClick={() => {
                   const id = deleting.id
                   setDeleting(null)
-                  void sendToTrash(id)
+                  void work(() => sendToTrash(id))
                 }}
               >
                 {aws ? 'Excluir permanentemente' : 'Excluir registro'}
@@ -1191,7 +1244,7 @@ export function VaultPage({
                 onClick={() => {
                   const target = bulkDeleting
                   setBulkDeleting(null)
-                  void deleteMany(target)
+                  void work(() => deleteMany(target))
                 }}
               >
                 {aws ? 'Excluir permanentemente' : 'Excluir'}
@@ -1249,7 +1302,7 @@ export function VaultPage({
                   const { items, folderId } = movingAws
                   setMovingAws(null)
                   if (items.length === 1 && items[0].startsWith('r:')) void moveTo(items[0].slice(2), folderId, true)
-                  else void moveMany(items, folderId, true)
+                  else void work(() => moveMany(items, folderId, true))
                 }}
               >
                 Mover

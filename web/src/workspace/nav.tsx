@@ -12,13 +12,13 @@ import { RowMenu, type MenuEntry } from './menu'
  */
 export type Destination =
   | { place: 'home' | 'trail' | 'instances' }
-  | { place: 'settings'; section?: string }
+  | { place: 'settings' | 'custom'; section?: string }
   | { place: 'vault'; vault: string; record?: string; folder?: string; trash?: boolean }
 
 function encode(to: Destination): URLSearchParams {
   const params = new URLSearchParams({ at: to.place })
 
-  if (to.place === 'settings' && to.section) params.set('s', to.section)
+  if ((to.place === 'settings' || to.place === 'custom') && to.section) params.set('s', to.section)
   if (to.place === 'vault') {
     params.set('v', to.vault)
     if (to.record) params.set('r', to.record)
@@ -35,7 +35,7 @@ export function destinationFromLocation(): Destination {
   const at = params.get('at')
 
   if (at === 'trail' || at === 'instances') return { place: at }
-  if (at === 'settings') return { place: 'settings', section: params.get('s') ?? undefined }
+  if (at === 'settings' || at === 'custom') return { place: at, section: params.get('s') ?? undefined }
   if (at === 'vault' && params.get('v')) {
     return {
       place: 'vault',

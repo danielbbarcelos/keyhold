@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- **Personalização**, a new place on the rail beside Ajustes: appearance, record types, the icon
+  library and the standard alerts. Ajustes keeps what decides how the vault is protected.
+- **Record types are yours**: Login, Cartão, Chave SSH and Nota can be changed, reordered or
+  removed, and new ones made, each with its icon and the fields a new record starts with.
+- **An icon library**: a picture used as an icon is kept, sealed, to be used again on any record
+  or vault. The icon picker has two tabs, the system's icons and your own.
+- More than 270 icons to choose from, and fourteen colours instead of seven.
+- A pencil beside the vault's name edits its name, icon and colour without leaving the page.
+
+### Changed
+
+- Folders are picked by typing, in a searchable list, wherever something is moved or filed.
+- In an AWS vault the tree and the record stand as skeletons while something is saved, created,
+  moved or cloned, instead of showing the old state until AWS answers.
+- Everything that can be clicked shows the pointer, menu items and options included.
+- The countdown ring of a 2FA code runs clockwise.
+
 ## 1.0.2
 
 A security review of the whole project, and Windows starting on a machine that has nothing else

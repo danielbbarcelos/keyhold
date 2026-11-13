@@ -119,7 +119,7 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
       </CardContent>
 
       {renaming && (
-        <RenameDialog
+        <EditVaultDialog
           vault={renaming}
           onDone={() => {
             setRenaming(null)
@@ -155,7 +155,8 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
   )
 }
 
-function RenameDialog({
+/** A vault's name, icon and colour. Used in Ajustes and straight from the vault's own page. */
+export function EditVaultDialog({
   vault,
   onDone,
   onCancel,

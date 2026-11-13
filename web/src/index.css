@@ -49,6 +49,20 @@
     --color-rose-soft: var(--rose-soft);
     --color-amber: var(--amber);
     --color-amber-soft: var(--amber-soft);
+    --color-teal: var(--teal);
+    --color-teal-soft: var(--teal-soft);
+    --color-indigo: var(--indigo);
+    --color-indigo-soft: var(--indigo-soft);
+    --color-orange: var(--orange);
+    --color-orange-soft: var(--orange-soft);
+    --color-pink: var(--pink);
+    --color-pink-soft: var(--pink-soft);
+    --color-lime: var(--lime);
+    --color-lime-soft: var(--lime-soft);
+    --color-cyan: var(--cyan);
+    --color-cyan-soft: var(--cyan-soft);
+    --color-ruby: var(--ruby);
+    --color-ruby-soft: var(--ruby-soft);
     --shadow-pop: var(--shadow-pop);
     --color-chart-5: var(--chart-5);
     --color-chart-4: var(--chart-4);
@@ -144,6 +158,13 @@
     --mint: #2e8f67; --mint-soft: #e4f4ec;
     --rose: #c2485e; --rose-soft: #fbe9ec;
     --amber: #a8730f; --amber-soft: #fbf0d9;
+    --teal: #1f8a8a; --teal-soft: #e0f3f2;
+    --indigo: #4f56b8; --indigo-soft: #e9eafa;
+    --orange: #c2611a; --orange-soft: #fcebdd;
+    --pink: #b8478f; --pink-soft: #fae8f3;
+    --lime: #6b8a1f; --lime-soft: #eef4dc;
+    --cyan: #1d7fa8; --cyan-soft: #e0f1f8;
+    --ruby: #b3362f; --ruby-soft: #fae6e4;
 }
 
 .dark {
@@ -195,6 +216,13 @@
     --mint: #62be97; --mint-soft: rgb(98 190 151 / 13%);
     --rose: #e2788b; --rose-soft: rgb(226 120 139 / 13%);
     --amber: #e8b04b; --amber-soft: rgb(232 176 75 / 13%);
+    --teal: #5fc4c0; --teal-soft: rgb(95 196 192 / 13%);
+    --indigo: #9aa0ec; --indigo-soft: rgb(154 160 236 / 13%);
+    --orange: #eb9a5c; --orange-soft: rgb(235 154 92 / 13%);
+    --pink: #e389c0; --pink-soft: rgb(227 137 192 / 13%);
+    --lime: #a9c75a; --lime-soft: rgb(169 199 90 / 13%);
+    --cyan: #63bfe2; --cyan-soft: rgb(99 191 226 / 13%);
+    --ruby: #e87a70; --ruby-soft: rgb(232 122 112 / 13%);
 }
 
 /* Accents. Âmbar is the logo's colour and the default; the others swap the same tokens. */
@@ -232,22 +260,33 @@
  * unmodified, so the one place that can state this for all of them — including the ones a future
  * `shadcn add` brings in — is the stylesheet.
  */
-@layer base {
-  button:not(:disabled),
-  [role='button']:not([aria-disabled='true']),
-  [role='option'],
-  [role='menuitem'],
-  summary,
-  label[for],
-  a[href] {
-    cursor: pointer;
-  }
+/*
+ * Outside any layer on purpose: the components ship `cursor-default` as a utility on menu items,
+ * options and list items, and a rule in a layer loses to a utility. Unlayered, this one wins.
+ */
+button:not(:disabled),
+[role='button'],
+[role='option'],
+[role='menuitem'],
+[role='menuitemcheckbox'],
+[role='menuitemradio'],
+[role='tab'],
+[role='combobox'],
+[role='checkbox'],
+[role='radio'],
+[role='switch'],
+[cmdk-item],
+summary,
+label[for],
+label:has(input, [role='checkbox'], [role='switch'], [role='radio']),
+a[href] {
+  cursor: pointer;
+}
 
-  button:disabled,
-  [role='button'][aria-disabled='true'],
-  [data-disabled] {
-    cursor: not-allowed;
-  }
+button:disabled,
+[aria-disabled='true'],
+[data-disabled]:not([data-disabled='false']) {
+  cursor: not-allowed;
 }
 
 /*

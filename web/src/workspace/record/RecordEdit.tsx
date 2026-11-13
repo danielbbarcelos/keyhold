@@ -1,21 +1,15 @@
+import { FolderCombobox } from '../FolderCombobox'
 import { useState } from 'react'
-import { CreditCard, FileText, KeyRound, SquareDashed, Terminal } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { SquareDashed } from 'lucide-react'
 
 import { DatePicker } from '@/components/common/DatePicker'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 
 import type { Field, FolderNode, Payload } from '../../api'
-import { fieldsOf, TEMPLATES } from '../fields'
+import { fieldsOfType, useCustom } from '../custom'
+import { RecordTile } from '../icons'
 import { IconPicker } from '../IconPicker'
 import { Checkbox } from '@/components/ui/checkbox'
 import { awsPathOf, AwsNameField, join, leafOf, suggestName, titleProblem } from '../awsName'
@@ -43,15 +37,6 @@ export function renameOf(draft: EditDraft, originalTitle: string): string | null
   if (!draft.rename || !asked) return null
 
   return draft.leaf ?? suggestName(draft.payload.title)
-}
-
-const ROOT = '__root__'
-
-const TEMPLATE_ICONS: Record<string, LucideIcon> = {
-  login: KeyRound,
-  cartao: CreditCard,
-  ssh: Terminal,
-  nota: FileText,
 }
 
 /** A field somebody already filled in, which switching template keeps. */
@@ -82,17 +67,24 @@ export function RecordEdit({
   const [template, setTemplate] = useState(creating?.cloning ? '' : 'branco')
   const titleWrong = aws ? titleProblem(draft.payload.title) : null
 
-  /** Templates only add fields: switching keeps whatever was already filled in. */
+  const { types } = useCustom()
+  // The icon a type put there. Switching type takes it along; an icon the person chose stays.
+  const [typeIcon, setTypeIcon] = useState<string | null>(null)
+
+  /** A type only adds fields: switching keeps whatever was already filled in. */
   function pick(id: string) {
-    const chosen = TEMPLATES.find((one) => one.id === id)
+    const chosen = types.find((one) => one.id === id)
+    const untouched = draft.payload.icon === null || JSON.stringify(draft.payload.icon) === typeIcon
+    const icon = untouched ? (chosen?.icon.name || chosen?.icon.image ? chosen.icon : null) : draft.payload.icon
 
     setTemplate(id)
+    if (untouched) setTypeIcon(icon ? JSON.stringify(icon) : null)
     onChange({
       ...draft,
       payload: {
         ...draft.payload,
-        fields: [...draft.payload.fields.filter(isFilled), ...(chosen ? fieldsOf(chosen) : [])],
-        icon: draft.payload.icon ?? (chosen ? { name: chosen.icon, colour: chosen.colour } : null),
+        fields: [...draft.payload.fields.filter(isFilled), ...(chosen ? fieldsOfType(chosen) : [])],
+        icon,
       },
     })
   }
@@ -131,23 +123,11 @@ export function RecordEdit({
           <div className="flex flex-wrap items-start gap-4">
             <label className="grid w-[220px] gap-1.5">
               <span className="text-[13px] font-medium">Pasta</span>
-              <Select
-                value={draft.folderId ?? ROOT}
-                onValueChange={(value) => onChange({ ...draft, folderId: value === ROOT ? null : value })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ROOT}>Raiz do cofre</SelectItem>
-                  {folders.map((folder) => (
-                    <SelectItem key={folder.id} value={folder.id}>
-                      {'  '.repeat(folder.depth)}
-                      {folder.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <FolderCombobox
+                folders={folders}
+                value={draft.folderId}
+                onChange={(folderId) => onChange({ ...draft, folderId })}
+              />
               {aws && !creating && (
                 <span className="text-xs text-faint">Mudar a pasta na AWS exclui o histórico do nome antigo.</span>
               )}
@@ -165,11 +145,16 @@ export function RecordEdit({
           <div className="grid gap-1.5 border-t px-5 py-3.5">
             <span className="text-[13px] font-medium">Começar com</span>
             <div className="flex flex-wrap gap-1.5">
-              <Chip on={template === 'branco'} icon={SquareDashed} onClick={() => pick('branco')}>
+              <Chip on={template === 'branco'} icon={<SquareDashed className="size-3.5" />} onClick={() => pick('branco')}>
                 Em branco
               </Chip>
-              {TEMPLATES.map((one) => (
-                <Chip key={one.id} on={template === one.id} icon={TEMPLATE_ICONS[one.id] ?? FileText} onClick={() => pick(one.id)}>
+              {types.map((one) => (
+                <Chip
+                  key={one.id}
+                  on={template === one.id}
+                  icon={<RecordTile icon={one.icon} size="xs" className="-ml-1.5 size-5 rounded-full [&_svg]:size-3" />}
+                  onClick={() => pick(one.id)}
+                >
                   {one.label}
                 </Chip>
               ))}
@@ -205,12 +190,12 @@ export function RecordEdit({
 
 function Chip({
   on,
-  icon: Icon,
+  icon,
   onClick,
   children,
 }: {
   on: boolean
-  icon: LucideIcon
+  icon: React.ReactNode
   onClick: () => void
   children: React.ReactNode
 }) {
@@ -224,7 +209,7 @@ function Chip({
         on ? 'border-transparent bg-primary-soft text-primary-text' : 'text-muted-foreground hover:bg-hover hover:text-foreground',
       )}
     >
-      <Icon className="size-3.5" />
+      {icon}
       {children}
     </button>
   )

@@ -102,6 +102,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/settings/layout", put(set_layout))
         .route("/alerts", get(alert_presets))
         .route("/alerts", put(set_alert_presets))
+        .route("/custom/icons", get(custom_icons))
+        .route("/custom/icons", put(set_custom_icons))
+        .route("/custom/types", get(record_types))
+        .route("/custom/types", put(set_record_types))
+        .route("/custom/types", delete(reset_record_types))
         .route("/audit", get(read_audit))
         .route("/audit/integrity", get(audit_integrity))
         .route("/agent", get(agent_status))
@@ -1154,6 +1159,74 @@ async fn set_alert_presets(State(state): State<Arc<AppState>>, Json(body): Json<
         .map_err(bad_request)?;
 
     Ok(Json(json!({ "presets": presets })))
+}
+
+/// The icon library. Sealed, so only while unlocked.
+async fn custom_icons(State(state): State<Arc<AppState>>) -> Answer {
+    let store = state.store.lock().unwrap();
+    let icons = state
+        .lock
+        .with_key(|key| crate::custom::load_icons(&store, key))
+        .ok_or_else(locked)?
+        .map_err(bad_request)?;
+
+    Ok(Json(json!({ "icons": icons })))
+}
+
+#[derive(Deserialize)]
+struct CustomIcons {
+    icons: Vec<crate::custom::CustomIcon>,
+}
+
+async fn set_custom_icons(State(state): State<Arc<AppState>>, Json(body): Json<CustomIcons>) -> Answer {
+    let store = state.store.lock().unwrap();
+    let icons = state
+        .lock
+        .with_key(|key| crate::custom::save_icons(&store, key, body.icons))
+        .ok_or_else(locked)?
+        .map_err(bad_request)?;
+
+    Ok(Json(json!({ "icons": icons })))
+}
+
+/// The kinds of record a new one can start as. Sealed, so only while unlocked.
+async fn record_types(State(state): State<Arc<AppState>>) -> Answer {
+    let store = state.store.lock().unwrap();
+    let types = state
+        .lock
+        .with_key(|key| crate::custom::load_types(&store, key))
+        .ok_or_else(locked)?
+        .map_err(bad_request)?;
+
+    Ok(Json(json!({ "types": types })))
+}
+
+#[derive(Deserialize)]
+struct RecordTypes {
+    types: Vec<crate::custom::RecordType>,
+}
+
+async fn set_record_types(State(state): State<Arc<AppState>>, Json(body): Json<RecordTypes>) -> Answer {
+    let store = state.store.lock().unwrap();
+    let types = state
+        .lock
+        .with_key(|key| crate::custom::save_types(&store, key, body.types))
+        .ok_or_else(locked)?
+        .map_err(bad_request)?;
+
+    Ok(Json(json!({ "types": types })))
+}
+
+/// Back to the kinds Keyhold starts with.
+async fn reset_record_types(State(state): State<Arc<AppState>>) -> Answer {
+    let store = state.store.lock().unwrap();
+    let types = state
+        .lock
+        .with_key(|key| crate::custom::reset_types(&store).and_then(|()| crate::custom::load_types(&store, key)))
+        .ok_or_else(locked)?
+        .map_err(bad_request)?;
+
+    Ok(Json(json!({ "types": types })))
 }
 
 async fn make_password(Json(recipe): Json<Recipe>) -> Answer {

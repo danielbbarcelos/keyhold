@@ -120,47 +120,6 @@ export function primaryField(fields: Field[]): Field | undefined {
   return secrets.find((f) => f.primary) ?? secrets[0]
 }
 
-/**
- * Starting points for a new record. A template is not a type: it only adds fields, and the record
- * is free to lose or gain any of them afterwards.
- */
-export interface Template {
-  id: string
-  label: string
-  icon: string
-  colour: string
-  fields: Array<[FieldKind, string?]>
-}
-
-export const TEMPLATES: Template[] = [
-  {
-    id: 'login',
-    label: 'Login',
-    icon: 'key-round',
-    colour: 'sky',
-    fields: [['email'], ['password'], ['url'], ['totp']],
-  },
-  {
-    id: 'cartao',
-    label: 'Cartão',
-    icon: 'credit-card',
-    colour: 'mint',
-    fields: [['card'], ['phone', 'Central de atendimento']],
-  },
-  {
-    id: 'ssh',
-    label: 'Chave SSH',
-    icon: 'terminal',
-    colour: 'stone',
-    fields: [['text', 'Servidor'], ['text', 'Usuário'], ['multiline_hidden', 'Chave privada'], ['password', 'Frase secreta']],
-  },
-  { id: 'nota', label: 'Nota', icon: 'file-text', colour: 'sand', fields: [['multiline_hidden', 'Nota']] },
-]
-
-export function fieldsOf(template: Template): Field[] {
-  return template.fields.map(([kind, label]) => ({ ...newField(kind), ...(label ? { label } : {}) }))
-}
-
 export function emptyPayload(): Payload {
   return { title: '', notes: '', fields: [], icon: null }
 }

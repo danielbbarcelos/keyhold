@@ -8,7 +8,6 @@ import {
   KeyRound,
   Loader2,
   Lock,
-  Palette,
   RefreshCw,
   ScrollText,
   ShieldCheck,
@@ -16,7 +15,6 @@ import {
   Trash2,
   Vault,
   Wand2,
-  ShieldAlert,
   WandSparkles,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -73,7 +71,6 @@ import {
 import { askToNotify, notifyState, type NotifyState } from '../notify'
 import { AwsAccounts } from './AwsAccounts'
 import { toastError } from './toast'
-import { AlertPresetsPanel } from './record/Alerts'
 import { GeneratorControls, StrengthBar } from './PasswordGenerator'
 import { AwsMark } from './AwsMark'
 import { linkProps, TabMenu } from './nav'
@@ -107,12 +104,10 @@ function AwsNavMark({ className }: { className?: string }) {
 }
 
 const SECTIONS: Array<{ id: string; label: string; icon: LucideIcon | typeof AwsNavMark }> = [
-  { id: 'aparencia', label: 'Aparência', icon: Palette },
   { id: 'tranca', label: 'Tranca automática', icon: Timer },
   { id: 'segundo-fator', label: 'Segundo fator', icon: ShieldCheck },
   { id: 'senha', label: 'Senha-mestra', icon: KeyRound },
   { id: 'cofres', label: 'Cofres', icon: Vault },
-  { id: 'alertas', label: 'Alertas', icon: ShieldAlert },
   { id: 'gerador', label: 'Gerador de senhas', icon: WandSparkles },
   { id: 'aws', label: 'Contas AWS', icon: AwsNavMark },
   { id: 'chaves', label: 'Troca de chave', icon: RefreshCw },
@@ -126,7 +121,7 @@ const SECTIONS: Array<{ id: string; label: string; icon: LucideIcon | typeof Aws
  * The sections are cards in their own files, and they are flattened here rather than one by one:
  * a page of settings reads as one document with dividers, not a stack of boxes.
  */
-const FLAT =
+export const FLAT =
   '[&_[data-slot=card]]:gap-4 [&_[data-slot=card]]:rounded-[14px] [&_[data-slot=card]]:border [&_[data-slot=card]]:bg-card [&_[data-slot=card]]:py-5 [&_[data-slot=card]]:shadow-none [&_[data-slot=card]]:ring-0 ' +
   '[&_[data-slot=card-header]]:px-5 [&_[data-slot=card-content]]:px-5 [&_[data-slot=card-footer]]:border-0 [&_[data-slot=card-footer]]:bg-transparent [&_[data-slot=card-footer]]:px-5 [&_[data-slot=card-footer]]:pt-1 ' +
   '[&_[data-slot=card-title]]:text-[15px] [&_[data-slot=card-title]]:font-semibold [&_[data-slot=card-title]>svg]:hidden [&_[data-slot=card-description]]:max-w-2xl [&_[data-slot=card-description]]:text-[13px]'
@@ -156,12 +151,10 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
   }, [request])
 
   const sections: Record<string, React.ReactNode> = {
-    aparencia: <AppearanceSettings appearance={status.appearance} onChanged={onChanged} />,
     tranca: <AutoLock policy={status.lock.policy} onChanged={onChanged} />,
     'segundo-fator': <SecondFactor status={status} onChanged={onChanged} />,
     senha: <MasterPassword status={status} onChanged={onChanged} />,
     cofres: <VaultsPanel vaults={vaults} onChanged={onVaultsChanged} />,
-    alertas: <AlertPresetsPanel />,
     gerador: <GeneratorSettings recipe={status.generator} onChanged={onChanged} />,
     aws: <AwsAccounts vaults={vaults} />,
     chaves: <Rotation vaults={vaults} onChanged={onVaultsChanged} />,
@@ -227,7 +220,7 @@ const ACCENTS: Array<{ value: Accent; label: string; colour: string }> = [
  * Theme and accent. Saved by the binary, so the unlock screen opens in the same colours, and applied
  * the moment it is picked rather than after a round trip.
  */
-function AppearanceSettings({
+export function AppearanceSettings({
   appearance,
   onChanged,
 }: {

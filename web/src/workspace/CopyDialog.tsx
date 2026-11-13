@@ -1,3 +1,4 @@
+import { FolderCombobox } from './FolderCombobox'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, CircleAlert, Copy, Loader2 } from 'lucide-react'
 
@@ -12,13 +13,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
 import {
@@ -433,19 +427,13 @@ export function CopyDialog({
 
               <label className="grid gap-1.5">
                 <span className="text-[13px] font-medium">{destAws ? 'Caminho de destino' : 'Pasta de destino'}</span>
-                <Select value={destFolder} onValueChange={setDestFolder}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ROOT}>{destAws ? '/ (raiz da conta)' : 'Raiz do cofre'}</SelectItem>
-                    {folders.map((folder) => (
-                      <SelectItem key={folder.id} value={folder.id}>
-                        {`${'  '.repeat(folder.depth)}${folder.name}`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <FolderCombobox
+                  label={destAws ? 'Caminho de destino' : 'Pasta de destino'}
+                  rootLabel={destAws ? '/ (raiz da conta)' : 'Raiz do cofre'}
+                  folders={folders}
+                  value={destFolder === ROOT ? null : destFolder}
+                  onChange={(id) => setDestFolder(id ?? ROOT)}
+                />
                 <span className="text-xs text-faint">
                   {source.folderId
                     ? 'A pasta é copiada inteira, com as subpastas, para dentro desta.'

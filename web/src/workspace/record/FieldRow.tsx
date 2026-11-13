@@ -311,7 +311,8 @@ function Totp({ recordId, trail, index, label }: { recordId?: string; trail?: st
         <span className="font-mono text-lg tracking-[0.12em]">{shown}</span>
         <span
           className="grid size-5 place-items-center rounded-full"
-          style={{ background: `conic-gradient(var(--primary) 0 ${share * 100}%, var(--border) ${share * 100}% 100%)` }}
+          // What has gone by grows clockwise from the top, the way a clock hand moves.
+          style={{ background: `conic-gradient(var(--border) 0 ${(1 - share) * 100}%, var(--primary) ${(1 - share) * 100}% 100%)` }}
         >
           <i className="size-3.5 rounded-full bg-card" />
         </span>

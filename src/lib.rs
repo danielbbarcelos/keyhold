@@ -19,6 +19,7 @@ pub mod audit;
 pub mod aws;
 pub mod clipboard;
 pub mod crypto;
+pub mod custom;
 pub mod db;
 pub mod encoding;
 pub mod generator;

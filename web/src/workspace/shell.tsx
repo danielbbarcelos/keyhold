@@ -11,6 +11,7 @@ import {
   ScrollText,
   Search,
   Settings2,
+  Paintbrush,
   SlidersHorizontal,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -35,12 +36,13 @@ import { LogoIcon } from './Logo'
  * What belongs to a vault (its records, favourites, attention, trash) lives inside the vault page,
  * not on the rail; switching vaults is the first step of the path in the top bar.
  */
-export type Place = 'home' | 'vault' | 'trail' | 'instances' | 'settings'
+export type Place = 'home' | 'vault' | 'trail' | 'instances' | 'custom' | 'settings'
 
 const RAIL: Array<{ id: Exclude<Place, 'vault'>; label: string; icon: LucideIcon }> = [
   { id: 'home', label: 'Início', icon: Home },
   { id: 'trail', label: 'Trilha', icon: ScrollText },
   { id: 'instances', label: 'Instâncias', icon: Cpu },
+  { id: 'custom', label: 'Personalizar', icon: Paintbrush },
   { id: 'settings', label: 'Ajustes', icon: SlidersHorizontal },
 ]
 
@@ -61,7 +63,7 @@ export function Rail({
   onChanged: () => void
 }) {
   return (
-    <nav className="flex min-h-0 flex-col items-center gap-1.5 border-r bg-sidebar px-3 pt-4 pb-3">
+    <nav className="flex min-h-0 flex-col items-center gap-1.5 border-r bg-sidebar px-2 pt-4 pb-3">
       <span className="mb-4 grid size-9 place-items-center">
         <LogoIcon className="size-9" />
       </span>
@@ -73,9 +75,9 @@ export function Rail({
           aria-current={place === id}
           {...linkProps({ place: id }, () => onGo(id))}
           className={cn(
-            'relative flex w-16 flex-col items-center gap-1 rounded-[10px] pt-2.5 pb-2 text-[11px] font-medium text-faint hover:bg-hover hover:text-foreground',
+            'relative flex w-[72px] flex-col items-center gap-1 rounded-[10px] pt-2.5 pb-2 text-[11px] font-medium text-faint hover:bg-hover hover:text-foreground',
             place === id &&
-              'bg-card text-foreground ring-1 ring-border before:absolute before:top-3 before:bottom-3 before:-left-3 before:w-[3px] before:rounded-r before:bg-primary',
+              'bg-card text-foreground ring-1 ring-border before:absolute before:top-3 before:bottom-3 before:-left-2 before:w-[3px] before:rounded-r before:bg-primary',
           )}
         >
           <Icon className="size-[18px]" />

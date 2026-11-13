@@ -78,6 +78,22 @@ export interface Alert {
   text: string
 }
 
+/** A picture kept in the person's icon library, to be used on any record or vault. */
+export interface CustomIcon {
+  id: string
+  name: string
+  /** A `data:image/...` address. */
+  image: string
+}
+
+/** A kind of record: where a new one starts. The record owes it nothing afterwards. */
+export interface RecordType {
+  id: string
+  label: string
+  icon: RecordIcon
+  fields: Array<{ kind: FieldKind; label: string }>
+}
+
 export interface AlertPreset {
   id: string
   colour: string
@@ -781,6 +797,16 @@ export const api = {
   saveGenerator: (recipe: Recipe) => call<{ generator: Recipe }>('PUT', '/api/settings/generator', recipe),
 
   saveLayout: (layout: Layout) => call<{ layout: Layout }>('PUT', '/api/settings/layout', layout),
+
+  customIcons: () => call<{ icons: CustomIcon[] }>('GET', '/api/custom/icons'),
+
+  saveCustomIcons: (icons: CustomIcon[]) => call<{ icons: CustomIcon[] }>('PUT', '/api/custom/icons', { icons }),
+
+  recordTypes: () => call<{ types: RecordType[] }>('GET', '/api/custom/types'),
+
+  saveRecordTypes: (types: RecordType[]) => call<{ types: RecordType[] }>('PUT', '/api/custom/types', { types }),
+
+  resetRecordTypes: () => call<{ types: RecordType[] }>('DELETE', '/api/custom/types'),
 
   alertPresets: () => call<{ presets: AlertPreset[] }>('GET', '/api/alerts'),
 

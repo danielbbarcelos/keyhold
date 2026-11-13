@@ -1,3 +1,4 @@
+import { FolderCombobox } from './FolderCombobox'
 import { useState } from 'react'
 
 import {
@@ -12,13 +13,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 
 import { api, ApiError, type FolderNode } from '../api'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -185,22 +179,12 @@ export function MoveFolderDialog({
 
         <div className="space-y-2">
           <Label>Destino</Label>
-          <Select value={parentId} onValueChange={setParentId}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="root">Raiz do cofre</SelectItem>
-              {folders
-                .filter((candidate) => !descendants.has(candidate.id))
-                .map((candidate) => (
-                  <SelectItem key={candidate.id} value={candidate.id}>
-                    {'\u00a0\u00a0\u00a0'.repeat(candidate.depth)}
-                    {candidate.name}
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
+          <FolderCombobox
+            label="Destino"
+            folders={folders.filter((candidate) => !descendants.has(candidate.id))}
+            value={parentId === 'root' ? null : parentId}
+            onChange={(id) => setParentId(id ?? 'root')}
+          />
 
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
