@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.5
+
+AWS vaults that start at a path, for roles allowed only one branch of an account.
+
+### New
+
+- **Caminho na AWS** when making an AWS vault. Empty is the whole account, as before. A role that
+  may only read one branch, such as `/shared`, could not open a vault at all, because the vault
+  listed the account from `/`. With the path, the vault lists from there, shows what is under it
+  as its top folders, and creates everything new inside it.
+- The new vault dialog asks you to confirm that account, region, path and bucket do not change
+  once the vault exists. Only its name and icon do.
+
+### Changed
+
+- Account and role are chosen in comboboxes with search, in Contas AWS and in the new vault
+  dialog, which is also wider.
+- An AWS vault that cannot be opened says why: an expired session, a path the role may not read,
+  access denied or no answer, each with its own title. A refusal is no longer called "no answer".
+
+### Fixed
+
+- The lock in the rail empties clockwise, like the 2FA code's ring.
+
 ## 1.0.4
 
 Pictures as icons in AWS vaults, vaults and icons listed by name, and a switch for the browser's
