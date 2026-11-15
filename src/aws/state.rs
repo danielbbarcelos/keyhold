@@ -89,6 +89,11 @@ pub struct Inner {
     pub snapshots: HashMap<String, Arc<Snapshot>>,
     /// Tags, by `<vault id>|<parameter name>`, with when they were read.
     pub tags: HashMap<String, (u64, Vec<Tag>)>,
+    /// What a parameter's history said about it (description, key, tier), by
+    /// `<vault id>|<parameter name>`, for a role that may not call DescribeParameters. Good for as
+    /// long as the parameter is at the version it was read at, so it is checked against the
+    /// listing rather than against a clock.
+    pub history_metadata: HashMap<String, ParameterMetadata>,
 }
 
 impl Inner {
@@ -247,6 +252,7 @@ impl AwsState {
             + inner.credentials.len()
             + inner.snapshots.len()
             + inner.tags.len()
+            + inner.history_metadata.len()
     }
 }
 

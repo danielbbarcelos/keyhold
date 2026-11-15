@@ -901,9 +901,11 @@ fn target_attachment(id: &str) -> Result<(String, String), Failure> {
 /// The whole vault, read once: GetParametersByPath from `/` (A6), and the description and key of
 /// those parameters, and only those, from DescribeParameters.
 ///
-/// A failed DescribeParameters still gives a listing (titled by name), with the failure kept in
-/// `metadata_error` so that nothing that needs a key decides from an empty map. Such a snapshot is
-/// not cached: the next request tries again rather than living with a throttle for ten seconds.
+/// A role that may not call DescribeParameters (one given a single branch of the account) gets
+/// the same from each parameter's history instead. When neither can be read there is still a
+/// listing, titled by name, with the failure kept in `metadata_error` so that nothing that needs a
+/// key decides from an empty map. Such a snapshot is not cached: the next request tries again
+/// rather than living with a throttle for ten seconds.
 async fn snapshot(state: &AppState, place: &Place) -> Result<Arc<Snapshot>, Failure> {
     let now = now_unix();
     let cached = state
@@ -932,6 +934,15 @@ async fn snapshot(state: &AppState, place: &Place) -> Result<Arc<Snapshot>, Fail
                 .collect(),
             None,
         ),
+        // A role given one branch of the account cannot call DescribeParameters at all: AWS only
+        // grants it for the whole account. What it can read is each parameter's own history, and
+        // the newest entry there carries the same description and key. Without this, such a vault
+        // would show parameter names where the titles and the folder labels belong.
+        Err(AwsError::AccessDenied(detail)) => {
+            let (found, failed) = metadata_from_history(state, place, &parameters).await;
+
+            (found, failed.then(|| AwsError::AccessDenied(detail)))
+        }
         Err(error) => (HashMap::new(), Some(error)),
     };
 
@@ -945,6 +956,75 @@ async fn snapshot(state: &AppState, place: &Place) -> Result<Arc<Snapshot>, Fail
     }
 
     Ok(fresh)
+}
+
+/// How many histories are read at once. Enough to open a vault of a few hundred parameters in a
+/// couple of seconds, well under what Parameter Store allows an account per second.
+const HISTORY_AT_ONCE: usize = 8;
+
+/// The description, key and tier of every parameter of a listing, read from each one's history.
+///
+/// Only the parameters whose version changed since the last time are asked about: a history is one
+/// request per parameter, and a vault is read again every minute. The answer says whether anything
+/// could not be read, in which case what was read is still used for titles, and the listing is
+/// treated as incomplete by everything that needs a key.
+async fn metadata_from_history(
+    state: &AppState,
+    place: &Place,
+    parameters: &[Parameter],
+) -> (HashMap<String, ParameterMetadata>, bool) {
+    let cache_key = |name: &str| format!("{}|{name}", place.vault_id);
+
+    let known: HashMap<String, ParameterMetadata> = state
+        .aws
+        .with(&state.lock, |inner| {
+            parameters
+                .iter()
+                .filter_map(|p| {
+                    let kept = inner.history_metadata.get(&cache_key(&p.name))?;
+                    (kept.version == p.version).then(|| (p.name.clone(), kept.clone()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let limit = Arc::new(tokio::sync::Semaphore::new(HISTORY_AT_ONCE));
+    let mut reading = tokio::task::JoinSet::new();
+    for parameter in parameters.iter().filter(|p| !known.contains_key(&p.name)) {
+        let (ssm, limit, name) = (place.ssm.clone(), limit.clone(), parameter.name.clone());
+        reading.spawn(async move {
+            let _turn = limit.acquire().await;
+
+            ssm.latest_history(&name).await
+        });
+    }
+
+    let mut found = known;
+    let mut fresh = Vec::new();
+    let mut failed = false;
+    while let Some(read) = reading.join_next().await {
+        match read {
+            Ok(Ok(Some(entry))) => fresh.push(entry.metadata()),
+            // Gone between the listing and now: nothing to say about it.
+            Ok(Ok(None)) | Ok(Err(AwsError::NotFound(_))) => {}
+            _ => failed = true,
+        }
+    }
+
+    state.aws.with(&state.lock, |inner| {
+        // What is no longer in the vault is forgotten with it.
+        let prefix = cache_key("");
+        let present: std::collections::HashSet<String> = parameters.iter().map(|p| cache_key(&p.name)).collect();
+        inner.history_metadata.retain(|key, _| !key.starts_with(&prefix) || present.contains(key));
+
+        for metadata in &fresh {
+            inner.history_metadata.insert(cache_key(&metadata.name), metadata.clone());
+        }
+    });
+
+    found.extend(fresh.into_iter().map(|metadata| (metadata.name.clone(), metadata)));
+
+    (found, failed)
 }
 
 /// A listing AWS refused. The role answered, so this is never "no answer", and renewing the

@@ -1849,7 +1849,9 @@ async fn a_copy_into_aws_without_a_bucket_or_keys_is_stopped_before_anything_is_
     let h = start(
         |ssm| {
             account(ssm);
+            // Neither way of reading a key: describe, nor each parameter's history.
             ssm.describe_denied = true;
+            ssm.history_denied = true;
         },
         None,
         None,
@@ -2323,4 +2325,50 @@ async fn a_vault_rooted_at_a_branch_draws_it_as_its_top_and_writes_inside_it() {
     );
     assert_eq!(aws["rename_with_title"], true);
     assert_eq!(h.get(&format!("/vaults/{}/folders", h.vault)).await.status, 200);
+}
+
+#[tokio::test]
+async fn a_role_that_cannot_describe_still_gets_titles_and_folder_labels_from_history() {
+    // What IAM really gives a role scoped to one branch: no DescribeParameters at all, which AWS
+    // only grants for the whole account.
+    let h = start_at(
+        |ssm| {
+            client_account(ssm);
+            ssm.seed("/shared/acessos-externos/.keep", "keyhold", Some("Acessos externos"), "alias/aws/ssm", &[]);
+            ssm.describe_denied = true;
+        },
+        None,
+        None,
+        Some("/shared"),
+    )
+    .await;
+    let histories = |h: &Harness| h.with_ssm(|ssm| ssm.calls.iter().filter(|(op, _)| op == "GetParameterHistory").count());
+
+    let records = h.get(&format!("/vaults/{}/records", h.vault)).await;
+    assert_eq!(records.status, 200, "{}", records.body);
+    let titles: Vec<&str> = records.body["records"].as_array().unwrap().iter().map(|r| r["title"].as_str().unwrap()).collect();
+    assert!(titles.contains(&"GitHub · token de deploy"), "the description is the title: {titles:?}");
+
+    let folders = h.get(&format!("/vaults/{}/folders", h.vault)).await;
+    let names: Vec<&str> = folders.body["folders"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"Acessos externos"), "the folder wears its label: {names:?}");
+
+    // One history per parameter, once. Reading the vault again asks about none of them.
+    let read = histories(&h);
+    assert_eq!(read, 4, "the three records and the folder's marker");
+    h.state.aws.invalidate(&h.vault);
+    h.get(&format!("/vaults/{}/records", h.vault)).await;
+    assert_eq!(histories(&h), read, "nothing changed, so nothing is read again");
+
+    // A parameter that changed is the only one asked about.
+    h.with_ssm(|ssm| {
+        let top = ssm.parameters.get_mut("/shared/top").unwrap();
+        top.version = 2;
+        top.description = Some("Topo".into());
+        top.history.push((2, "t".into(), Some("Topo".into()), 9.0));
+    });
+    h.state.aws.invalidate(&h.vault);
+    let again = h.get(&format!("/vaults/{}/records", h.vault)).await;
+    assert!(again.body["records"].as_array().unwrap().iter().any(|r| r["title"] == "Topo"), "{}", again.body);
+    assert_eq!(histories(&h), read + 1);
 }

@@ -175,8 +175,9 @@ all on the vault's path. Read-only roles work too: Keyhold shows what it can rea
 a save is refused.
 
 `ssm:DescribeParameters` is optional. It cannot be limited to a path, so an account that gives
-some people only one branch usually leaves it out. Without it, records are titled by their name
-until opened, and the KMS key of a parameter is read from its history instead.
+some people only one branch usually leaves it out. Without it, the title, the folder names and
+the KMS key of each parameter are read from its history instead (`ssm:GetParameterHistory`), once
+per parameter and again only when it changes.
 
 Good to know: parameter **names, folder paths and titles** are metadata AWS keeps unencrypted, and
 anyone allowed to describe parameters in the account can see them. Values and notes are encrypted.

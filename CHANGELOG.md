@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **An AWS vault rooted at a path showed parameter names instead of titles and folder names.** A
+  role given one branch of an account cannot call `DescribeParameters`, which AWS only grants for
+  the whole account, and that is where the titles and the folder labels were read from. They are
+  now read from each parameter's own history when describe is refused, once per parameter and
+  again only when it changes. The role needs `ssm:GetParameterHistory` on its branch.
+
 ## 1.0.5
 
 AWS vaults that start at a path, for roles allowed only one branch of an account.
