@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.0.6
+
+Titles and folder names in an AWS vault rooted at a path.
 
 ### Fixed
 
