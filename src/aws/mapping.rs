@@ -216,6 +216,48 @@ pub fn parent_path(name: &str) -> Option<String> {
     }
 }
 
+/// A vault's root as it is kept: `None` for the whole account, or a path like `/shared`, with one
+/// leading slash and no trailing one. A role that may only read one branch of the account (the
+/// `/shared` a client is given) can open a vault rooted there, where a vault of the whole account
+/// is refused at the first listing.
+pub fn normalize_root(root: &str) -> Result<Option<String>, String> {
+    let trimmed = root.trim().trim_end_matches('/');
+
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    let root = absolute(trimmed);
+    validate_name(&root)?;
+
+    if root.split('/').any(|segment| segment == KEEP) {
+        return Err(format!("o caminho {root} não pode conter {KEEP}"));
+    }
+
+    Ok(Some(root))
+}
+
+/// Whether a name sits under the root (`None` = the whole account, where everything does).
+pub fn under_root(name: &str, root: Option<&str>) -> bool {
+    match root {
+        None => true,
+        Some(root) => absolute(name).starts_with(&format!("{}/", root.trim_end_matches('/'))),
+    }
+}
+
+/// The folder a name is shown in: its parent path, or `None` when it sits right at the root.
+pub fn folder_of(name: &str, root: Option<&str>) -> Option<String> {
+    parent_path(name).filter(|parent| under_root(parent, root))
+}
+
+/// How deep a folder is drawn: 0 for one right under the root.
+pub fn depth_under(path: &str, root: Option<&str>) -> usize {
+    let below = path.matches('/').count().saturating_sub(1);
+    let root_depth = root.map_or(0, |root| root.matches('/').count());
+
+    below.saturating_sub(root_depth)
+}
+
 /// The last segment of a name.
 pub fn leaf(name: &str) -> &str {
     name.rsplit('/').next().unwrap_or(name)
@@ -563,17 +605,34 @@ pub fn folder_nodes_labelled<'a>(
     names: impl IntoIterator<Item = &'a str>,
     labels: &std::collections::HashMap<String, String>,
 ) -> Vec<FolderNode> {
+    folder_nodes_in(vault_id, None, names, labels)
+}
+
+/// The tree of a vault rooted at `root`: the root and the folders above it are not drawn, and a
+/// folder right under the root sits at the top of the tree.
+pub fn folder_nodes_in<'a>(
+    vault_id: &str,
+    root: Option<&str>,
+    names: impl IntoIterator<Item = &'a str>,
+    labels: &std::collections::HashMap<String, String>,
+) -> Vec<FolderNode> {
     folder_paths(names)
         .into_iter()
-        .map(|path| FolderNode {
-            id: folder_id(vault_id, &path),
-            vault_id: vault_id.to_string(),
-            parent_id: parent_path(&path).map(|parent| folder_id(vault_id, &parent)),
-            name: labels.get(&path).cloned().unwrap_or_else(|| leaf(&path).to_string()),
-            colour: None,
-            depth: path.matches('/').count().saturating_sub(1),
-        })
+        .filter(|path| under_root(path, root))
+        .map(|path| folder_node(vault_id, root, &path, labels.get(&path).cloned()))
         .collect()
+}
+
+/// One folder of a vault rooted at `root`, named `label` or after its last segment.
+pub fn folder_node(vault_id: &str, root: Option<&str>, path: &str, label: Option<String>) -> FolderNode {
+    FolderNode {
+        id: folder_id(vault_id, path),
+        vault_id: vault_id.to_string(),
+        parent_id: folder_of(path, root).map(|parent| folder_id(vault_id, &parent)),
+        name: label.unwrap_or_else(|| leaf(path).to_string()),
+        colour: None,
+        depth: depth_under(path, root),
+    }
 }
 
 /// Whether anything other than the folder's own marker lives at or below `path`.
@@ -714,6 +773,55 @@ mod tests {
         assert!(is_attachment_of("app/db/", "app/db/a.pdf"));
         assert!(!is_attachment_of("app/db/", "app/db/nested/a.pdf"));
         assert!(!is_attachment_of("app/db/", "app/db/"));
+    }
+
+    #[test]
+    fn a_root_is_kept_with_one_leading_slash_and_none_at_the_end() {
+        assert_eq!(normalize_root(""), Ok(None));
+        assert_eq!(normalize_root(" / "), Ok(None));
+        assert_eq!(normalize_root("shared").unwrap().as_deref(), Some("/shared"));
+        assert_eq!(normalize_root("/shared/").unwrap().as_deref(), Some("/shared"));
+        assert_eq!(normalize_root(" /shared/app ").unwrap().as_deref(), Some("/shared/app"));
+        assert!(normalize_root("/shared/.keep").is_err());
+        assert!(normalize_root("/aws/x").is_err());
+        assert!(normalize_root("/com espaço").is_err());
+    }
+
+    #[test]
+    fn a_vault_rooted_in_a_branch_draws_the_branch_as_its_top() {
+        let root = Some("/shared");
+        let names = ["/shared/github/deploy-token", "/shared/servers/main/ssh/.keep", "/shared/top"];
+
+        assert!(under_root("/shared/x", root));
+        assert!(!under_root("/shared", root));
+        assert!(!under_root("/sharedx/y", root));
+        assert!(!under_root("/internal/x", root));
+        assert!(under_root("/anything", None));
+
+        assert_eq!(folder_of("/shared/top", root), None);
+        assert_eq!(folder_of("/shared/github/deploy-token", root).as_deref(), Some("/shared/github"));
+        assert_eq!(folder_of("/top", None), None);
+
+        let nodes = folder_nodes_in("V", root, names, &std::collections::HashMap::new());
+        let by_path: std::collections::HashMap<String, &FolderNode> = nodes
+            .iter()
+            .map(|n| (decode_id(&n.id).unwrap().2, n))
+            .collect();
+
+        assert!(!by_path.contains_key("/shared"), "the root itself is not a folder of the vault");
+        assert_eq!(nodes.len(), 4);
+
+        let github = by_path["/shared/github"];
+        assert_eq!((github.parent_id.as_deref(), github.depth, github.name.as_str()), (None, 0, "github"));
+
+        let ssh = by_path["/shared/servers/main/ssh"];
+        assert_eq!(ssh.parent_id, Some(folder_id("V", "/shared/servers/main")));
+        assert_eq!(ssh.depth, 2);
+
+        // The whole account draws exactly as it always has.
+        let whole = folder_nodes_labelled("V", names, &std::collections::HashMap::new());
+        assert_eq!(whole.len(), 5);
+        assert!(whole.iter().any(|n| n.id == folder_id("V", "/shared") && n.depth == 0 && n.parent_id.is_none()));
     }
 
     #[test]

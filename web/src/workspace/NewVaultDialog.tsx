@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Check, HardDrive } from 'lucide-react'
+import { HardDrive } from 'lucide-react'
 
+import { Combobox } from '@/components/common/Combobox'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -21,9 +23,13 @@ import { VaultInitial } from './shell'
 /**
  * A new vault: kept in the local file, or in an AWS account's Parameter Store.
  *
- * An AWS vault is a whole account from `/`; what IAM lets the chosen role read is what shows. The
- * bucket is where attachments go, and Keyhold never creates it: the suggestion follows the name
- * the infrastructure is expected to give it.
+ * An AWS vault is an account from its path down: the whole account from `/` when the path is left
+ * empty, or one branch of it (`/shared`) for a role allowed only that. What IAM lets the role read
+ * is what shows. The bucket is where attachments go, and Keyhold never creates it: the suggestion
+ * follows the name the infrastructure is expected to give it.
+ *
+ * Account, region, path and bucket are fixed once the vault exists, so the dialog asks for a tick
+ * saying so before it creates one: a path typed wrong is a vault made again, not one edited.
  *
  * The icon works like a record's: a lucide icon in a soft colour, or a picture of one's own, sealed
  * with the vault's name. Without one the vault shows its initials, as it always did.
@@ -46,6 +52,8 @@ export function NewVaultDialog({
   const [region, setRegion] = useState('us-east-2')
   const [bucket, setBucket] = useState('')
   const [bucketTouched, setBucketTouched] = useState(false)
+  const [root, setRoot] = useState('')
+  const [understood, setUnderstood] = useState(false)
 
   useEffect(() => {
     if (kind === 'aws' && connections === null) {
@@ -68,11 +76,13 @@ export function NewVaultDialog({
     .replace(/^-|-$/g, '')
   const suggested = slug ? `keyhold-${slug}` : ''
   const shownBucket = bucketTouched ? bucket : suggested
-  const ready = name.trim() !== '' && (kind === 'local' || (connection !== '' && region !== '' && shownBucket !== ''))
+  const ready =
+    name.trim() !== '' &&
+    (kind === 'local' || (connection !== '' && region !== '' && shownBucket !== '' && understood))
 
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Novo cofre</DialogTitle>
           <DialogDescription>
@@ -142,32 +152,22 @@ export function NewVaultDialog({
               <div className="space-y-3">
                 <div className="grid gap-1.5">
                   <span className="text-[13px] font-medium">Conta</span>
-                  <div role="radiogroup" aria-label="Conta" className="grid max-h-[208px] gap-1.5 overflow-y-auto">
-                    {connections.map((one) => {
-                      const on = one.id === connection
+                  <Combobox
+                    label="Conta"
+                    tall
+                    value={connection}
+                    searchPlaceholder="Buscar pelo título, número da conta ou papel"
+                    empty="Nenhuma conta com esse nome."
+                    onChange={setConnection}
+                    options={connections.map((one) => {
                       const live = logins.find((login) => login.id === one.login_id)?.connected ?? false
 
-                      return (
-                        <button
-                          key={one.id}
-                          type="button"
-                          role="radio"
-                          aria-checked={on}
-                          onClick={() => setConnection(one.id)}
-                          className={cn(
-                            'flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left hover:bg-hover',
-                            on && 'border-primary bg-primary-soft hover:bg-primary-soft',
-                          )}
-                        >
-                          <AwsMark size="sm" />
-                          <span className="min-w-0 flex-1">
-                            <b className="block truncate text-sm font-semibold">
-                              {one.title || one.account_name || one.account_id}
-                            </b>
-                            <span className="block truncate text-xs text-faint">
-                              {one.account_id}, papel {one.role}
-                            </span>
-                          </span>
+                      return {
+                        value: one.id,
+                        label: one.title || one.account_name || one.account_id,
+                        detail: `${one.account_id}, papel ${one.role}`,
+                        leading: <AwsMark size="sm" />,
+                        trailing: (
                           <span
                             className={cn(
                               'shrink-0 rounded-full px-2 py-px text-[11px] font-medium',
@@ -176,11 +176,10 @@ export function NewVaultDialog({
                           >
                             {live ? 'sessão ativa' : 'sem sessão'}
                           </span>
-                          {on && <Check className="size-4 shrink-0 text-primary-text" />}
-                        </button>
-                      )
+                        ),
+                      }
                     })}
-                  </div>
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="grid gap-1.5">
@@ -202,6 +201,33 @@ export function NewVaultDialog({
                 <p className="text-xs text-faint">
                   O Keyhold não cria o bucket. Sem ele, os registros funcionam e apenas os anexos ficam indisponíveis.
                 </p>
+                <label className="grid gap-1.5">
+                  <span className="text-[13px] font-medium">Caminho na AWS (opcional)</span>
+                  <Input
+                    value={root}
+                    placeholder="/ (a conta inteira)"
+                    spellCheck={false}
+                    onChange={(event) => setRoot(event.target.value.trim())}
+                  />
+                  <span className="text-xs text-faint">
+                    Deixe vazio para ver a conta inteira. Se o seu acesso é a uma pasta só, informe essa pasta, por
+                    exemplo /shared: o cofre começa nela.
+                  </span>
+                </label>
+                <label className="flex items-start gap-2.5 rounded-[10px] border p-3 text-[13px]">
+                  <Checkbox
+                    className="mt-0.5"
+                    checked={understood}
+                    onCheckedChange={(on) => setUnderstood(on === true)}
+                  />
+                  <span className="grid gap-0.5">
+                    <span className="font-medium">Entendi que conta, região, caminho e bucket não mudam depois</span>
+                    <span className="text-xs text-faint">
+                      Depois de criado, só o nome e o ícone do cofre podem ser alterados. Para mudar o resto, crie um
+                      cofre novo.
+                    </span>
+                  </span>
+                </label>
               </div>
             ))}
         </div>
@@ -215,7 +241,7 @@ export function NewVaultDialog({
             onClick={() =>
               onCreate(
                 name.trim(),
-                kind === 'aws' ? { connection_id: connection, region, bucket: shownBucket } : undefined,
+                kind === 'aws' ? { connection_id: connection, region, bucket: shownBucket, root: root || null } : undefined,
                 icon,
               )
             }

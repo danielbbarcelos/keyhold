@@ -908,9 +908,7 @@ export function VaultPage({
       return (
         <div className="grid h-full place-items-center rounded-[14px] border border-dashed p-8 text-center">
           <div className="max-w-sm space-y-3">
-            <b className="block text-[15px] font-semibold">
-              {unavailable.code === 'session_expired' ? 'A sessão da AWS expirou' : 'O cofre na AWS não respondeu'}
-            </b>
+            <b className="block text-[15px] font-semibold">{unavailableTitle(unavailable.code)}</b>
             <p className="text-sm text-muted-foreground">{unavailable.message}</p>
             <div className="flex justify-center gap-2">
               {unavailable.code === 'session_expired' ? (
@@ -1049,7 +1047,7 @@ export function VaultPage({
         <div className="relative grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
         {loaded && unavailable ? (
           <aside className="grid min-h-0 place-items-center rounded-[14px] border bg-card p-6 text-center text-[13px] text-faint">
-            Os registros deste cofre ficam disponíveis quando a sessão da AWS for renovada.
+            {unavailableAside(unavailable?.code)}
           </aside>
         ) : loaded ? (
         <>
@@ -1391,4 +1389,35 @@ function MovePreview({ moves }: { moves: Array<{ from: string; to: string }> }) 
       )}
     </div>
   )
+}
+
+/**
+ * What went wrong with an AWS vault, said by what it was. A refusal is an answer: calling it "no
+ * answer" sent people to renew a session that was fine.
+ */
+function unavailableTitle(code: string | undefined): string {
+  switch (code) {
+    case 'session_expired':
+      return 'A sessão da AWS expirou'
+    case 'listing_denied':
+      return 'Este papel não pode ler o caminho do cofre'
+    case 'access_denied':
+      return 'A AWS negou o acesso'
+    default:
+      return 'O cofre na AWS não respondeu'
+  }
+}
+
+/** The tree's place while the vault is unavailable: when the records come back. */
+function unavailableAside(code: string | undefined): string {
+  switch (code) {
+    case 'session_expired':
+      return 'Os registros deste cofre ficam disponíveis quando a sessão da AWS for renovada.'
+    case 'listing_denied':
+      return 'O caminho de um cofre não muda depois de criado. Crie um cofre novo com o caminho que o seu acesso permite.'
+    case 'access_denied':
+      return 'Os registros deste cofre ficam disponíveis quando o papel tiver permissão para lê-los.'
+    default:
+      return 'Os registros deste cofre ficam disponíveis quando a AWS responder.'
+  }
 }

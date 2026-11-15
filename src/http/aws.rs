@@ -56,7 +56,7 @@ use crate::aws::{
     SsmClient, SsoToken, Tag,
 };
 use crate::records::{OpenRecord, Payload, RecordHeader, RecordPreview, VersionEntry};
-use crate::vaults::{self, AwsVault, FolderNode};
+use crate::vaults::{self, AwsVault};
 
 /// How many tag requests run at once while a list is drawn. Parameter Store throttles
 /// `ListTagsForResource` at a few per second per account; eight in flight stays under it for any
@@ -805,7 +805,7 @@ async fn place(state: &AppState, vault_id: &str) -> Result<Place, Failure> {
                     .ok_or_else(|| bad_request("o cofre não é um cofre AWS"))?;
                 let config = config::load(&store, key).map_err(bad_request)?;
                 let connection = config.connection(&vault.connection_id).cloned().ok_or_else(|| {
-                    bad_request("a conta AWS deste cofre não existe mais. Escolha outra nas configurações do cofre")
+                    bad_request("a conta AWS deste cofre não existe mais. Conecte a conta de novo em Contas AWS e crie o cofre outra vez")
                 })?;
                 let login = config.login(&connection.login_id).cloned();
                 Ok((vault, connection, login))
@@ -915,10 +915,15 @@ async fn snapshot(state: &AppState, place: &Place) -> Result<Arc<Snapshot>, Fail
         return Ok(cached);
     }
 
-    let parameters = place.ssm.get_parameters_by_path("/", true).await.map_err(aws_failure)?;
+    let path = place.vault.listing_path();
+    let parameters = place
+        .ssm
+        .get_parameters_by_path(path, true)
+        .await
+        .map_err(|error| listing_failure(error, path))?;
 
     let wanted: std::collections::HashSet<&str> = parameters.iter().map(|p| p.name.as_str()).collect();
-    let (metadata, metadata_error) = match place.ssm.describe_parameters("/", true).await {
+    let (metadata, metadata_error) = match place.ssm.describe_parameters(path, true).await {
         Ok(found) => (
             found
                 .into_iter()
@@ -940,6 +945,31 @@ async fn snapshot(state: &AppState, place: &Place) -> Result<Arc<Snapshot>, Fail
     }
 
     Ok(fresh)
+}
+
+/// A listing AWS refused. The role answered, so this is never "no answer", and renewing the
+/// session would not change it: the vault starts somewhere the role may not read. A role given one
+/// branch of the account (a client's `/shared`) needs the vault to start there.
+fn listing_failure(error: AwsError, path: &str) -> Failure {
+    match error {
+        AwsError::AccessDenied(detail) => aws_refusal(
+            StatusCode::FORBIDDEN,
+            "listing_denied",
+            if path == "/" {
+                format!(
+                    "o papel desta conta não pode listar a conta inteira, a partir de /. Se o seu \
+                     acesso é a uma pasta só (como /shared), crie um cofre novo informando essa \
+                     pasta em Caminho na AWS ({detail})"
+                )
+            } else {
+                format!(
+                    "o papel desta conta não pode listar a partir de {path}. Crie um cofre novo com \
+                     o Caminho na AWS que o seu acesso permite ({detail})"
+                )
+            },
+        ),
+        other => aws_failure(other),
+    }
 }
 
 /// Why the key, tier or description of a parameter could not be read, as a refusal.
@@ -1112,7 +1142,7 @@ fn header_for(
     RecordHeader {
         id: record_id(&place.vault_id, name),
         vault_id: place.vault_id.clone(),
-        folder_id: mapping::parent_path(name).map(|p| folder_id(&place.vault_id, &p)),
+        folder_id: mapping::folder_of(name, place.vault.root()).map(|p| folder_id(&place.vault_id, &p)),
         kind: "item".into(),
         version,
         favourite: config.is_favourite(&place.connection.account_id, name),
@@ -1184,8 +1214,9 @@ pub(crate) async fn list_folders(state: &AppState, vault_id: &str) -> Answer {
     let place = place(state, vault_id).await?;
     let snapshot = snapshot(state, &place).await?;
 
-    let folders = mapping::folder_nodes_labelled(
+    let folders = mapping::folder_nodes_in(
         vault_id,
+        place.vault.root(),
         snapshot.parameters.iter().map(|p| p.name.as_str()),
         &folder_labels(&snapshot),
     );
@@ -1375,7 +1406,7 @@ async fn relocate_folder(
 /// every parameter under it (see [`relocate_folder`]). Its name in Keyhold travels on its marker.
 pub(crate) async fn move_folder(state: &AppState, id: &str, parent_id: Option<&str>) -> Answer {
     let (vault_id, path) = target_folder(id)?;
-    let parent = folder_path(&vault_id, parent_id)?;
+    let parent = folder_path(state, &vault_id, parent_id)?;
 
     if parent.as_deref().is_some_and(|p| p == path || p.starts_with(&format!("{}/", path.trim_end_matches('/')))) {
         return Err(bad_request("uma pasta não pode ser movida para dentro dela mesma"));
@@ -1401,14 +1432,7 @@ pub(crate) async fn move_folder(state: &AppState, id: &str, parent_id: Option<&s
             "a pasta não foi movida, pois estes itens não podem mudar de nome na AWS: {blocked}"
         ))),
         Relocated::Moved { target, warning } => {
-            let node = FolderNode {
-                id: folder_id(&vault_id, &target),
-                vault_id: vault_id.clone(),
-                parent_id: mapping::parent_path(&target).map(|p| folder_id(&vault_id, &p)),
-                name: label.unwrap_or_else(|| mapping::leaf(&target).to_string()),
-                colour: None,
-                depth: target.matches('/').count().saturating_sub(1),
-            };
+            let node = mapping::folder_node(&vault_id, place.vault.root(), &target, label);
             Ok(Json(with_warning(json!({ "moved": true, "id": node.id, "folder": node }), warning)))
         }
     }
@@ -1466,14 +1490,7 @@ pub(crate) async fn rename_folder(state: &AppState, id: &str, label: &str, segme
         .any(|p| mapping::absolute(&p.name) == mapping::join(Some(&target), mapping::KEEP));
     write_folder_label(state, &place, &fresh, &target, &description, exists).await?;
 
-    let node = FolderNode {
-        id: folder_id(&vault_id, &target),
-        vault_id: vault_id.clone(),
-        parent_id: mapping::parent_path(&target).map(|p| folder_id(&vault_id, &p)),
-        name: label.to_string(),
-        colour: None,
-        depth: target.matches('/').count().saturating_sub(1),
-    };
+    let node = mapping::folder_node(&vault_id, place.vault.root(), &target, Some(label.to_string()));
 
     Ok(Json(with_warning(json!({ "folder": node }), warning)))
 }
@@ -1490,7 +1507,7 @@ pub(crate) async fn create_folder(
     let description = folder_description(label)?;
     let name = folder_segment(label, segment)?;
 
-    let parent = folder_path(vault_id, parent_id)?;
+    let parent = folder_path(state, vault_id, parent_id)?;
     let path = mapping::join(parent.as_deref(), &name);
     let marker = mapping::join(Some(&path), mapping::KEEP);
     mapping::validate_name(&path).map_err(bad_request)?;
@@ -1519,11 +1536,7 @@ pub(crate) async fn create_folder(
     state.aws.invalidate(vault_id);
     written.map_err(|e| write_failure(e, &marker))?;
 
-    let labels = HashMap::from([(path.clone(), label.to_string())]);
-    let node = mapping::folder_nodes_labelled(vault_id, [marker.as_str()], &labels)
-        .into_iter()
-        .find(|n| n.id == folder_id(vault_id, &path))
-        .ok_or_else(|| bad_request("a pasta não foi criada"))?;
+    let node = mapping::folder_node(vault_id, place.vault.root(), &path, Some(label.to_string()));
 
     Ok(Json(json!({ "folder": node })))
 }
@@ -1557,12 +1570,19 @@ pub(crate) async fn delete_folder(state: &AppState, id: &str) -> Answer {
     Ok(Json(json!({ "deleted": true })))
 }
 
-pub(crate) fn folder_path(vault_id: &str, id: Option<&str>) -> Result<Option<String>, Failure> {
-    let Some(id) = id else { return Ok(None) };
+/// The path a folder id stands for, or the vault's root when there is none: what "no folder"
+/// means in a vault that starts at `/shared` is `/shared`, and in one of the whole account, `/`.
+pub(crate) fn folder_path(state: &AppState, vault_id: &str, id: Option<&str>) -> Result<Option<String>, Failure> {
+    let root = aws_vault_of(state, vault_id)?.and_then(|vault| vault.root);
+
+    let Some(id) = id else { return Ok(root) };
     let (owner, path) = target_folder(id)?;
 
     if owner != vault_id {
         return Err(bad_request("a pasta pertence a outro cofre"));
+    }
+    if !mapping::under_root(&path, root.as_deref()) {
+        return Err(not_found("a pasta não está neste cofre"));
     }
 
     Ok(Some(path))
@@ -1703,7 +1723,7 @@ pub(crate) async fn create_record(
     name: Option<&str>,
 ) -> Answer {
     let (_, description, value, json) = prepared(payload)?;
-    let folder = folder_path(vault_id, folder_id)?;
+    let folder = folder_path(state, vault_id, folder_id)?;
 
     let name = match name.map(str::trim).filter(|n| !n.is_empty()) {
         Some(full) if full.starts_with('/') => full.to_string(),
@@ -1713,6 +1733,9 @@ pub(crate) async fn create_record(
     mapping::validate_name(&name).map_err(bad_request)?;
 
     let place = place(state, vault_id).await?;
+    if let Some(root) = place.vault.root().filter(|root| !mapping::under_root(&name, Some(root))) {
+        return Err(bad_request(format!("o nome na AWS precisa começar com {root}/, o caminho deste cofre")));
+    }
     let snapshot = snapshot(state, &place).await?;
     let key_id =
         mapping::inherit_key(mapping::parent_path(&name).as_deref(), &known_keys(&snapshot)?);
@@ -1965,7 +1988,7 @@ pub(crate) async fn move_record(
         ));
     }
 
-    let folder = folder_path(&vault_id, folder_id)?;
+    let folder = folder_path(state, &vault_id, folder_id)?;
     // A new last segment renames as well as moves: "Mudar o nome na AWS também".
     let leaf = match leaf.map(str::trim).filter(|l| !l.is_empty()) {
         Some(typed) => {
@@ -2543,11 +2566,12 @@ async fn check_vault(State(state): State<Arc<AppState>>, Path(id): Path<String>)
     require_unlocked(&state)?;
     let place = place(&state, &id).await?;
 
-    let (parameters, parameters_message) = match place.ssm.get_parameters_by_path("/", false).await {
+    let path = place.vault.listing_path();
+    let (parameters, parameters_message) = match place.ssm.get_parameters_by_path(path, false).await {
         Ok(_) => (true, None),
         Err(AwsError::AccessDenied(_)) => (
             false,
-            Some("o papel desta conta não pode ler parâmetros (falta ssm:GetParametersByPath)".to_string()),
+            Some(format!("o papel desta conta não pode ler parâmetros a partir de {path} (falta ssm:GetParametersByPath)")),
         ),
         Err(other) => return Err(aws_failure(other)),
     };

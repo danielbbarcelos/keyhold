@@ -55,6 +55,9 @@ struct Ssm {
     parameters: BTreeMap<String, FakeParameter>,
     /// Names under this prefix exist, but this role may not read them.
     denied: Vec<String>,
+    /// The one branch the role's policy allows (`/shared` for a client): any name outside it is
+    /// denied, and so is a listing that starts above it, the way IAM checks the path itself.
+    only: Option<String>,
     /// The role may not call DescribeParameters at all.
     describe_denied: bool,
     /// The role may not call GetParameterHistory.
@@ -95,7 +98,15 @@ impl Ssm {
     }
 
     fn denied(&self, name: &str) -> bool {
-        self.denied.iter().any(|prefix| name.starts_with(prefix))
+        self.denied.iter().any(|prefix| name.starts_with(prefix)) || !self.allows(name)
+    }
+
+    /// Whether the policy covers this name or path: the branch itself or anything under it.
+    fn allows(&self, name: &str) -> bool {
+        match &self.only {
+            None => true,
+            Some(only) => name == only || name.starts_with(&format!("{only}/")),
+        }
     }
 
     fn under<'a>(&'a self, path: &str, recursive: bool) -> impl Iterator<Item = (&'a String, &'a FakeParameter)> {
@@ -150,6 +161,12 @@ async fn ssm(State(shared): State<Shared>, request: Request) -> Response {
     match target.as_str() {
         "GetParametersByPath" => {
             let path = text("Path");
+            if !ssm.allows(&path) {
+                return error(
+                    "AccessDeniedException",
+                    &format!("is not authorized to perform: ssm:GetParametersByPath on resource: arn:aws:ssm:sa-east-1:123456789012:parameter{path}"),
+                );
+            }
             let items: Vec<Value> = ssm
                 .under(&path, body["Recursive"].as_bool().unwrap_or(false))
                 .filter(|(name, _)| !ssm.denied(name))
@@ -260,7 +277,7 @@ async fn ssm(State(shared): State<Shared>, request: Request) -> Response {
         }
         "DeleteParameter" => {
             let name = text("Name");
-            if ssm.delete_denied.contains(&name) {
+            if ssm.delete_denied.contains(&name) || ssm.denied(&name) {
                 return error("AccessDeniedException", "not allowed to delete");
             }
             match ssm.parameters.remove(&name) {
@@ -269,7 +286,7 @@ async fn ssm(State(shared): State<Shared>, request: Request) -> Response {
             }
         }
         "GetParameterHistory" => {
-            if ssm.history_denied {
+            if ssm.history_denied || ssm.denied(&text("Name")) {
                 return error("AccessDeniedException", "not allowed to read history");
             }
             let name = text("Name");
@@ -402,6 +419,10 @@ impl Harness {
 }
 
 async fn start(seed: impl FnOnce(&mut Ssm), bucket: Option<String>, s3: Option<String>) -> Harness {
+    start_at(seed, bucket, s3, None).await
+}
+
+async fn start_at(seed: impl FnOnce(&mut Ssm), bucket: Option<String>, s3: Option<String>, root: Option<&str>) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(&dir.path().join("vault.db")).unwrap();
     let key = SecretKey::random();
@@ -430,7 +451,7 @@ async fn start(seed: impl FnOnce(&mut Ssm), bucket: Option<String>, s3: Option<S
         VaultMeta {
             name: "Produção".into(),
             kind: "aws".into(),
-            aws: Some(AwsVault { connection_id: "CONN".into(), region: "sa-east-1".into(), bucket, rename_with_title: false }),
+            aws: Some(AwsVault { connection_id: "CONN".into(), region: "sa-east-1".into(), bucket, rename_with_title: false, root: root.map(str::to_string) }),
             ..Default::default()
         },
     )
@@ -1881,7 +1902,7 @@ fn alias_vault(h: &Harness) -> String {
                 VaultMeta {
                     name: "Produção de novo".into(),
                     kind: "aws".into(),
-                    aws: Some(AwsVault { connection_id: "CONN".into(), region: "sa-east-1".into(), bucket: None, rename_with_title: false }),
+                    aws: Some(AwsVault { connection_id: "CONN".into(), region: "sa-east-1".into(), bucket: None, rename_with_title: false, root: None }),
                     ..Default::default()
                 },
             )
@@ -2173,4 +2194,133 @@ fn a_picture_that_does_not_fit_is_left_out_and_its_place_in_the_library_kept() {
         ..Payload::default()
     };
     assert!(super::prepared(&too_much).is_err());
+}
+
+// ── a vault that starts at a branch (a client's `/shared`) ──────────────────────────────────────
+
+/// An account split the way a client's is: `/shared` theirs, `/internal` not, and a policy that
+/// allows nothing outside `/shared`, not even a listing of `/`.
+fn client_account(ssm: &mut Ssm) {
+    ssm.seed("/shared/github/deploy-token", "ghp", Some("GitHub · token de deploy"), "alias/aws/ssm", &[]);
+    ssm.seed("/shared/servers/main/ssh-password", "ssh", None, "alias/aws/ssm", &[]);
+    ssm.seed("/shared/top", "t", None, "alias/aws/ssm", &[]);
+    ssm.seed("/internal/digitalocean/password", "do", None, "alias/internal-parameters", &[]);
+    ssm.only = Some("/shared".into());
+}
+
+async fn edit_place(h: &Harness, root: Option<&str>) -> Reply {
+    h.put(
+        &format!("/vaults/{}", h.vault),
+        json!({ "name": "Produção 2", "aws": { "connection_id": "OUTRA", "region": "us-east-1", "bucket": "outro", "root": root, "rename_with_title": true } }),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn a_role_allowed_one_branch_is_told_to_root_the_vault_there() {
+    let h = start(client_account, None, None).await;
+
+    let folders = h.get(&format!("/vaults/{}/folders", h.vault)).await;
+    assert_eq!(folders.status, 403, "{}", folders.body);
+    assert_eq!(folders.body["aws"], "listing_denied", "{}", folders.body);
+    let said = folders.body["error"].as_str().unwrap_or_default().to_string();
+    assert!(said.contains("Caminho na AWS"), "{said}");
+
+    // A vault of the whole account is still what an unset root means.
+    let vaults = h.get("/vaults").await;
+    assert!(vaults.body["vaults"][0]["aws"]["root"].is_null());
+}
+
+#[tokio::test]
+async fn a_vault_rooted_at_a_branch_draws_it_as_its_top_and_writes_inside_it() {
+    let h = start_at(client_account, None, None, Some("shared/")).await;
+
+    let vaults = h.get("/vaults").await;
+    assert_eq!(vaults.body["vaults"][0]["aws"]["root"], "/shared", "kept normalised");
+
+    let folders = h.get(&format!("/vaults/{}/folders", h.vault)).await;
+    assert_eq!(folders.status, 200, "{}", folders.body);
+    let mut drawn: Vec<(String, Option<String>, u64)> = folders.body["folders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            (
+                crate::aws::mapping::decode_id(f["id"].as_str().unwrap()).unwrap().2,
+                f["parent_id"].as_str().map(|p| crate::aws::mapping::decode_id(p).unwrap().2),
+                f["depth"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    drawn.sort();
+    assert_eq!(
+        drawn,
+        vec![
+            ("/shared/github".to_string(), None, 0),
+            ("/shared/servers".to_string(), None, 0),
+            ("/shared/servers/main".to_string(), Some("/shared/servers".to_string()), 1),
+        ],
+        "the root is not a folder, and nothing outside it is listed"
+    );
+
+    let records = h.records().await;
+    let top = records.iter().find(|r| r["id"] == h.id("/shared/top")).expect("listed");
+    assert!(top["folder_id"].is_null(), "a record right under the root sits at the top: {top}");
+    assert!(!records.iter().any(|r| r["id"] == h.id("/internal/digitalocean/password")));
+
+    // "No folder" is the root: a new record and a new folder land under /shared.
+    let made = h
+        .post(
+            &format!("/vaults/{}/records", h.vault),
+            json!({ "folder_id": null, "payload": { "title": "Senha do Wi-Fi", "fields": [{ "label": "Senha", "kind": "password", "value": "w1f1" }] } }),
+        )
+        .await;
+    assert_eq!(made.status, 200, "{}", made.body);
+    assert_eq!(made.body["record"]["id"], h.id("/shared/senha-do-wi-fi"));
+    assert!(made.body["record"]["folder_id"].is_null());
+    assert!(h.parameter("/shared/senha-do-wi-fi").is_some());
+
+    let folder = h.post(&format!("/vaults/{}/folders", h.vault), json!({ "name": "Google", "parent_id": null })).await;
+    assert_eq!(folder.status, 200, "{}", folder.body);
+    assert_eq!(folder.body["folder"]["id"], h.folder("/shared/google"));
+    assert!(folder.body["folder"]["parent_id"].is_null());
+    assert_eq!(folder.body["folder"]["depth"], 0);
+    assert!(h.parameter("/shared/google/.keep").is_some());
+
+    // A full name typed by hand cannot leave the vault.
+    let outside = h
+        .post(
+            &format!("/vaults/{}/records", h.vault),
+            json!({ "folder_id": null, "name": "/internal/x", "payload": { "title": "X", "fields": [{ "label": "Senha", "kind": "password", "value": "x" }] } }),
+        )
+        .await;
+    assert_eq!(outside.status, 400, "{}", outside.body);
+    assert!(h.parameter("/internal/x").is_none());
+
+    // Moving to the top is moving to the root.
+    let moved = h
+        .post(&format!("/records/{}/move", h.id("/shared/github/deploy-token")), json!({ "folder_id": null }))
+        .await;
+    assert_eq!(moved.status, 200, "{}", moved.body);
+    assert!(h.parameter("/shared/deploy-token").is_some());
+    assert!(h.parameter("/deploy-token").is_none());
+
+    // A folder of the vault cannot be pointed outside it by an id made by hand.
+    let elsewhere = h
+        .post(&format!("/vaults/{}/folders", h.vault), json!({ "name": "fora", "parent_id": h.folder("/internal") }))
+        .await;
+    assert_eq!(elsewhere.status, 404, "{}", elsewhere.body);
+
+    // Once made, only the name, the icon and the rename preference change: the place stays.
+    let edited = edit_place(&h, Some("/")).await;
+    assert_eq!(edited.status, 200, "{}", edited.body);
+    let aws = &edited.body["vault"]["aws"];
+    assert_eq!(edited.body["vault"]["name"], "Produção 2");
+    assert_eq!(
+        (aws["root"].as_str(), aws["connection_id"].as_str(), aws["region"].as_str(), aws["bucket"].is_null()),
+        (Some("/shared"), Some("CONN"), Some("sa-east-1"), true),
+        "{aws}"
+    );
+    assert_eq!(aws["rename_with_title"], true);
+    assert_eq!(h.get(&format!("/vaults/{}/folders", h.vault)).await.status, 200);
 }

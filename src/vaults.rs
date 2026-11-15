@@ -92,8 +92,8 @@ impl Default for VaultMeta {
     }
 }
 
-/// An AWS vault's place: one whole account (through one connection) in one region (A5), and the
-/// bucket its attachments go to (A18).
+/// An AWS vault's place: an account (through one connection) in one region (A5), from its root
+/// down, and the bucket its attachments go to (A18).
 ///
 /// Sealed with the rest of the vault's metadata. The vault still has a row and a key in the local
 /// file, for this and for its name, but never a local record.
@@ -107,6 +107,23 @@ pub struct AwsVault {
     /// Off by default: a name an application reads is not something a retitle should move.
     #[serde(default)]
     pub rename_with_title: bool,
+    /// The branch of the account the vault shows, like `/shared`; `None` for the whole account,
+    /// which is what every vault made before this field was. A role allowed only one branch reads
+    /// nothing from `/`, so its vault has to start where its permission does.
+    #[serde(default)]
+    pub root: Option<String>,
+}
+
+impl AwsVault {
+    /// The root as a path: `None` for the whole account.
+    pub fn root(&self) -> Option<&str> {
+        self.root.as_deref()
+    }
+
+    /// Where a listing of the vault starts.
+    pub fn listing_path(&self) -> &str {
+        self.root.as_deref().unwrap_or("/")
+    }
 }
 
 pub const KIND_LOCAL: &str = "local";
@@ -144,6 +161,11 @@ impl VaultMeta {
 
         aws.region = aws.region.trim().to_string();
         aws.bucket = aws.bucket.take().map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
+        aws.root = match aws.root.take() {
+            None => None,
+            Some(root) => crate::aws::mapping::normalize_root(&root)
+                .map_err(|why| anyhow!("caminho na AWS inválido: {why}"))?,
+        };
 
         if crate::aws::validate_region(&aws.region).is_err() {
             bail!("'{}' não é uma região da AWS", aws.region);
@@ -323,20 +345,31 @@ pub fn vault_key(store: &Store, master: &SecretKey, id: &str) -> Result<SecretKe
     unwrap_key(master, &wrapped, &vault_key_aad(id)).context("this vault's key did not open")
 }
 
-/// Rename, recolour, or move an AWS vault to another connection, region or bucket.
+/// Rename, recolour or re-icon a vault.
 ///
 /// The kind never changes: a local vault does not become an AWS one by being edited, nor the other
-/// way round. An AWS vault edited without an `aws` part (an interface that only sends name and
-/// colour) keeps the place it had.
+/// way round. Neither does an AWS vault's place: its connection, region, root and bucket are fixed
+/// when it is made (the dialog says so before it is), because what a vault shows and where its new
+/// records land would quietly change under the person otherwise. Only the preference of whether a
+/// retitle renames in AWS too can be changed.
 pub fn update_vault(store: &Store, master: &SecretKey, id: &str, meta: VaultMeta) -> Result<VaultSummary> {
     if meta.name.trim().is_empty() {
         bail!("a vault needs a name");
     }
 
     let current = read_vault(store, master, id)?;
+    let aws = match (current.kind == KIND_AWS, current.aws) {
+        (true, Some(mut place)) => {
+            if let Some(asked) = meta.aws.as_ref() {
+                place.rename_with_title = asked.rename_with_title;
+            }
+            Some(place)
+        }
+        _ => None,
+    };
     let meta = VaultMeta {
         kind: current.kind.clone(),
-        aws: if current.kind == KIND_AWS { meta.aws.or(current.aws) } else { None },
+        aws,
         ..meta
     }
     .settled()?;

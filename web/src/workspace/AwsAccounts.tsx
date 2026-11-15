@@ -13,13 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Combobox } from '@/components/common/Combobox'
 import { cn } from '@/lib/utils'
 
 import { api, type AwsConnection, type AwsLogin, type DeviceLogin, type VaultSummary } from '../api'
@@ -526,44 +520,39 @@ function ConnectionDialog({
           </p>
         ) : (
           <div className="space-y-3">
-            <label className="grid gap-1.5">
+            <div className="grid gap-1.5">
               <span className="text-[13px] font-medium">Conta</span>
-              <Select
+              <Combobox
+                label="Conta"
+                tall
                 value={account}
-                onValueChange={(value) => {
+                searchPlaceholder="Buscar pelo nome ou pelo número da conta"
+                empty="Nenhuma conta com esse nome ou número."
+                options={accounts.map((one) => ({
+                  value: one.account_id,
+                  label: one.account_name || one.account_id,
+                  detail: taken.includes(one.account_id) ? `${one.account_id}, já adicionada` : one.account_id,
+                  leading: <AwsMark size="sm" />,
+                  disabled: taken.includes(one.account_id),
+                }))}
+                onChange={(value) => {
                   setAccount(value)
                   setRole(accounts.find((one) => one.account_id === value)?.roles[0] ?? '')
                 }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Selecione…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {accounts.map((one) => (
-                    <SelectItem key={one.account_id} value={one.account_id} disabled={taken.includes(one.account_id)}>
-                      {one.account_name || one.account_id} ({one.account_id})
-                      {taken.includes(one.account_id) && ', já adicionada'}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </label>
+              />
+            </div>
             {chosen && (
-              <label className="grid gap-1.5">
+              <div className="grid gap-1.5">
                 <span className="text-[13px] font-medium">Papel</span>
-                <Select value={role} onValueChange={setRole}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {chosen.roles.map((one) => (
-                      <SelectItem key={one} value={one}>
-                        {one}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
+                <Combobox
+                  label="Papel"
+                  value={role}
+                  searchPlaceholder="Buscar papel"
+                  empty="Nenhum papel com esse nome."
+                  options={chosen.roles.map((one) => ({ value: one, label: one }))}
+                  onChange={setRole}
+                />
+              </div>
             )}
             <label className="grid gap-1.5">
               <span className="text-[13px] font-medium">Título (opcional)</span>

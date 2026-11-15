@@ -270,11 +270,14 @@ async fn aws_sources(state: &AppState, scope: &Scope) -> Result<Vec<Source>, Fai
 
     let root = match &scope.folder_id {
         Some(id) => Some(
-            aws::folder_path(&scope.source_vault, Some(id))?
+            aws::folder_path(state, &scope.source_vault, Some(id))?
                 .ok_or_else(|| bad_request("a pasta não está neste cofre"))?,
         ),
         None => None,
     };
+    // Where the vault itself starts: a vault rooted at `/shared` copies `github/x`, not
+    // `shared/github/x`, the same tree it draws.
+    let vault_root = aws::folder_path(state, &scope.source_vault, None)?;
     let wanted: Option<HashSet<&String>> = scope.record_ids.as_ref().map(|ids| ids.iter().collect());
 
     let mut found = Vec::new();
@@ -296,7 +299,14 @@ async fn aws_sources(state: &AppState, scope: &Scope) -> Result<Vec<Source>, Fai
         let parent = mapping::parent_path(&absolute).unwrap_or_default();
 
         let rel_path = match &root {
-            None => parent.clone(),
+            None => match vault_root.as_deref().map(mapping::absolute) {
+                Some(vault_root) if parent == vault_root => String::new(),
+                Some(vault_root) => match parent.strip_prefix(&format!("{vault_root}/")) {
+                    Some(below) => format!("/{below}"),
+                    None => continue,
+                },
+                None => parent.clone(),
+            },
             Some(root) => {
                 let root = mapping::absolute(root);
                 if parent != root && !parent.starts_with(&format!("{root}/")) {
@@ -452,7 +462,7 @@ async fn plan(State(state): State<Arc<AppState>>, Json(scope): Json<Scope>) -> A
     let dest_aws = dest.kind == vaults::KIND_AWS;
 
     let base = if dest_aws {
-        aws::folder_path(&scope.dest_vault, scope.dest_folder.as_deref())?
+        aws::folder_path(&state, &scope.dest_vault, scope.dest_folder.as_deref())?
     } else {
         check_local_folder(&state, &scope.dest_vault, scope.dest_folder.as_deref())?;
         None
@@ -899,7 +909,7 @@ async fn write_aws(
         let warning = written["warning"].as_str().map(str::to_string);
         (id, (None, warning))
     } else {
-        let base = aws::folder_path(&run.dest_vault, run.dest_folder.as_deref())?;
+        let base = aws::folder_path(state, &run.dest_vault, run.dest_folder.as_deref())?;
         let mut name = match run.item.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
             Some(name) => mapping::absolute(name),
             None => aws_name(base.as_deref(), &run.item.rel, &aws_leaf(&payload.title)),

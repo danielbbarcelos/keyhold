@@ -140,12 +140,24 @@ account it names. The [threat model](docs/THREAT_MODEL.md) says exactly what eac
 
 ### Using AWS Parameter Store
 
+Keyhold still opens with its own local vault and master password the first time, even if you
+only mean to use AWS: that vault is where your AWS logins and accounts are kept, sealed like
+everything else.
+
 1. **Ajustes → Contas AWS → Adicionar login SSO.** Enter your AWS access portal address and its
    region. Keyhold shows a code and opens the AWS page; confirm the code there. The session lives
-   only in memory: after Keyhold restarts or locks, press **Renovar**.
+   only in memory, never on disk: after Keyhold restarts or locks, press **Renovar** and confirm
+   again. The rail shows when the session ends.
 2. **Adicionar conta deste login.** Pick the account and the role Keyhold should use.
-3. **Novo cofre → AWS Parameter Store.** Choose the account, the region, and the S3 bucket for
-   attachments (Keyhold suggests `keyhold-<vault name>` and never creates it).
+3. **Novo cofre → AWS Parameter Store.** Choose the account, the region, the S3 bucket for
+   attachments (Keyhold suggests `keyhold-<vault name>` and never creates it) and, optionally,
+   the **path** the vault starts at. Empty is the whole account. If your role may only read one
+   branch, say `/shared`, enter it: the vault lists from there, shows what is under it as its top
+   folders, and creates everything new inside it. A role limited to a branch cannot list the
+   account from `/`, so without the path that vault would be refused.
+
+Account, region, path and bucket are fixed once the vault exists (the dialog asks you to confirm
+that): only the vault's name and icon change later. To point somewhere else, make a new vault.
 
 Every `/` in a parameter name is a folder. Titles and folder names can be anything except `/`: the
 parameter name is made from them (`Banco Inter (PJ)` becomes `banco-inter-pj`), shown as "Na AWS"
@@ -156,11 +168,15 @@ becomes Keyhold's JSON. Keyhold only writes `SecureString` parameters, keeps the
 parameter already uses, and refuses to save over a change someone else made in the meantime.
 
 The role needs `ssm:GetParametersByPath`, `ssm:GetParameter`, `ssm:GetParameterHistory`,
-`ssm:DescribeParameters`, `ssm:PutParameter`, `ssm:DeleteParameter`,
-`ssm:ListTagsForResource`, `ssm:AddTagsToResource`, `ssm:RemoveTagsFromResource`, the matching
-`kms:Decrypt`/`kms:Encrypt`/`kms:GenerateDataKey`, and for attachments `s3:ListBucket`,
-`s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on the bucket. Read-only roles work too: Keyhold
-shows what it can read and says so when a save is refused.
+`ssm:PutParameter`, `ssm:DeleteParameter`, `ssm:ListTagsForResource`, `ssm:AddTagsToResource`,
+`ssm:RemoveTagsFromResource`, the matching `kms:Decrypt`/`kms:Encrypt`/`kms:GenerateDataKey`, and
+for attachments `s3:ListBucket`, `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on the bucket,
+all on the vault's path. Read-only roles work too: Keyhold shows what it can read and says so when
+a save is refused.
+
+`ssm:DescribeParameters` is optional. It cannot be limited to a path, so an account that gives
+some people only one branch usually leaves it out. Without it, records are titled by their name
+until opened, and the KMS key of a parameter is read from its history instead.
 
 Good to know: parameter **names, folder paths and titles** are metadata AWS keeps unencrypted, and
 anyone allowed to describe parameters in the account can see them. Values and notes are encrypted.

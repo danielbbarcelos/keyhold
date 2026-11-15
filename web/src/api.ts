@@ -323,6 +323,8 @@ export interface AwsVault {
   bucket: string
   /** Whether "Mudar o nome na AWS também" starts ticked when a title or folder name changes. */
   rename_with_title?: boolean
+  /** The branch of the account the vault starts at, like `/shared`; empty for the whole account. */
+  root?: string | null
 }
 
 export interface AwsLogin {

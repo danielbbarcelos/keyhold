@@ -270,8 +270,10 @@ function LockButton({
         >
           <span
             className="grid size-[30px] place-items-center rounded-full"
+            // What has gone by grows clockwise from the top, the way a clock hand moves (as the 2FA
+            // code's ring does).
             style={{
-              background: `conic-gradient(var(${urgent ? '--rose' : '--primary'}) 0 ${share * 100}%, var(--border) ${share * 100}% 100%)`,
+              background: `conic-gradient(var(--border) 0 ${(1 - share) * 100}%, var(${urgent ? '--rose' : '--primary'}) ${(1 - share) * 100}% 100%)`,
             }}
           >
             <span className="grid size-6 place-items-center rounded-full bg-sidebar">
