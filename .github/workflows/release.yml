@@ -73,6 +73,12 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    # Windows warns before running a program nobody vouched for. Once the SignPath Foundation has
+    # accepted the project (the SIGNPATH_* variables and secret exist), a release signs the two
+    # programs before they go into the installer, and then the installer itself. A manual run, or
+    # a repository without them, builds unsigned as before. See docs/CODE_SIGNING.md.
+    env:
+      SIGN: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -95,6 +101,28 @@ jobs:
               if ($text.IndexOf($dll, [StringComparison]::OrdinalIgnoreCase) -ge 0) { throw "$exe needs $dll" }
             }
           }
+      - name: Hand the programs to SignPath
+        if: env.SIGN == 'true'
+        id: unsigned-programs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-programs
+          path: |
+            target/release/keyhold.exe
+            target/release/keyhold-launch.exe
+      - name: Sign the programs
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: keyhold
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: programs
+          github-artifact-id: ${{ steps.unsigned-programs.outputs.artifact-id }}
+          # A release signature waits for a person to approve it in SignPath.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: target/release
       - name: Installer
         shell: pwsh
         run: |
@@ -103,6 +131,33 @@ jobs:
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp "/DAppVersion=$version" packaging\windows\keyhold.iss
           if ($LASTEXITCODE -ne 0) { throw 'the installer did not build' }
           Copy-Item dist\KeyholdSetup.exe KeyholdSetup.exe
+      - name: Hand the installer to SignPath
+        if: env.SIGN == 'true'
+        id: unsigned-installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with: { name: unsigned-installer, path: KeyholdSetup.exe }
+      - name: Sign the installer
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: keyhold
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+      - name: Signed, all three
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          Copy-Item signed\KeyholdSetup.exe KeyholdSetup.exe -Force
+          foreach ($exe in 'KeyholdSetup.exe', 'target\release\keyhold.exe', 'target\release\keyhold-launch.exe') {
+            $signature = Get-AuthenticodeSignature $exe
+            if ($signature.Status -ne 'Valid') { throw "$exe is not signed: $($signature.StatusMessage)" }
+            "$exe signed by $($signature.SignerCertificate.Subject)"
+          }
       - name: Install it, the way a person would (silently here)
         shell: pwsh
         run: |
@@ -127,7 +182,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with: { path: out, merge-multiple: true }
+        # linux, macos and windows; the unsigned-* handed to SignPath are not downloads.
+        with: { path: out, pattern: '[lmw]*', merge-multiple: true }
       # A signed statement that these exact files came out of this workflow at this commit:
       #   gh attestation verify KeyholdSetup.exe --repo danielbbarcelos/keyhold
       - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
@@ -136,6 +192,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
         run: |
           VERSION="${TAG#v}"
           # The notes are that version's section of the changelog, heading excluded.
@@ -144,6 +201,9 @@ jobs:
           # What each download should hash to, for anyone who wants to check before running it.
           (cd out && sha256sum * > SHA256SUMS.txt)
           { echo; echo '### SHA-256'; echo; echo '```'; cat out/SHA256SUMS.txt; echo '```'; } >> notes.md
+          if [ -n "$SIGNPATH_ORGANIZATION_ID" ]; then
+            { echo; echo 'Windows downloads: free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).'; } >> notes.md
+          fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" out/* --repo "$GITHUB_REPOSITORY" --clobber
           else
