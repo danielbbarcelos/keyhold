@@ -38,6 +38,15 @@
   permission to read the whole trail is told so and pointed to each record's Atividade.
 - **"sem trilha na AWS"** next to an AWS vault's name and on its records, when the account has no
   trail there, with the reason and "Tentar de novo".
+- **Share a record with somebody outside.** "Compartilhar…" on a record. From an AWS vault, a link
+  to a page in the vault's own bucket: valid for hours (never past the AWS session that signs it)
+  or until first opened, with an optional generated opening password. The link's key never leaves
+  its fragment, the bucket holds only ciphertext in two layers (what the page shows before
+  "Revelar", and the fields), the page is the same bytes for every share and runs only its own
+  script, and what it reports (opened, revealed, wrong password) becomes trail events. The record
+  shows its open links and revokes them, every version deleted. From a local vault, a ZIP with
+  AES-256 (WinZip AE-2) and a 24-character generated password, holding the record as .txt, .md or
+  .html. The 2FA seed and attachments never go.
 - **A hint when Keyhold opens on 127.0.0.1**, on Início, with the `set-host` command that gives it a
   name of its own. Dismissed on this machine.
 

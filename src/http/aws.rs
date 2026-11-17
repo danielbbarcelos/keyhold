@@ -2455,12 +2455,16 @@ pub(crate) async fn record_shares(state: &AppState, id: &str) -> Answer {
     let mine: Vec<crate::aws::config::SharedLink> =
         config.shares.iter().filter(|share| share.record_id == id && share.expires_at > now).cloned().collect();
 
-    if mine.is_empty() {
-        return Ok(Json(json!({ "shares": [] })));
-    }
-
     let (vault_id, name) = target_record(id)?;
     let place = place(state, &vault_id).await?;
+    // The longest a new link may last: until these credentials end.
+    let session_ends_at = place.credentials.expires_at();
+    let settings = bucket_settings(state, &place).await;
+
+    if mine.is_empty() {
+        return Ok(Json(json!({ "shares": [], "session_ends_at": session_ends_at, "share_off": settings.share_off })));
+    }
+
     let s3 = s3_of(state, &place)?;
     let mut answer = Vec::new();
     let mut newly_seen: Vec<(String, String)> = Vec::new();
@@ -2505,7 +2509,7 @@ pub(crate) async fn record_shares(state: &AppState, id: &str) -> Answer {
         })?;
     }
 
-    Ok(Json(json!({ "shares": answer })))
+    Ok(Json(json!({ "shares": answer, "session_ends_at": session_ends_at, "share_off": settings.share_off })))
 }
 
 /// Revoke a link: delete its objects, versions and all, so nothing of it stays in the bucket.

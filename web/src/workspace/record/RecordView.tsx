@@ -9,6 +9,7 @@ import {
   FolderInput,
   Pencil,
   ShieldAlert,
+  Share2,
   ShieldOff,
   Star,
   Trash2,
@@ -19,7 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
-import { api, ApiError, type FolderNode, type OpenRecord, type VersionEntry } from '../../api'
+import { api, ApiError, type FolderNode, type OpenRecord, type SharedLink, type VersionEntry } from '../../api'
 import { copyForSeconds } from '../../clipboard'
 import { Attachments } from '../Attachments'
 import { primaryField, subtitleField } from '../fields'
@@ -29,6 +30,7 @@ import { toast, toastError } from '../toast'
 import { VersionDialog } from '../VersionDialog'
 import { Activity } from './Activity'
 import { RecordAlerts } from './Alerts'
+import { ShareDialog } from './ShareDialog'
 import { FieldRow } from './FieldRow'
 import { folderPath, when } from '../vault/paths'
 
@@ -74,6 +76,13 @@ export function RecordView({
   const [files, setFiles] = useState<number | null>(null)
   const [viewing, setViewing] = useState<number | null>(null)
   const [copied, setCopied] = useState(0)
+  const [sharing, setSharing] = useState(false)
+  // AWS records: links still open, when the session that would sign a new one ends, and whether
+  // the bucket switched sharing off.
+  const [shares, setShares] = useState<SharedLink[]>([])
+  const [sessionEndsAt, setSessionEndsAt] = useState<number | null>(null)
+  const [shareOff, setShareOff] = useState(false)
+  const aws = Boolean(record.parameter)
 
   const { payload } = record
   const primary = primaryField(payload.fields)
@@ -87,6 +96,20 @@ export function RecordView({
     void api.versions(record.id).then((found) => setVersions(found.versions)).catch(() => setVersions([]))
     void api.attachments(record.id).then((found) => setFiles(found.attachments.length)).catch(() => setFiles(null))
   }, [record.id, record.version])
+
+  const loadShares = () => {
+    if (!aws) return
+    void api
+      .recordShares(record.id)
+      .then((found) => {
+        setShares(found.shares)
+        setSessionEndsAt(found.session_ends_at ?? null)
+        setShareOff(found.share_off ?? false)
+      })
+      .catch(() => setShares([]))
+  }
+
+  useEffect(loadShares, [record.id, aws])
 
   useEffect(() => {
     if (copied <= 0) return
@@ -140,6 +163,30 @@ export function RecordView({
                   normalmente; quem administra a conta resolve isso.
                 </TooltipContent>
               </Tooltip>
+            )}
+            {shares.length > 0 && (
+              <span className="inline-flex items-center gap-1.5">
+                <Pill icon={Share2} tone="amber">
+                  {shares.length === 1 ? '1 link ativo' : `${shares.length} links ativos`} · expira às{' '}
+                  {new Date(Math.min(...shares.map((one) => one.expires_at)) * 1000).toLocaleTimeString('pt-BR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </Pill>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 rounded-full px-2.5 text-xs"
+                  onClick={() =>
+                    void run(async () => {
+                      for (const one of shares) await api.revokeShare(one.id)
+                      loadShares()
+                    }, shares.length === 1 ? 'Link revogado' : 'Links revogados')
+                  }
+                >
+                  Revogar
+                </Button>
+              </span>
             )}
             {record.rotation_due_at && (
               <Pill icon={CalendarClock} tone={overdue ? 'rose' : undefined}>
@@ -239,6 +286,7 @@ export function RecordView({
             },
             ...(permanent ? [] : [{ kind: 'item' as const, label: 'Mover para outro cofre', icon: Vault, onSelect: onMoveToVault }]),
             { kind: 'item', label: 'Copiar para outro local', icon: Copy, onSelect: onCopy },
+            ...(shareOff || record.plaintext ? [] : [{ kind: 'item' as const, label: 'Compartilhar…', icon: Share2, onSelect: () => setSharing(true) }]),
             {
               kind: 'item',
               label: record.compromised_at ? 'Remover marca de comprometido' : 'Marcar como comprometido',
@@ -333,6 +381,16 @@ export function RecordView({
       )}
 
       {tab === 'atividade' && <Activity recordId={record.id} />}
+
+      {sharing && (
+        <ShareDialog
+          record={record}
+          aws={aws}
+          sessionEndsAt={sessionEndsAt}
+          onClose={() => setSharing(false)}
+          onShared={loadShares}
+        />
+      )}
 
       {viewing !== null && (
         <VersionDialog

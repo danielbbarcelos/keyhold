@@ -535,6 +535,25 @@ export interface Activity {
   audit?: AuditGroup
 }
 
+/** A link shared from an AWS vault, while it can still be opened. */
+export interface SharedLink {
+  id: string
+  created_at: number
+  expires_at: number
+  first_access: boolean
+  password: boolean
+  recipient: string | null
+  opened: boolean
+  revealed: boolean
+}
+
+export interface ShareChoice {
+  /** Indices of the record's fields. */
+  fields: number[]
+  notes: boolean
+  recipient?: string
+}
+
 export interface VaultTrail {
   groups: string[]
   denied: string[]
@@ -709,6 +728,23 @@ export const api = {
   },
 
   retryAudit: (vaultId: string) => call<{ audit: AuditSummary }>('POST', `/api/aws/vaults/${vaultId}/audit/retry`),
+
+  /** AWS vaults: a link to a page in the vault's bucket. */
+  shareRecord: (id: string, choice: ShareChoice & { hours?: number; first_access: boolean; password: boolean }) =>
+    call<{ link: string; password: string | null; share: { id: string; expires_at: number; first_access: boolean; recipient: string | null } }>(
+      'POST',
+      `/api/records/${id}/share`,
+      choice,
+    ),
+
+  /** Local vaults: a ZIP with AES-256 to download. */
+  shareFile: (id: string, choice: ShareChoice & { format: 'md' | 'txt' | 'html' }) =>
+    call<{ name: string; inner: string; data: string; password: string }>('POST', `/api/records/${id}/share-file`, choice),
+
+  recordShares: (id: string) =>
+    call<{ shares: SharedLink[]; session_ends_at?: number | null; share_off?: boolean }>('GET', `/api/records/${id}/shares`),
+
+  revokeShare: (shareId: string) => call<{ revoked: boolean }>('DELETE', `/api/shares/${shareId}`),
 
   dismissSetHostHint: () => call<{ set_host_hint_dismissed: boolean }>('DELETE', '/api/settings/set-host-hint'),
 
