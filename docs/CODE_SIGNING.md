@@ -1,9 +1,12 @@
 # Code signing
 
-## Policy
+## Status
 
-Free code signing on Windows provided by [SignPath.io](https://about.signpath.io), certificate by
-[SignPath Foundation](https://signpath.org).
+The downloads are not signed yet. The release workflow is ready to sign the Windows programs
+through [SignPath.io](https://about.signpath.io) once a certificate is in place; until then, check
+a download with its SHA-256 sum and build attestation (below).
+
+## Policy
 
 - **What is signed.** Only what this repository's release workflow
   ([`.github/workflows/release.yml`](../.github/workflows/release.yml)) builds from the tagged
@@ -24,7 +27,7 @@ when the person connects an AWS account to it, and then only to AWS. See
 ## Checking a download
 
 ```powershell
-Get-AuthenticodeSignature .\KeyholdSetup.exe   # Status: Valid, signed by SignPath Foundation
+Get-AuthenticodeSignature .\KeyholdSetup.exe   # once signing is in place: Status Valid
 ```
 
 Every release also carries a SHA-256 list and a build attestation:
