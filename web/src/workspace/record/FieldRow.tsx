@@ -450,7 +450,17 @@ export function CopyButton({
     <IconButton
       label={copied > 0 ? `A área de transferência é limpa em ${copied}s` : `Copiar (limpa em ${seconds}s)`}
       onClick={() => {
-        void copyForSeconds(typeof value === 'string' ? value : value(), seconds, () => setCopied(0))
+        // A refusal from the binary is kept apart from a clipboard that would not take the value.
+        let refused: unknown = null
+        const handed =
+          typeof value === 'string'
+            ? value
+            : value().catch((cause) => {
+                refused = cause
+                throw cause
+              })
+
+        void copyForSeconds(handed, seconds, () => setCopied(0))
           .then(() => {
             // Reported once the copy happened: a trail that records copies that failed is a trail
             // nobody can trust.
@@ -458,7 +468,15 @@ export function CopyButton({
             setCopied(seconds)
             toast(`${label} copiado`, `A área de transferência é limpa em ${seconds} segundos.`)
           })
-          .catch(() => toast('Não foi possível copiar', 'O navegador bloqueou o acesso à área de transferência nesta página.', 'error'))
+          .catch(() =>
+            toast(
+              'Não foi possível copiar',
+              refused instanceof ApiError
+                ? refused.message
+                : 'O navegador bloqueou o acesso à área de transferência nesta página.',
+              'error',
+            ),
+          )
       }}
     >
       {copied > 0 ? <Check className="text-primary" /> : <Copy />}
