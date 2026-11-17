@@ -35,6 +35,10 @@
   .icon { flex-shrink: 0; width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
   .icon:hover { background: var(--line); color: var(--fg); }
   .notes { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+  .notes small { display: block; color: var(--muted); font-size: 12px; }
+  .notes span { display: block; white-space: pre-wrap; word-break: break-word; }
+  .icon { display: grid; place-items: center; }
+  .icon svg { width: 16px; height: 16px; }
   .after { margin: 12px 0 0; color: var(--muted); font-size: 13px; }
   footer { margin-top: 20px; color: var(--faint); font-size: 12px; text-align: center; }
   [hidden] { display: none !important; }
@@ -175,6 +179,32 @@
     });
   }
 
+  // Lucide icons (ISC), drawn through the DOM: this page never parses markup.
+  var ICONS = {
+    copy: [['rect', { width: 14, height: 14, x: 8, y: 8, rx: 2, ry: 2 }], ['path', { d: 'M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2' }]],
+    check: [['path', { d: 'M20 6 9 17l-5-5' }]],
+    eye: [['path', { d: 'M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0' }], ['circle', { cx: 12, cy: 12, r: 3 }]],
+    eyeOff: [['path', { d: 'M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49' }], ['path', { d: 'M14.084 14.158a3 3 0 0 1-4.242-4.242' }], ['path', { d: 'M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143' }], ['path', { d: 'm2 2 20 20' }]]
+  };
+
+  function icon(name) {
+    var ns = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(ns, 'svg');
+    [['viewBox', '0 0 24 24'], ['fill', 'none'], ['stroke', 'currentColor'], ['stroke-width', '2'], ['stroke-linecap', 'round'], ['stroke-linejoin', 'round'], ['aria-hidden', 'true']]
+      .forEach(function (pair) { svg.setAttribute(pair[0], pair[1]); });
+    ICONS[name].forEach(function (part) {
+      var node = document.createElementNS(ns, part[0]);
+      Object.keys(part[1]).forEach(function (key) { node.setAttribute(key, String(part[1][key])); });
+      svg.appendChild(node);
+    });
+    return svg;
+  }
+
+  function setIcon(button, name) {
+    while (button.firstChild) button.removeChild(button.firstChild);
+    button.appendChild(icon(name));
+  }
+
   function row(label, value, secret) {
     var line = document.createElement('div');
     line.className = 'field';
@@ -191,23 +221,26 @@
       var eye = document.createElement('button');
       eye.type = 'button';
       eye.className = 'icon';
-      eye.textContent = 'ver';
-      eye.setAttribute('aria-label', 'Mostrar');
+      setIcon(eye, 'eye');
+      eye.setAttribute('aria-label', 'Mostrar ' + label);
+      eye.title = 'Mostrar';
       eye.addEventListener('click', function () {
         var showing = span.className !== 'hidden';
         span.textContent = showing ? '••••••••••••' : value;
         span.className = showing ? 'hidden' : '';
-        eye.textContent = showing ? 'ver' : 'ocultar';
+        setIcon(eye, showing ? 'eye' : 'eyeOff');
+        eye.title = showing ? 'Mostrar' : 'Ocultar';
       });
       line.appendChild(eye);
     }
     var copy = document.createElement('button');
     copy.type = 'button';
     copy.className = 'icon';
-    copy.textContent = 'copiar';
+    setIcon(copy, 'copy');
+    copy.title = 'Copiar';
     copy.setAttribute('aria-label', 'Copiar ' + label);
     copy.addEventListener('click', function () {
-      navigator.clipboard.writeText(value).then(function () { copy.textContent = 'copiado'; setTimeout(function () { copy.textContent = 'copiar'; }, 1500); });
+      navigator.clipboard.writeText(value).then(function () { setIcon(copy, 'check'); setTimeout(function () { setIcon(copy, 'copy'); }, 1500); });
     });
     line.appendChild(copy);
     return line;
