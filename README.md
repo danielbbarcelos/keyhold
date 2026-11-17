@@ -55,10 +55,8 @@ launcher; on macOS it makes `~/Applications/Keyhold.app`, which Launchpad and Sp
 [latest release](https://github.com/danielbbarcelos/keyhold/releases/latest) and open it. It installs
 for your user only (no administrator), adds **Keyhold** to the Start menu, and can be removed from
 "Adicionar ou remover programas". Your vault lives in `%LOCALAPPDATA%\Keyhold` and is never touched
-by installing, upgrading or uninstalling. The Windows downloads are signed through the SignPath
-Foundation (free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
-[SignPath Foundation](https://signpath.org)); see [Code signing](#code-signing). Until that is in
-place Windows warns the first time: "Mais informações", then "Executar assim mesmo".
+by installing, upgrading or uninstalling. Windows warns the first time, because the installer is not
+signed yet: "Mais informações", then "Executar assim mesmo".
 
 To build it yourself instead, `powershell -ExecutionPolicy Bypass -File .\install.ps1` in a clone.
 
@@ -278,10 +276,9 @@ What changed in each version is in [CHANGELOG.md](CHANGELOG.md); what is planned
 
 ## Code signing
 
-Windows downloads are signed with a certificate from the SignPath Foundation, through
-[SignPath.io](https://about.signpath.io). Until the project is accepted there, they are still
-unsigned and Windows shows its SmartScreen warning. What is signed, who approves it and how to
-check a download is in [docs/CODE_SIGNING.md](docs/CODE_SIGNING.md).
+The downloads are not signed yet, so Windows and macOS warn before the first run. Each release
+carries SHA-256 sums and a build attestation instead; how to check them, and the signing policy
+for when signing arrives, is in [docs/CODE_SIGNING.md](docs/CODE_SIGNING.md).
 
 ## Licence
 
