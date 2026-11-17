@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::records::Payload;
+use crate::tr;
 
 /// The recipient's page, the same bytes for every share: nothing about a record is in it. Its
 /// inline script is allowed by hash, computed here so the page and its policy cannot drift apart.
@@ -78,7 +79,7 @@ pub fn content(payload: &Payload, choice: &Choice) -> Result<(Vec<SharedField>, 
     let notes = (choice.notes && !payload.notes.trim().is_empty()).then(|| payload.notes.clone());
 
     if fields.is_empty() && notes.is_none() {
-        bail!("escolha ao menos um campo para compartilhar");
+        bail!(tr!("escolha ao menos um campo para compartilhar"));
     }
 
     Ok((fields, notes, left_out))
@@ -141,9 +142,17 @@ fn url_pairs(pairs: &[(&str, &str)]) -> String {
 /// A record as a text file for a local share: `.md`, `.txt` or `.html`. The `.html` carries no
 /// script at all and escapes everything, under a policy that allows nothing.
 pub fn as_file(title: &str, fields: &[SharedField], notes: Option<&str>, format: &str) -> Result<(String, Vec<u8>)> {
-    const PARTS: [(&str, &str); 5] =
-        [("question", "Pergunta"), ("holder", "Nome no cartão"), ("expiry", "Validade"), ("code", "Código de segurança"), ("pin", "PIN")];
-    let part_label = |key: &str| PARTS.iter().find(|(k, _)| *k == key).map(|(_, l)| *l).unwrap_or(key).to_string();
+    // Written in the sharer's language: the file is theirs until it reaches the recipient.
+    let part_label = |key: &str| match key {
+        "question" => tr!("Pergunta"),
+        "holder" => tr!("Nome no cartão"),
+        "expiry" => tr!("Validade"),
+        "code" => tr!("Código de segurança"),
+        "pin" => tr!("PIN"),
+        other => other.to_string(),
+    };
+    let notes_label = tr!("Observação");
+    let base = tr!("registro");
 
     let mut lines: Vec<(String, String)> = Vec::new();
     for field in fields {
@@ -165,9 +174,9 @@ pub fn as_file(title: &str, fields: &[SharedField], notes: Option<&str>, format:
                 out.push_str(&format!("- **{label}:** `{}`\n", value.replace('`', "'")));
             }
             if let Some(notes) = notes {
-                out.push_str(&format!("\n## Observação\n\n{notes}\n"));
+                out.push_str(&format!("\n## {notes_label}\n\n{notes}\n"));
             }
-            Ok(("registro.md".into(), out.into_bytes()))
+            Ok((format!("{base}.md"), out.into_bytes()))
         }
         "txt" => {
             let mut out = format!("{title}\n\n");
@@ -175,33 +184,34 @@ pub fn as_file(title: &str, fields: &[SharedField], notes: Option<&str>, format:
                 out.push_str(&format!("{label}: {value}\n"));
             }
             if let Some(notes) = notes {
-                out.push_str(&format!("\nObservação:\n{notes}\n"));
+                out.push_str(&format!("\n{notes_label}:\n{notes}\n"));
             }
-            Ok(("registro.txt".into(), out.into_bytes()))
+            Ok((format!("{base}.txt"), out.into_bytes()))
         }
         "html" => {
             let escape = |text: &str| {
                 text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
             };
             let mut out = format!(
-                "<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\">\
+                "<!doctype html><html lang=\"{1}\"><head><meta charset=\"utf-8\">\
                  <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\">\
                  <title>{0}</title><style>body{{font:15px/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}}\
                  dt{{color:#666;font-size:13px;margin-top:.75rem}}dd{{margin:0;font-family:ui-monospace,monospace;word-break:break-all}}</style>\
                  </head><body><h1>{0}</h1><dl>",
-                escape(title)
+                escape(title),
+                crate::i18n::current().tag()
             );
             for (label, value) in &lines {
                 out.push_str(&format!("<dt>{}</dt><dd>{}</dd>", escape(label), escape(value)));
             }
             out.push_str("</dl>");
             if let Some(notes) = notes {
-                out.push_str(&format!("<h2>Observação</h2><p style=\"white-space:pre-wrap\">{}</p>", escape(notes)));
+                out.push_str(&format!("<h2>{}</h2><p style=\"white-space:pre-wrap\">{}</p>", escape(&notes_label), escape(notes)));
             }
             out.push_str("</body></html>\n");
-            Ok(("registro.html".into(), out.into_bytes()))
+            Ok((format!("{base}.html"), out.into_bytes()))
         }
-        _ => bail!("formato desconhecido: use md, txt ou html"),
+        _ => bail!(tr!("formato desconhecido: use md, txt ou html")),
     }
 }
 

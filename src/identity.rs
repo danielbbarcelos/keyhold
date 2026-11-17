@@ -37,6 +37,7 @@ use crate::crypto::{
 };
 use crate::db::Store;
 use crate::encoding::base32;
+use crate::tr;
 
 /// Context strings, so a ciphertext from one place cannot be pasted into another.
 const AAD_VAULT_KEY: &[u8] = b"keyhold:vault-key:v1";
@@ -226,7 +227,7 @@ pub fn unlock(vault: &Store, attempt: UnlockAttempt) -> Result<SecretKey> {
         let kek = crypto::derive_key(&normalised, &recovery_salt, params)?;
 
         unwrap_key(&kek, &recovery_wrapped, AAD_RECOVERY)
-            .map_err(|_| anyhow!("a chave de recuperação não abre este cofre"))?
+            .map_err(|_| anyhow!(tr!("a chave de recuperação não abre este cofre")))?
     } else {
         let unlock_key = match protection {
             Protection::Password => {
@@ -244,7 +245,7 @@ pub fn unlock(vault: &Store, attempt: UnlockAttempt) -> Result<SecretKey> {
         // Nothing here compares a stored hash. The password is right when the key it derives opens
         // the wrapped vault key, and wrong when it does not — there is no other check to fool.
         unwrap_key(&unlock_key, &wrapped, AAD_VAULT_KEY)
-            .map_err(|_| anyhow!("a senha-mestra não abre este cofre"))?
+            .map_err(|_| anyhow!(tr!("a senha-mestra não abre este cofre")))?
     };
 
     if let Some(sealed) = totp_secret {
@@ -260,7 +261,7 @@ pub fn unlock(vault: &Store, attempt: UnlockAttempt) -> Result<SecretKey> {
         secret.zeroize();
 
         if !accepted {
-            bail!("o código não confere ou já expirou");
+            bail!(tr!("o código não confere ou já expirou"));
         }
     }
 

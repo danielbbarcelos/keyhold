@@ -17,6 +17,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::AwsError;
+use crate::tr;
 
 pub const DEFAULT_PREFIX: &str = "/keyhold/audit";
 
@@ -55,11 +56,10 @@ pub enum Failure {
 pub fn classify(error: &AwsError, group: &str) -> Failure {
     match error {
         AwsError::AccessDenied(_) => Failure::Off(
-            "sem permissão para gravar a trilha: falta a política audit-write ou o atributo keyhold-user no Identity Center"
-                .into(),
+            tr!("sem permissão para gravar a trilha: falta a política audit-write ou o atributo keyhold-user no Identity Center"),
         ),
-        AwsError::NotFound(_) => Failure::Off(format!("o log group {group} não existe nesta conta")),
-        other => Failure::Unavailable(format!("o CloudWatch Logs não respondeu ({other})")),
+        AwsError::NotFound(_) => Failure::Off(tr!("o log group {group} não existe nesta conta", group = group)),
+        other => Failure::Unavailable(tr!("o CloudWatch Logs não respondeu ({other})", other = other)),
     }
 }
 

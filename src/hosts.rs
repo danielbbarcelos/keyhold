@@ -19,6 +19,8 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 
+use crate::tr;
+
 #[cfg(unix)]
 pub const HOSTS_FILE: &str = "/etc/hosts";
 
@@ -39,11 +41,12 @@ pub fn check_name(name: &str) -> Result<()> {
     let suffix = LOCAL_SUFFIXES.iter().find(|suffix| name.ends_with(*suffix));
 
     let Some(suffix) = suffix else {
-        bail!(
-            "\"{name}\" não termina num domínio local. Use um nome terminado em {}: eles nunca \
+        bail!(tr!(
+            "\"{name}\" não termina num domínio local. Use um nome terminado em {suffixes}: eles nunca \
              existem na internet, e um nome que existe pode ser servido por outra pessoa.",
-            LOCAL_SUFFIXES.join(", ")
-        );
+            name = name,
+            suffixes = LOCAL_SUFFIXES.join(", ")
+        ));
     };
 
     let head = &name[..name.len() - suffix.len()];
@@ -57,10 +60,12 @@ pub fn check_name(name: &str) -> Result<()> {
     };
 
     if head.is_empty() || name.len() > 253 || !head.split('.').all(label_ok) {
-        bail!(
+        bail!(tr!(
             "\"{name}\" não é um nome válido. Use letras minúsculas, números e hífen, por exemplo \
-             {DEFAULT_NAME}."
-        );
+             {example}.",
+            name = name,
+            example = DEFAULT_NAME
+        ));
     }
 
     Ok(())
@@ -130,12 +135,12 @@ pub fn names_on_this_machine() -> Vec<String> {
 /// `/etc/hosts` being empty or truncated for a moment would break every name lookup on the machine,
 /// which is a lot to risk for a nicer URL.
 pub fn replace_file(path: &Path, contents: &str) -> Result<()> {
-    let dir = path.parent().context("o arquivo não tem pasta")?;
+    let dir = path.parent().context(tr!("o arquivo não tem pasta"))?;
     let temp = dir.join(".hosts.keyhold.tmp");
 
     {
         let mut file = fs::File::create(&temp)
-            .with_context(|| format!("não consegui escrever em {}", dir.display()))?;
+            .with_context(|| tr!("não consegui escrever em {path}", path = dir.display()))?;
         file.write_all(contents.as_bytes())?;
         file.sync_all()?;
     }
@@ -148,7 +153,7 @@ pub fn replace_file(path: &Path, contents: &str) -> Result<()> {
         fs::set_permissions(&temp, fs::Permissions::from_mode(mode))?;
     }
 
-    fs::rename(&temp, path).with_context(|| format!("não consegui substituir {}", path.display()))?;
+    fs::rename(&temp, path).with_context(|| tr!("não consegui substituir {path}", path = path.display()))?;
 
     Ok(())
 }
@@ -220,9 +225,9 @@ pub fn make_certificate(name: &str, install_ca: bool) -> Result<Certificate> {
     let dir = who.home.join(".config/keyhold/tls");
 
     run_as(&who, Command::new("/bin/mkdir").arg("-p").arg(&dir))
-        .context("não consegui criar a pasta do certificado")?;
+        .context(tr!("não consegui criar a pasta do certificado"))?;
     run_as(&who, Command::new("/bin/chmod").arg("700").arg(dir.parent().unwrap_or(&dir)).arg(&dir))
-        .context("não consegui proteger a pasta do certificado")?;
+        .context(tr!("não consegui proteger a pasta do certificado"))?;
 
     // The CA is the one thing never done silently. `mkcert -install` puts an authority every
     // browser here trusts *for every site*, with its private key in their home: worth having, but
@@ -235,7 +240,7 @@ pub fn make_certificate(name: &str, install_ca: bool) -> Result<Certificate> {
         }
 
         let mut install = Command::new(&mkcert);
-        run_as(&who, install.arg("-install")).context("o mkcert não conseguiu instalar a autoridade local")?;
+        run_as(&who, install.arg("-install")).context(tr!("o mkcert não conseguiu instalar a autoridade local"))?;
     }
 
     let cert = dir.join("cert.pem");
@@ -247,10 +252,10 @@ pub fn make_certificate(name: &str, install_ca: bool) -> Result<Certificate> {
         .arg("-key-file")
         .arg(&key)
         .args([name, "localhost", "127.0.0.1", "::1"]);
-    run_as(&who, &mut make).context("o mkcert falhou")?;
+    run_as(&who, &mut make).context(tr!("o mkcert falhou"))?;
 
     run_as(&who, Command::new("/bin/chmod").arg("600").arg(&key))
-        .context("não consegui proteger a chave do certificado")?;
+        .context(tr!("não consegui proteger a chave do certificado"))?;
 
     Ok(Certificate::Made { cert })
 }
@@ -295,7 +300,7 @@ pub fn remove_certificate() -> Result<bool> {
 
     let dir = who.home.join(".config/keyhold/tls");
     run_as(&who, std::process::Command::new("/bin/rm").arg("-f").arg(dir.join("cert.pem")).arg(dir.join("key.pem")))
-        .context("não consegui apagar o certificado")?;
+        .context(tr!("não consegui apagar o certificado"))?;
 
     Ok(true)
 }

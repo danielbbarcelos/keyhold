@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::crypto::{self, unwrap_key, wrap_key, SecretKey};
 use crate::db::Store;
 use crate::encoding::base32;
+use crate::tr;
 
 /// How deep the tree may go.
 ///
@@ -156,7 +157,7 @@ impl VaultMeta {
         }
 
         let Some(aws) = self.aws.as_mut() else {
-            bail!("um cofre AWS precisa de uma conta e de uma região");
+            bail!(tr!("um cofre AWS precisa de uma conta e de uma região"));
         };
 
         aws.region = aws.region.trim().to_string();
@@ -164,11 +165,11 @@ impl VaultMeta {
         aws.root = match aws.root.take() {
             None => None,
             Some(root) => crate::aws::mapping::normalize_root(&root)
-                .map_err(|why| anyhow!("caminho na AWS inválido: {why}"))?,
+                .map_err(|why| anyhow!(tr!("caminho na AWS inválido: {why}", why = why)))?,
         };
 
         if crate::aws::validate_region(&aws.region).is_err() {
-            bail!("'{}' não é uma região da AWS", aws.region);
+            bail!(tr!("'{region}' não é uma região da AWS", region = aws.region));
         }
 
         Ok(self)
@@ -184,10 +185,10 @@ fn settled_icon(icon: Option<crate::records::Icon>) -> Result<Option<crate::reco
 
     if let Some(image) = icon.image.as_deref() {
         if !image.starts_with("data:image/") {
-            bail!("o ícone do cofre precisa ser uma imagem");
+            bail!(tr!("o ícone do cofre precisa ser uma imagem"));
         }
         if image.len() > crate::records::ICON_IMAGE_LIMIT {
-            bail!("a imagem é grande demais para o ícone do cofre");
+            bail!(tr!("a imagem é grande demais para o ícone do cofre"));
         }
     }
 
@@ -394,7 +395,7 @@ fn check_connection(store: &Store, master: &SecretKey, meta: &VaultMeta) -> Resu
     let config = crate::aws::config::load(store, master)?;
 
     if config.connection(&aws.connection_id).is_none() {
-        bail!("a conta AWS não existe mais. Escolha outra");
+        bail!(tr!("a conta AWS não existe mais. Escolha outra"));
     }
 
     Ok(())
@@ -471,7 +472,7 @@ pub fn delete_vault(store: &Store, master: &SecretKey, id: &str, confirm_name: &
     let vault = read_vault(store, master, id)?;
 
     if confirm_name.trim() != vault.name.trim() {
-        bail!("o nome digitado não corresponde ao nome do cofre");
+        bail!(tr!("o nome digitado não corresponde ao nome do cofre"));
     }
 
     let contents = contents_of(store, id)?;
@@ -537,7 +538,7 @@ pub fn rotate_vault(store: &mut Store, master: &SecretKey, id: &str) -> Result<V
             let aad = format!("keyhold:record-key:v1|{record_id}").into_bytes();
 
             let record_key = unwrap_key(&old_key, &wrapped, &aad)
-                .with_context(|| format!("não foi possível abrir a chave de um registro ({record_id})"))?;
+                .with_context(|| tr!("não foi possível abrir a chave de um registro ({record_id})", record_id = record_id))?;
 
             records.push((record_id, wrap_key(&new_key, &record_key, &aad)?));
         }
@@ -558,7 +559,7 @@ pub fn rotate_vault(store: &mut Store, master: &SecretKey, id: &str) -> Result<V
             let aad = folder_key_aad(&folder_id);
 
             let folder_key = unwrap_key(&old_key, &wrapped, &aad)
-                .with_context(|| format!("não foi possível abrir a chave de uma pasta ({folder_id})"))?;
+                .with_context(|| tr!("não foi possível abrir a chave de uma pasta ({folder_id})", folder_id = folder_id))?;
 
             folders.push((folder_id, wrap_key(&new_key, &folder_key, &aad)?));
         }

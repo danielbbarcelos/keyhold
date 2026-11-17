@@ -44,6 +44,7 @@ use crate::lock::{Lock, LockPolicy};
 use crate::session::{Exchange, SessionGate, MARK_HEADER};
 use crate::settings;
 use crate::totp;
+use crate::tr;
 
 /// The header every API request carries. Re-exported for the tests and the interface's sake.
 ///
@@ -223,21 +224,21 @@ async fn open_window(State(state): State<Arc<AppState>>, uri: Uri, headers: Head
     let origin = headers.get(header::ORIGIN).and_then(|value| value.to_str().ok()).unwrap_or_default();
 
     if origin != format!("http://{host}") && origin != format!("https://{host}") {
-        return (StatusCode::FORBIDDEN, Json(json!({ "error": "apenas a própria página do Keyhold pode fazer este pedido" })))
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": tr!("apenas a própria página do Keyhold pode fazer este pedido") })))
             .into_response();
     }
 
     let now = identity::now_seconds();
 
     if now.saturating_sub(LAST.swap(now, std::sync::atomic::Ordering::SeqCst)) < 3 {
-        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": "o Keyhold acabou de ser aberto. Confira as abas do navegador" })))
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": tr!("o Keyhold acabou de ser aberto. Confira as abas do navegador") })))
             .into_response();
     }
 
     if present(&state) {
         Json(json!({ "opened": true })).into_response()
     } else {
-        (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": "não foi possível abrir o Keyhold a partir desta página" })))
+        (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": tr!("não foi possível abrir o Keyhold a partir desta página") })))
             .into_response()
     }
 }
@@ -313,7 +314,7 @@ async fn redeem(
     let origin = origin_of(&state, &headers, &uri);
 
     if !from_our_page(&headers, &origin) {
-        return (StatusCode::FORBIDDEN, Json(json!({ "error": "apenas a própria página do Keyhold pode fazer este pedido" })))
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": tr!("apenas a própria página do Keyhold pode fazer este pedido") })))
             .into_response();
     }
 
@@ -326,7 +327,7 @@ async fn redeem(
         Exchange::Replayed => (
             StatusCode::CONFLICT,
             Json(json!({
-                "error": "este endereço de abertura já tinha sido usado. A sessão aberta com ele foi encerrada por segurança",
+                "error": tr!("este endereço de abertura já tinha sido usado. A sessão aberta com ele foi encerrada por segurança"),
                 "session": "replayed",
             })),
         )
@@ -489,7 +490,7 @@ async fn unlock(State(state): State<Arc<AppState>>, Json(body): Json<UnlockBody>
         if failures >= MAX_FAILURES {
             return Err(Failure(
                 StatusCode::TOO_MANY_REQUESTS,
-                "muitas tentativas sem sucesso. Feche o Keyhold e abra novamente".into(),
+                tr!("muitas tentativas sem sucesso. Feche o Keyhold e abra novamente"),
                 None,
             ));
         }
@@ -876,7 +877,7 @@ async fn answer_agent_request(
                     since,
                     process: asked.peer.parent.clone().unwrap_or_else(|| asked.peer.process.clone()),
                 },
-                None => return Err(bad_request("o processo não está mais em execução")),
+                None => return Err(bad_request(tr!("o processo não está mais em execução"))),
             }
         }
     };
@@ -1166,7 +1167,7 @@ async fn enable_second_factor(
 
     if !totp::verify(&secret, &body.code, identity::now_seconds()) {
         return Err(bad_request(
-            "o código não confere. Confira se o aplicativo mostra o código deste cofre",
+            tr!("o código não confere. Confira se o aplicativo mostra o código deste cofre"),
         ));
     }
 
@@ -1180,7 +1181,7 @@ async fn enable_second_factor(
         .map_err(bad_request)?;
     if existing.is_some() {
         return Err(bad_request(
-            "este cofre já tem um segundo fator. Desative o atual, com um código dele, antes de configurar outro",
+            tr!("este cofre já tem um segundo fator. Desative o atual, com um código dele, antes de configurar outro"),
         ));
     }
 
@@ -1234,13 +1235,13 @@ async fn disable_second_factor(
         if *failures >= MAX_FAILURES {
             return Err(Failure(
                 StatusCode::TOO_MANY_REQUESTS,
-                "muitas tentativas sem sucesso. Feche o Keyhold e abra novamente".into(),
+                tr!("muitas tentativas sem sucesso. Feche o Keyhold e abra novamente"),
                 None,
             ));
         }
         if !totp::verify(&secret, code, identity::now_seconds()) {
             *failures += 1;
-            return Err(bad_request("o código não confere"));
+            return Err(bad_request(tr!("o código não confere")));
         }
     }
 

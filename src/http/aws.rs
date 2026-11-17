@@ -56,6 +56,7 @@ use crate::aws::{
     SsmClient, SsoToken, Tag,
 };
 use crate::records::{OpenRecord, Payload, RecordHeader, RecordPreview, VersionEntry};
+use crate::tr;
 use crate::vaults::{self, AwsVault};
 
 /// How many tag requests run at once while a list is drawn. Parameter Store throttles
@@ -90,51 +91,51 @@ pub(crate) fn aws_failure(error: AwsError) -> Failure {
         AwsError::SessionExpired(_) => (
             StatusCode::FAILED_DEPENDENCY,
             "session_expired",
-            "a sessão da AWS expirou. Renove o login para continuar".to_string(),
+            tr!("a sessão da AWS expirou. Renove o login para continuar"),
         ),
         AwsError::AccessDenied(detail) => (
             StatusCode::FORBIDDEN,
             "access_denied",
-            format!("a AWS negou o acesso ao papel desta conta ({detail})"),
+            tr!("a AWS negou o acesso ao papel desta conta ({detail})", detail = detail),
         ),
         AwsError::NotFound(_) => (
             StatusCode::NOT_FOUND,
             "not_found",
-            "o item não existe mais na AWS. Ele pode ter sido excluído".to_string(),
+            tr!("o item não existe mais na AWS. Ele pode ter sido excluído"),
         ),
         AwsError::VersionConflict(_) => (
             StatusCode::CONFLICT,
             "conflict",
-            "o item foi alterado na AWS depois de aberto. Recarregue antes de salvar".to_string(),
+            tr!("o item foi alterado na AWS depois de aberto. Recarregue antes de salvar"),
         ),
         AwsError::Throttled(_) => (
             StatusCode::TOO_MANY_REQUESTS,
             "throttled",
-            "a AWS limitou o ritmo das requisições. Tente novamente em alguns segundos".to_string(),
+            tr!("a AWS limitou o ritmo das requisições. Tente novamente em alguns segundos"),
         ),
         AwsError::Network(_) => (
             StatusCode::BAD_GATEWAY,
             "network",
-            "a AWS não respondeu. Confira a conexão com a internet".to_string(),
+            tr!("a AWS não respondeu. Confira a conexão com a internet"),
         ),
         AwsError::Invalid(detail) => (
             StatusCode::BAD_REQUEST,
             "invalid",
-            format!("a AWS recusou o pedido: {detail}"),
+            tr!("a AWS recusou o pedido: {detail}", detail = detail),
         ),
         AwsError::TooLarge { size, limit } => (
             StatusCode::BAD_REQUEST,
             "invalid",
-            format!(
-                "o arquivo tem {:.1} MB, acima do limite de {} MB aceito pelo Keyhold",
-                *size as f64 / (1024.0 * 1024.0),
-                limit / (1024 * 1024)
+            tr!(
+                "o arquivo tem {size} MB, acima do limite de {limit} MB aceito pelo Keyhold",
+                size = format!("{:.1}", *size as f64 / (1024.0 * 1024.0)),
+                limit = limit / (1024 * 1024)
             ),
         ),
         AwsError::Other { code, .. } => (
             StatusCode::BAD_GATEWAY,
             "other",
-            format!("a AWS respondeu com um erro inesperado ({code})"),
+            tr!("a AWS respondeu com um erro inesperado ({code})", code = code),
         ),
     };
 
@@ -146,7 +147,7 @@ fn aws_refusal(status: StatusCode, kind: &'static str, text: impl Into<String>) 
     Failure(status, text.into(), Some(kind))
 }
 
-fn not_found(text: &str) -> Failure {
+fn not_found(text: impl Into<String>) -> Failure {
     aws_refusal(StatusCode::NOT_FOUND, "not_found", text)
 }
 
@@ -160,25 +161,25 @@ fn s3_failure(error: AwsError, bucket: &str, region: &str) -> Failure {
         AwsError::AccessDenied(_) => aws_refusal(
             StatusCode::FORBIDDEN,
             "access_denied",
-            format!(
+            tr!(
                 "sem permissão no bucket {bucket}. O papel desta conta precisa de \
                  s3:ListBucket, s3:GetObject, s3:PutObject e s3:DeleteObject nele, e de \
-                 kms:GenerateDataKey e kms:Decrypt na chave dos parâmetros"
+                 kms:GenerateDataKey e kms:Decrypt na chave dos parâmetros", bucket = bucket
             ),
         ),
         AwsError::NotFound(message) if message.to_lowercase().contains("bucket") => aws_refusal(
             StatusCode::NOT_FOUND,
             "not_found",
-            format!(
+            tr!(
                 "o bucket {bucket} não existe na região {region}. Crie o bucket na AWS, pois o \
-                 Keyhold não cria buckets"
+                 Keyhold não cria buckets", bucket = bucket, region = region
             ),
         ),
-        AwsError::NotFound(_) => not_found("o arquivo não existe mais no bucket"),
+        AwsError::NotFound(_) => not_found(tr!("o arquivo não existe mais no bucket")),
         AwsError::Invalid(message) if message.contains("region") => aws_refusal(
             StatusCode::BAD_REQUEST,
             "invalid",
-            format!("o bucket {bucket} está em outra região, e não em {region}"),
+            tr!("o bucket {bucket} está em outra região, e não em {region}", bucket = bucket, region = region),
         ),
         other => aws_failure(other),
     }
@@ -352,10 +353,10 @@ async fn start_login(State(state): State<Arc<AppState>>, Json(body): Json<NewLog
     let region = body.region.trim().to_string();
 
     if !start_url.starts_with("https://") {
-        return Err(bad_request("o endereço do portal precisa começar com https://"));
+        return Err(bad_request(tr!("o endereço do portal precisa começar com https://")));
     }
     crate::aws::validate_region(&region)
-        .map_err(|_| bad_request(format!("'{region}' não é uma região da AWS")))?;
+        .map_err(|_| bad_request(tr!("'{region}' não é uma região da AWS", region = region)))?;
 
     let config = load(&state)?;
     let generation = state.aws.generation(&state.lock).ok_or_else(locked)?;
@@ -426,7 +427,7 @@ async fn poll_login(State(state): State<Arc<AppState>>, Path(id): Path<String>) 
     let (device, login, known) = match waiting {
         (Some(found), _) => found,
         (None, true) => return Ok(Json(json!({ "state": "done" }))),
-        (None, false) => return Err(not_found("nenhum login em andamento para esta conta")),
+        (None, false) => return Err(not_found(tr!("nenhum login em andamento para esta conta"))),
     };
 
     let sso = state.aws.sso(&login.region).map_err(aws_failure)?;
@@ -489,7 +490,7 @@ async fn renew_login(State(state): State<Arc<AppState>>, Path(id): Path<String>)
     });
 
     let config = load(&state)?;
-    let login = config.login(&id).cloned().ok_or_else(|| not_found("o login SSO não existe mais"))?;
+    let login = config.login(&id).cloned().ok_or_else(|| not_found(tr!("o login SSO não existe mais")))?;
     let generation = state.aws.generation(&state.lock).ok_or_else(locked)?;
 
     let held = state
@@ -517,7 +518,7 @@ async fn renew_login(State(state): State<Arc<AppState>>, Path(id): Path<String>)
 /// Log out of Identity Center. The login stays listed, disconnected (A4).
 async fn revoke_login(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
     let config = load(&state)?;
-    let login = config.login(&id).cloned().ok_or_else(|| not_found("o login SSO não existe mais"))?;
+    let login = config.login(&id).cloned().ok_or_else(|| not_found(tr!("o login SSO não existe mais")))?;
 
     let token = state
         .aws
@@ -546,10 +547,10 @@ async fn revoke_login(State(state): State<Arc<AppState>>, Path(id): Path<String>
 /// the login from the list must not leave a live Identity Center session behind it.
 async fn delete_login(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
     let removed = change(&state, |config, _| {
-        let login = config.login(&id).cloned().ok_or_else(|| not_found("o login SSO não existe mais"))?;
+        let login = config.login(&id).cloned().ok_or_else(|| not_found(tr!("o login SSO não existe mais")))?;
         if config.connections.iter().any(|c| c.login_id == id) {
             return Err(conflict(
-                "o login ainda possui contas. Remova as contas antes de remover o login",
+                tr!("o login ainda possui contas. Remova as contas antes de remover o login"),
             ));
         }
         config.logins.retain(|l| l.id != id);
@@ -599,7 +600,7 @@ async fn token_for(state: &AppState, login: &Login, generation: u64) -> Result<S
 /// Every account the login can reach, with the roles in each.
 async fn list_accounts(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
     let config = load(&state)?;
-    let login = config.login(&id).cloned().ok_or_else(|| not_found("o login SSO não existe mais"))?;
+    let login = config.login(&id).cloned().ok_or_else(|| not_found(tr!("o login SSO não existe mais")))?;
     let generation = state.aws.generation(&state.lock).ok_or_else(locked)?;
 
     let token = Arc::new(token_for(&state, &login, generation).await?);
@@ -671,20 +672,20 @@ async fn create_connection(
     let role = body.role.trim().to_string();
 
     if account_id.is_empty() || !account_id.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(bad_request("o número da conta AWS deve conter apenas dígitos"));
+        return Err(bad_request(tr!("o número da conta AWS deve conter apenas dígitos")));
     }
     if role.is_empty() {
-        return Err(bad_request("escolha o papel a usar nesta conta"));
+        return Err(bad_request(tr!("escolha o papel a usar nesta conta")));
     }
 
     let made = change(&state, |config, _| {
         if config.login(&body.login_id).is_none() {
-            return Err(not_found("o login SSO não existe mais"));
+            return Err(not_found(tr!("o login SSO não existe mais")));
         }
         // A3: one account, one connection. Another role is an edit of that connection.
         if config.connections.iter().any(|c| c.account_id == account_id) {
             return Err(conflict(
-                "esta conta já foi adicionada. Para usar outro papel, edite a conta existente",
+                tr!("esta conta já foi adicionada. Para usar outro papel, edite a conta existente"),
             ));
         }
 
@@ -720,7 +721,7 @@ async fn update_connection(
 ) -> Answer {
     let role = body.role.trim().to_string();
     if role.is_empty() {
-        return Err(bad_request("escolha o papel a usar nesta conta"));
+        return Err(bad_request(tr!("escolha o papel a usar nesta conta")));
     }
 
     let (edited, users) = change(&state, |config, vaults| {
@@ -728,7 +729,7 @@ async fn update_connection(
             .connections
             .iter_mut()
             .find(|c| c.id == id)
-            .ok_or_else(|| not_found("a conta AWS não existe mais"))?;
+            .ok_or_else(|| not_found(tr!("a conta AWS não existe mais")))?;
 
         connection.role = role.clone();
         connection.title = title_or_default(body.title.clone(), &connection.account_id, &role);
@@ -750,11 +751,11 @@ async fn update_connection(
 async fn delete_connection(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
     change(&state, |config, vaults| {
         if config.connection(&id).is_none() {
-            return Err(not_found("a conta AWS não existe mais"));
+            return Err(not_found(tr!("a conta AWS não existe mais")));
         }
         if !used_by(&id, vaults).is_empty() {
             return Err(conflict(
-                "um cofre ainda usa esta conta. Exclua o cofre ou troque a conta dele antes",
+                tr!("um cofre ainda usa esta conta. Exclua o cofre ou troque a conta dele antes"),
             ));
         }
         config.connections.retain(|c| c.id != id);
@@ -807,14 +808,14 @@ async fn place(state: &AppState, vault_id: &str) -> Result<Place, Failure> {
             .lock
             .with_key(|key| -> Result<_, Failure> {
                 let summary = vaults::read_vault(&store, key, vault_id)
-                    .map_err(|_| not_found("o cofre não existe mais"))?;
+                    .map_err(|_| not_found(tr!("o cofre não existe mais")))?;
                 let vault = summary
                     .aws
                     .filter(|_| summary.kind == vaults::KIND_AWS)
-                    .ok_or_else(|| bad_request("o cofre não é um cofre AWS"))?;
+                    .ok_or_else(|| bad_request(tr!("o cofre não é um cofre AWS")))?;
                 let config = config::load(&store, key).map_err(bad_request)?;
                 let connection = config.connection(&vault.connection_id).cloned().ok_or_else(|| {
-                    bad_request("a conta AWS deste cofre não existe mais. Conecte a conta de novo em Contas AWS e crie o cofre outra vez")
+                    bad_request(tr!("a conta AWS deste cofre não existe mais. Conecte a conta de novo em Contas AWS e crie o cofre outra vez"))
                 })?;
                 let login = config.login(&connection.login_id).cloned();
                 Ok((vault, connection, login))
@@ -858,9 +859,10 @@ async fn credentials_for(
             AwsError::AccessDenied(_) | AwsError::NotFound(_) => aws_refusal(
                 StatusCode::FORBIDDEN,
                 "access_denied",
-                format!(
-                    "o login não pode mais usar o papel {} na conta {}. Edite a conta",
-                    connection.role, connection.account_id
+                tr!(
+                    "o login não pode mais usar o papel {role} na conta {account}. Edite a conta",
+                    role = connection.role,
+                    account = connection.account_id
                 ),
             ),
             other => aws_failure(other),
@@ -888,7 +890,7 @@ fn s3_of(state: &AppState, place: &Place) -> Result<S3Client, Failure> {
 
 /// The vault and target of an id of the given kind. Any other kind, or an id that is not AWS's,
 /// is "not found": a folder id handed to a record route never reaches a parameter.
-fn target_of(id: &str, kind: IdKind, missing: &str) -> Result<(String, String), Failure> {
+fn target_of(id: &str, kind: IdKind, missing: String) -> Result<(String, String), Failure> {
     match mapping::decode_id(id) {
         Some((found, vault, target)) if found == kind => Ok((vault, target)),
         _ => Err(not_found(missing)),
@@ -896,15 +898,15 @@ fn target_of(id: &str, kind: IdKind, missing: &str) -> Result<(String, String), 
 }
 
 fn target_record(id: &str) -> Result<(String, String), Failure> {
-    target_of(id, IdKind::Record, "o registro não existe")
+    target_of(id, IdKind::Record, tr!("o registro não existe"))
 }
 
 fn target_folder(id: &str) -> Result<(String, String), Failure> {
-    target_of(id, IdKind::Folder, "a pasta não existe")
+    target_of(id, IdKind::Folder, tr!("a pasta não existe"))
 }
 
 fn target_attachment(id: &str) -> Result<(String, String), Failure> {
-    target_of(id, IdKind::Attachment, "o anexo não existe")
+    target_of(id, IdKind::Attachment, tr!("o anexo não existe"))
 }
 
 /// The whole vault, read once: GetParametersByPath from `/` (A6), and the description and key of
@@ -1045,15 +1047,15 @@ fn listing_failure(error: AwsError, path: &str) -> Failure {
             StatusCode::FORBIDDEN,
             "listing_denied",
             if path == "/" {
-                format!(
+                tr!(
                     "o papel desta conta não pode listar a conta inteira, a partir de /. Se o seu \
                      acesso é a uma pasta só (como /shared), crie um cofre novo informando essa \
-                     pasta em Caminho na AWS ({detail})"
+                     pasta em Caminho na AWS ({detail})", detail = detail
                 )
             } else {
-                format!(
+                tr!(
                     "o papel desta conta não pode listar a partir de {path}. Crie um cofre novo com \
-                     o Caminho na AWS que o seu acesso permite ({detail})"
+                     o Caminho na AWS que o seu acesso permite ({detail})", path = path, detail = detail
                 )
             },
         ),
@@ -1067,10 +1069,10 @@ fn metadata_failure(error: AwsError, name: &str) -> Failure {
         AwsError::AccessDenied(_) => aws_refusal(
             StatusCode::FORBIDDEN,
             "access_denied",
-            format!(
+            tr!(
                 "nada foi gravado. Não foi possível ler a chave KMS de {name}: o papel desta conta \
                  precisa de ssm:DescribeParameters ou de ssm:GetParameterHistory. Sem a chave, \
-                 gravar trocaria a proteção do segredo pela chave padrão da conta"
+                 gravar trocaria a proteção do segredo pela chave padrão da conta", name = name
             ),
         ),
         other => aws_failure(other),
@@ -1092,7 +1094,7 @@ async fn metadata_of(place: &Place, name: &str) -> Result<ParameterMetadata, Fai
 
     match place.ssm.latest_history(name).await {
         Ok(Some(entry)) => Ok(entry.metadata()),
-        Ok(None) => Err(not_found("o registro não existe mais na AWS")),
+        Ok(None) => Err(not_found(tr!("o registro não existe mais na AWS"))),
         Err(AwsError::NotFound(message)) if described.is_none() => {
             Err(aws_failure(AwsError::NotFound(message)))
         }
@@ -1107,9 +1109,9 @@ fn key_of(metadata: &ParameterMetadata, name: &str) -> Result<String, Failure> {
         aws_refusal(
             StatusCode::BAD_GATEWAY,
             "other",
-            format!(
+            tr!(
                 "nada foi gravado. A AWS não informou com qual chave KMS {name} está protegido, e \
-                 gravar sem essa informação trocaria a proteção do segredo"
+                 gravar sem essa informação trocaria a proteção do segredo", name = name
             ),
         )
     })
@@ -1141,10 +1143,10 @@ fn refuse_plaintext(kind: &str, name: &str) -> Result<(), Failure> {
     Err(aws_refusal(
         StatusCode::BAD_REQUEST,
         "invalid",
-        format!(
+        tr!(
             "{name} é um parâmetro {kind}, armazenado sem criptografia. O Keyhold grava apenas \
              SecureString, e trocar o tipo pode quebrar as aplicações que leem esse parâmetro. \
-             Se necessário, mude o tipo na própria AWS"
+             Se necessário, mude o tipo na própria AWS", name = name, kind = kind
         ),
     ))
 }
@@ -1341,10 +1343,10 @@ fn folder_segment(label: &str, segment: Option<&str>) -> Result<String, Failure>
 /// A folder's name as its marker's description: one line, no `/`, within what AWS accepts.
 fn folder_description(label: &str) -> Result<String, Failure> {
     if label.trim().is_empty() {
-        return Err(bad_request("a pasta precisa de um nome"));
+        return Err(bad_request(tr!("a pasta precisa de um nome")));
     }
     if label.contains('/') {
-        return Err(bad_request("o nome da pasta não pode conter '/', pois na AWS a barra cria mais uma pasta"));
+        return Err(bad_request(tr!("o nome da pasta não pode conter '/', pois na AWS a barra cria mais uma pasta")));
     }
 
     mapping::description_for(label).map_err(bad_request)
@@ -1424,7 +1426,7 @@ async fn relocate_folder(
 
     let paths = mapping::folder_paths(listing.parameters.iter().map(|p| p.name.as_str()));
     if paths.contains(new_path) {
-        return Err(conflict(format!("já existe uma pasta {new_path} na AWS")));
+        return Err(conflict(tr!("já existe uma pasta {new_path} na AWS", new_path = new_path)));
     }
 
     let prefix = format!("{}/", path.trim_end_matches('/'));
@@ -1437,7 +1439,7 @@ async fn relocate_folder(
     let mut blocked = Vec::new();
     for parameter in &inside {
         if !is_secure(&parameter.kind) {
-            blocked.push(format!("{} (parâmetro String)", mapping::leaf(&parameter.name)));
+            blocked.push(tr!("{name} (parâmetro String)", name = mapping::leaf(&parameter.name)));
             continue;
         }
         if mapping::is_keep(&parameter.name) {
@@ -1445,10 +1447,10 @@ async fn relocate_folder(
         }
         match attachments_in(state, place, &parameter.name).await {
             Ok(Some((_, _, keys))) if !keys.is_empty() => {
-                blocked.push(format!("{} (tem anexos)", mapping::leaf(&parameter.name)))
+                blocked.push(tr!("{name} (tem anexos)", name = mapping::leaf(&parameter.name)))
             }
             Ok(_) => {}
-            Err(Ok(failure)) => return Err(because("a pasta não foi movida, pois não foi possível conferir os anexos", failure)),
+            Err(Ok(failure)) => return Err(because(&tr!("a pasta não foi movida, pois não foi possível conferir os anexos"), failure)),
             Err(Err(failure)) => return Err(failure),
         }
     }
@@ -1477,10 +1479,13 @@ async fn relocate_folder(
                     return Err(failure);
                 }
                 // Half way: both folders exist now. Say so, and name the new one.
-                warning = Some(format!(
-                    "{moved} de {} parâmetros foram movidos para {new_path} antes da interrupção ({}). O restante permanece em {path}",
-                    inside.len(),
-                    failure.1
+                warning = Some(tr!(
+                    "{moved} de {total} parâmetros foram movidos para {new_path} antes da interrupção ({why}). O restante permanece em {path}",
+                    moved = moved,
+                    total = inside.len(),
+                    new_path = new_path,
+                    why = failure.1,
+                    path = path
                 ));
                 break;
             }
@@ -1498,7 +1503,7 @@ pub(crate) async fn move_folder(state: &AppState, id: &str, parent_id: Option<&s
     let parent = folder_path(state, &vault_id, parent_id)?;
 
     if parent.as_deref().is_some_and(|p| p == path || p.starts_with(&format!("{}/", path.trim_end_matches('/')))) {
-        return Err(bad_request("uma pasta não pode ser movida para dentro dela mesma"));
+        return Err(bad_request(tr!("uma pasta não pode ser movida para dentro dela mesma")));
     }
 
     let new_path = mapping::join(parent.as_deref(), mapping::leaf(&path));
@@ -1509,7 +1514,7 @@ pub(crate) async fn move_folder(state: &AppState, id: &str, parent_id: Option<&s
     let label = folder_labels(&listing).get(&path).cloned();
 
     if !mapping::folder_paths(listing.parameters.iter().map(|p| p.name.as_str())).contains(&path) {
-        return Err(not_found("a pasta não existe mais"));
+        return Err(not_found(tr!("a pasta não existe mais")));
     }
 
     if mapping::absolute(&new_path) == mapping::absolute(&path) {
@@ -1517,8 +1522,8 @@ pub(crate) async fn move_folder(state: &AppState, id: &str, parent_id: Option<&s
     }
 
     match relocate_folder(state, &place, &listing, &path, &new_path).await? {
-        Relocated::Blocked(blocked) => Err(conflict(format!(
-            "a pasta não foi movida, pois estes itens não podem mudar de nome na AWS: {blocked}"
+        Relocated::Blocked(blocked) => Err(conflict(tr!(
+            "a pasta não foi movida, pois estes itens não podem mudar de nome na AWS: {blocked}", blocked = blocked
         ))),
         Relocated::Moved { target, warning } => {
             let node = mapping::folder_node(&vault_id, place.vault.root(), &target, label);
@@ -1547,7 +1552,7 @@ pub(crate) async fn rename_folder(state: &AppState, id: &str, label: &str, segme
     let paths = mapping::folder_paths(names.iter().map(String::as_str));
 
     if !paths.contains(&path) {
-        return Err(not_found("a pasta não existe mais"));
+        return Err(not_found(tr!("a pasta não existe mais")));
     }
 
     let mut target = path.clone();
@@ -1565,8 +1570,8 @@ pub(crate) async fn rename_folder(state: &AppState, id: &str, label: &str, segme
                 warning = said;
             }
             Relocated::Blocked(blocked) => {
-                warning = Some(format!(
-                    "apenas o nome no Keyhold mudou. O caminho na AWS permanece {path}, pois estes itens não podem ser movidos: {blocked}"
+                warning = Some(tr!(
+                    "apenas o nome no Keyhold mudou. O caminho na AWS permanece {path}, pois estes itens não podem ser movidos: {blocked}", path = path, blocked = blocked
                 ));
             }
         }
@@ -1605,7 +1610,7 @@ pub(crate) async fn create_folder(
     let snapshot = snapshot(state, &place).await?;
 
     if mapping::folder_paths(snapshot.parameters.iter().map(|p| p.name.as_str())).contains(&path) {
-        return Err(aws_refusal(StatusCode::CONFLICT, "conflict", "a pasta já existe"));
+        return Err(aws_refusal(StatusCode::CONFLICT, "conflict", tr!("a pasta já existe")));
     }
 
     let key_id = mapping::inherit_key(Some(&path), &known_keys(&snapshot)?);
@@ -1640,7 +1645,7 @@ pub(crate) async fn delete_folder(state: &AppState, id: &str) -> Answer {
     let snapshot = snapshot(state, &place).await?;
 
     if mapping::folder_has_contents(&path, snapshot.parameters.iter().map(|p| p.name.as_str())) {
-        return Err(conflict("a pasta não está vazia. Mova ou exclua o conteúdo antes"));
+        return Err(conflict(tr!("a pasta não está vazia. Mova ou exclua o conteúdo antes")));
     }
 
     let marker = mapping::join(Some(&path), mapping::KEEP);
@@ -1668,10 +1673,10 @@ pub(crate) fn folder_path(state: &AppState, vault_id: &str, id: Option<&str>) ->
     let (owner, path) = target_folder(id)?;
 
     if owner != vault_id {
-        return Err(bad_request("a pasta pertence a outro cofre"));
+        return Err(bad_request(tr!("a pasta pertence a outro cofre")));
     }
     if !mapping::under_root(&path, root.as_deref()) {
-        return Err(not_found("a pasta não está neste cofre"));
+        return Err(not_found(tr!("a pasta não está neste cofre")));
     }
 
     Ok(Some(path))
@@ -1686,9 +1691,11 @@ fn known_keys(snapshot: &Snapshot) -> Result<Vec<(String, Option<String>)>, Fail
             AwsError::AccessDenied(_) => aws_refusal(
                 StatusCode::FORBIDDEN,
                 "access_denied",
-                "nada foi gravado. Não foi possível ler as chaves KMS desta conta (o papel precisa \
-                 de ssm:DescribeParameters), e sem elas não há como saber com qual chave proteger o \
-                 que seria criado nesta pasta",
+                tr!(
+                    "nada foi gravado. Não foi possível ler as chaves KMS desta conta (o papel precisa \
+                     de ssm:DescribeParameters), e sem elas não há como saber com qual chave proteger o \
+                     que seria criado nesta pasta"
+                ),
             ),
             other => aws_failure(other.clone()),
         });
@@ -1707,15 +1714,15 @@ fn write_failure(error: AwsError, name: &str) -> Failure {
         AwsError::AccessDenied(_) => aws_refusal(
             StatusCode::FORBIDDEN,
             "access_denied",
-            format!(
+            tr!(
                 "o papel desta conta não pode gravar em {name}. Na AWS, ele precisa de \
-                 ssm:PutParameter nesse caminho e de kms:Encrypt na chave"
+                 ssm:PutParameter nesse caminho e de kms:Encrypt na chave", name = name
             ),
         ),
         AwsError::VersionConflict(_) => aws_refusal(
             StatusCode::CONFLICT,
             "conflict",
-            format!("já existe um parâmetro chamado {name}. Escolha outro nome"),
+            tr!("já existe um parâmetro chamado {name}. Escolha outro nome", name = name),
         ),
         other => aws_failure(other),
     }
@@ -1825,7 +1832,7 @@ async fn caller(state: &AppState, place: &Place) -> Result<String, AwsError> {
     let name = caller
         .session_name()
         .map(str::to_string)
-        .ok_or_else(|| AwsError::Invalid("estas credenciais não são de uma sessão do Identity Center".into()))?;
+        .ok_or_else(|| AwsError::Invalid(tr!("estas credenciais não são de uma sessão do Identity Center")))?;
 
     state.aws.with(&state.lock, |inner| inner.callers.insert(place.connection.id.clone(), name.clone()));
     Ok(name)
@@ -1835,7 +1842,7 @@ fn trail_unavailable(reason: &str) -> Failure {
     aws_refusal(
         StatusCode::SERVICE_UNAVAILABLE,
         "audit_unavailable",
-        format!("a ação não foi feita porque a trilha da AWS não pôde ser gravada: {reason}. Tente de novo"),
+        tr!("a ação não foi feita porque a trilha da AWS não pôde ser gravada: {reason}. Tente de novo", reason = reason),
     )
 }
 
@@ -1843,7 +1850,7 @@ fn trail_required(reason: &str) -> Failure {
     aws_refusal(
         StatusCode::FORBIDDEN,
         "audit_required",
-        format!("este cofre exige a trilha da AWS, e ela não está disponível: {reason}"),
+        tr!("este cofre exige a trilha da AWS, e ela não está disponível: {reason}", reason = reason),
     )
 }
 
@@ -2037,8 +2044,8 @@ async fn probe(state: &AppState, place: &Place, names: &[String]) -> Value {
                 "group": group,
                 "state": "unknown",
                 "reason": match &stream {
-                    Err(error) => format!("não foi possível saber quem é o usuário desta sessão ({error})"),
-                    Ok(_) => "o CloudWatch Logs não respondeu".to_string(),
+                    Err(error) => tr!("não foi possível saber quem é o usuário desta sessão ({error})", error = error),
+                    Ok(_) => tr!("o CloudWatch Logs não respondeu"),
                 },
             }),
         });
@@ -2292,13 +2299,13 @@ pub(crate) async fn share_record(state: &AppState, id: &str, body: ShareBody) ->
     let settings = bucket_settings(state, &place).await;
 
     if settings.share_off {
-        return Err(share_refusal("o compartilhamento está desligado para este cofre (tag keyhold:share=off no bucket)"));
+        return Err(share_refusal(tr!("o compartilhamento está desligado para este cofre (tag keyhold:share=off no bucket)")));
     }
     let bucket = bucket_of(&place)?;
     // A bucket with a dot is reached path-style, on a host shared by every bucket of the region:
     // the recipient's page would share its origin with strangers.
     if bucket.contains('.') {
-        return Err(share_refusal("o compartilhamento precisa de um bucket sem ponto no nome"));
+        return Err(share_refusal(tr!("o compartilhamento precisa de um bucket sem ponto no nome")));
     }
 
     let absolute = mapping::absolute(&name);
@@ -2309,7 +2316,7 @@ pub(crate) async fn share_record(state: &AppState, id: &str, body: ShareBody) ->
         settings
             .share_prefix
             .clone()
-            .ok_or_else(|| share_refusal("um registro na raiz da conta só pode ser compartilhado com a tag keyhold:share-prefix no bucket"))?
+            .ok_or_else(|| share_refusal(tr!("um registro na raiz da conta só pode ser compartilhado com a tag keyhold:share-prefix no bucket")))?
     };
 
     let now = now_unix();
@@ -2323,7 +2330,7 @@ pub(crate) async fn share_record(state: &AppState, id: &str, body: ShareBody) ->
         (now + body.hours.unwrap_or(1).clamp(1, 12) * 3600).min(session_end)
     };
     if body.first_access && !body.password {
-        return Err(bad_request("o primeiro acesso exige a senha de abertura"));
+        return Err(bad_request(tr!("o primeiro acesso exige a senha de abertura")));
     }
 
     let (opened, _) = open_parameter(state, &place, &name).await?;
@@ -2520,7 +2527,7 @@ pub(crate) async fn revoke_share(state: &AppState, share_id: &str) -> Answer {
         .iter()
         .find(|share| share.id == share_id)
         .cloned()
-        .ok_or_else(|| not_found("o link não existe mais"))?;
+        .ok_or_else(|| not_found(tr!("o link não existe mais")))?;
 
     let place = place(state, &share.vault_id).await?;
     let s3 = s3_of(state, &place)?;
@@ -2539,9 +2546,9 @@ pub(crate) async fn revoke_share(state: &AppState, share_id: &str) -> Answer {
     }
 
     if !failed.is_empty() {
-        return Err(share_refusal(format!(
-            "o link não foi revogado por completo: {} não foi apagado do bucket. Tente de novo",
-            failed.join(", ")
+        return Err(share_refusal(tr!(
+            "o link não foi revogado por completo: {names} não foi apagado do bucket. Tente de novo",
+            names = failed.join(", ")
         )));
     }
 
@@ -2608,7 +2615,7 @@ pub(crate) async fn create_record(
 
     let place = place(state, vault_id).await?;
     if let Some(root) = place.vault.root().filter(|root| !mapping::under_root(&name, Some(root))) {
-        return Err(bad_request(format!("o nome na AWS precisa começar com {root}/, o caminho deste cofre")));
+        return Err(bad_request(tr!("o nome na AWS precisa começar com {root}/, o caminho deste cofre", root = root)));
     }
     let snapshot = snapshot(state, &place).await?;
     let key_id =
@@ -2722,10 +2729,11 @@ async fn write_over(
         return Err(aws_refusal(
             StatusCode::CONFLICT,
             "conflict",
-            format!(
+            tr!(
                 "o registro foi salvo na AWS durante a edição (a versão aberta era a {expected}, e \
-                 a atual é a {}). Recarregue para visualizar a mudança antes de salvar",
-                current.version
+                 a atual é a {current}). Recarregue para visualizar a mudança antes de salvar",
+                expected = expected,
+                current = current.version
             ),
         ));
     }
@@ -2763,10 +2771,12 @@ async fn write_over(
             .map_err(|e| write_failure(e, name))?;
 
         if version > baseline + 1 {
-            warnings.push(format!(
+            warnings.push(tr!(
                 "outra versão de {name} foi salva na AWS durante esta gravação: a sua passou a ser a \
-                 versão {version}, e não a {}. Abra o histórico para conferir se nada foi perdido",
-                baseline + 1
+                 versão {version}, e não a {expected}. Abra o histórico para conferir se nada foi perdido",
+                name = name,
+                version = version,
+                expected = baseline + 1
             ));
         }
 
@@ -2779,12 +2789,13 @@ async fn write_over(
                 Ok(()) => tags.retain(|t| t.key != mapping::TAG_FORMAT),
                 // Tags that could not even be read are not worth a warning when they cannot be
                 // removed either; a tag known to be there is.
-                Err(_) if was_json == Some(true) => warnings.push(format!(
-                    "o registro foi salvo, mas não foi possível remover a marca {}={} de {name}. O \
+                Err(_) if was_json == Some(true) => warnings.push(tr!(
+                    "o registro foi salvo, mas não foi possível remover a marca {tag}={value} de {name}. O \
                      Keyhold continua lendo o valor corretamente pelo formato. Remova a marca na AWS \
                      se ela confundir quem lê o parâmetro",
-                    mapping::TAG_FORMAT,
-                    mapping::TAG_FORMAT_JSON
+                    tag = mapping::TAG_FORMAT,
+                    value = mapping::TAG_FORMAT_JSON,
+                    name = name
                 )),
                 Err(_) => {}
             }
@@ -2887,10 +2898,10 @@ pub(crate) async fn move_record(
     let (vault_id, name) = target_record(id)?;
 
     if to_vault.is_some_and(|to| to != vault_id) {
-        return Err(bad_request(
+        return Err(bad_request(tr!(
             "um registro não muda de cofre AWS ao ser arrastado. Use “Copiar para outro local”: \
-             ele copia para o outro cofre e, ao final, oferece excluir o original",
-        ));
+             ele copia para o outro cofre e, ao final, oferece excluir o original"
+        )));
     }
 
     let folder = folder_path(state, &vault_id, folder_id)?;
@@ -2938,22 +2949,23 @@ async fn move_parameter(
     refuse_plaintext(&metadata.kind, name)?;
     let key_id = key_of(&metadata, name)?;
 
-    let why = "o registro não foi movido, pois não foi possível conferir se ele tem anexos no bucket";
+    let why = tr!("o registro não foi movido, pois não foi possível conferir se ele tem anexos no bucket");
     match attachments_in(state, place, name).await {
         Ok(Some((_, bucket, keys))) if !keys.is_empty() => {
             return Err(aws_refusal(
                 StatusCode::CONFLICT,
                 "conflict",
-                format!(
-                    "o registro tem {} anexo(s) no bucket {bucket}, armazenados sob o nome atual, \
+                tr!(
+                    "o registro tem {count} anexo(s) no bucket {bucket}, armazenados sob o nome atual, \
                      e mover deixaria os arquivos para trás. Baixe e remova os anexos, mova o \
                      registro e anexe os arquivos novamente",
-                    keys.len()
+                    count = keys.len(),
+                    bucket = bucket
                 ),
             ));
         }
         Ok(_) => {}
-        Err(Ok(failure)) => return Err(because(why, failure)),
+        Err(Ok(failure)) => return Err(because(&why, failure)),
         Err(Err(failure)) => return Err(failure),
     }
 
@@ -2994,10 +3006,12 @@ async fn move_parameter(
 
     let warning = match place.ssm.delete_parameter(name).await {
         Ok(()) => None,
-        Err(error) => Some(format!(
-            "o registro foi copiado para {new_name}, mas não foi possível excluir {name} ({}). As \
+        Err(error) => Some(tr!(
+            "o registro foi copiado para {new_name}, mas não foi possível excluir {name} ({why}). As \
              duas cópias existem na AWS agora. Exclua a antiga quando possível",
-            aws_failure(error).1
+            new_name = new_name,
+            name = name,
+            why = aws_failure(error).1
         )),
     };
 
@@ -3018,7 +3032,7 @@ async fn move_parameter(
 /// would leave files in the bucket that nothing in Keyhold points at any more.
 pub(crate) async fn delete_record(state: &AppState, id: &str, on: bool) -> Answer {
     if !on {
-        return Err(bad_request("cofres AWS não têm lixeira, e o que foi excluído não pode ser restaurado"));
+        return Err(bad_request(tr!("cofres AWS não têm lixeira, e o que foi excluído não pode ser restaurado")));
     }
 
     let (vault_id, name) = target_record(id)?;
@@ -3043,9 +3057,9 @@ async fn delete_parameter_and_files(
             for key in keys {
                 s3.delete_object(&bucket, &key).await.map_err(|e| {
                     because(
-                        &format!(
-                            "o registro não foi excluído, pois o anexo {} não foi removido do bucket",
-                            mapping::leaf(&key)
+                        &tr!(
+                            "o registro não foi excluído, pois o anexo {name} não foi removido do bucket",
+                            name = mapping::leaf(&key)
                         ),
                         s3_failure(e, &bucket, &place.vault.region),
                     )
@@ -3056,8 +3070,10 @@ async fn delete_parameter_and_files(
         Ok(None) => {}
         Err(Ok(failure)) => {
             return Err(because(
-                "o registro não foi excluído, pois ele pode ter anexos no bucket e não foi possível \
-                 listá-los. Excluir agora deixaria os arquivos para trás",
+                &tr!(
+                    "o registro não foi excluído, pois ele pode ter anexos no bucket e não foi possível \
+                     listá-los. Excluir agora deixaria os arquivos para trás"
+                ),
                 failure,
             ))
         }
@@ -3080,13 +3096,13 @@ async fn delete_parameter_and_files(
 /// Favourites are personal, so they stay here (A14).
 pub(crate) async fn set_favourite(state: &AppState, id: &str, on: bool) -> Answer {
     let (vault_id, name) = target_record(id)?;
-    let vault = aws_vault_of(state, &vault_id)?.ok_or_else(|| not_found("o cofre não existe mais"))?;
+    let vault = aws_vault_of(state, &vault_id)?.ok_or_else(|| not_found(tr!("o cofre não existe mais")))?;
 
     change(state, |config, _| {
         let account = config
             .connection(&vault.connection_id)
             .map(|c| c.account_id.clone())
-            .ok_or_else(|| bad_request("a conta AWS deste cofre não existe mais"))?;
+            .ok_or_else(|| bad_request(tr!("a conta AWS deste cofre não existe mais")))?;
         config.set_favourite(&account, &name, on);
         Ok(())
     })?;
@@ -3167,7 +3183,7 @@ async fn version_payload(place: &Place, name: &str, version: i64) -> Result<(Pay
     let entry = entries
         .into_iter()
         .find(|e| e.version == version)
-        .ok_or_else(|| not_found("a versão não existe mais na AWS"))?;
+        .ok_or_else(|| not_found(tr!("a versão não existe mais na AWS")))?;
 
     let payload = mapping::payload_from(name, entry.description.as_deref(), entry.value.expose(), None);
 
@@ -3264,11 +3280,11 @@ pub(crate) async fn totp_code(state: &AppState, id: &str, index: usize) -> Answe
         .fields
         .get(index)
         .filter(|f| f.kind == "totp")
-        .ok_or_else(|| bad_request("o campo não é um código 2FA"))?;
+        .ok_or_else(|| bad_request(tr!("o campo não é um código 2FA")))?;
 
     let (code, remaining) =
         crate::totp::code_for_field(&field.value, crate::identity::now_seconds())
-            .ok_or_else(|| bad_request("o segredo do campo não é um 2FA válido"))?;
+            .ok_or_else(|| bad_request(tr!("o segredo do campo não é um 2FA válido")))?;
 
     Ok(Json(json!({ "code": code, "remaining": remaining })))
 }
@@ -3277,7 +3293,7 @@ pub(crate) async fn totp_code(state: &AppState, id: &str, index: usize) -> Answe
 
 fn bucket_of(place: &Place) -> Result<String, Failure> {
     place.vault.bucket.clone().ok_or_else(|| {
-        bad_request("este cofre AWS não possui um bucket S3 para anexos. Defina um nas configurações do cofre")
+        bad_request(tr!("este cofre AWS não possui um bucket S3 para anexos. Defina um nas configurações do cofre"))
     })
 }
 
@@ -3285,10 +3301,10 @@ fn bucket_of(place: &Place) -> Result<String, Failure> {
 /// (whose prefix would be shared with the parameter of the same name with one).
 fn prefix_for(name: &str) -> Result<String, Failure> {
     mapping::attachment_prefix(name).ok_or_else(|| {
-        bad_request(
+        bad_request(tr!(
             "anexos funcionam apenas em parâmetros cujo nome começa com '/'. Mova o registro para \
-             uma pasta para anexar arquivos",
-        )
+             uma pasta para anexar arquivos"
+        ))
     })
 }
 
@@ -3341,19 +3357,19 @@ pub(crate) async fn add_attachment(
 ) -> Answer {
     let file_name = file_name.trim();
     if file_name.is_empty() {
-        return Err(bad_request("o arquivo precisa de um nome"));
+        return Err(bad_request(tr!("o arquivo precisa de um nome")));
     }
     if file_name.contains('/') || file_name == "." || file_name == ".." {
-        return Err(bad_request("o nome do arquivo não pode conter '/'"));
+        return Err(bad_request(tr!("o nome do arquivo não pode conter '/'")));
     }
     if bytes.is_empty() {
-        return Err(bad_request("o arquivo está vazio"));
+        return Err(bad_request(tr!("o arquivo está vazio")));
     }
     if bytes.len() > crate::attachments::MAX_BYTES {
-        return Err(bad_request(format!(
-            "o arquivo tem {:.1} MB, e o limite é {} MB",
-            bytes.len() as f64 / (1024.0 * 1024.0),
-            crate::attachments::MAX_BYTES / (1024 * 1024)
+        return Err(bad_request(tr!(
+            "o arquivo tem {size} MB, e o limite é {limit} MB",
+            size = format!("{:.1}", bytes.len() as f64 / (1024.0 * 1024.0)),
+            limit = crate::attachments::MAX_BYTES / (1024 * 1024)
         )));
     }
 
@@ -3482,11 +3498,10 @@ pub(crate) async fn copy_target(state: &AppState, vault_id: &str, need_bucket: b
 
     if need_bucket {
         match place.vault.bucket.as_deref() {
-            None => problems.push(
+            None => problems.push(tr!(
                 "há anexos para copiar, e o cofre de destino não possui bucket. Defina um bucket \
                  nas configurações do cofre ou remova esses registros da cópia"
-                    .to_string(),
-            ),
+            )),
             Some(bucket) => {
                 let s3 = s3_of(state, &place)?;
                 if let Err(error) = s3.head_bucket(bucket).await {
@@ -3539,7 +3554,7 @@ async fn check_vault(State(state): State<Arc<AppState>>, Path(id): Path<String>)
         Ok(_) => (true, None),
         Err(AwsError::AccessDenied(_)) => (
             false,
-            Some(format!("o papel desta conta não pode ler parâmetros a partir de {path} (falta ssm:GetParametersByPath)")),
+            Some(tr!("o papel desta conta não pode ler parâmetros a partir de {path} (falta ssm:GetParametersByPath)", path = path)),
         ),
         Err(other) => return Err(aws_failure(other)),
     };
@@ -3552,18 +3567,20 @@ async fn check_vault(State(state): State<Arc<AppState>>, Path(id): Path<String>)
                 Ok(()) => (json!("ok"), None),
                 Err(AwsError::NotFound(_)) => (
                     json!("missing"),
-                    Some(format!(
-                        "o bucket {bucket} não existe na região {}. Crie o bucket na AWS, pois o Keyhold não cria buckets",
-                        place.vault.region
+                    Some(tr!(
+                        "o bucket {bucket} não existe na região {region}. Crie o bucket na AWS, pois o Keyhold não cria buckets",
+                        bucket = bucket,
+                        region = place.vault.region
                     )),
                 ),
                 Err(AwsError::AccessDenied(_)) | Err(AwsError::Invalid(_)) => (
                     json!("denied"),
-                    Some(format!(
+                    Some(tr!(
                         "sem acesso ao bucket {bucket}: ele está em outra região ou não pertence à \
-                         conta {}. O papel precisa de s3:ListBucket, s3:GetObject, s3:PutObject e \
+                         conta {account}. O papel precisa de s3:ListBucket, s3:GetObject, s3:PutObject e \
                          s3:DeleteObject",
-                        place.connection.account_id
+                        bucket = bucket,
+                        account = place.connection.account_id
                     )),
                 ),
                 Err(other) => return Err(aws_failure(other)),
@@ -3572,9 +3589,9 @@ async fn check_vault(State(state): State<Arc<AppState>>, Path(id): Path<String>)
     };
 
     let message = match (parameters_message, bucket_message) {
-        (None, None) => "conexão verificada: o Keyhold lê os parâmetros desta conta".to_string(),
+        (None, None) => tr!("conexão verificada: o Keyhold lê os parâmetros desta conta"),
         (Some(a), None) | (None, Some(a)) => a,
-        (Some(a), Some(b)) => format!("{a}. Além disso, {b}"),
+        (Some(a), Some(b)) => tr!("{a}. Além disso, {b}", a = a, b = b),
     };
 
     Ok(Json(json!({ "parameters": parameters, "bucket": bucket, "message": message })))
