@@ -243,6 +243,111 @@ pub fn sign(credentials: &Credentials, input: &SigningInput<'_>) -> Signed {
     }
 }
 
+/// A request signed in its query string (a "presigned URL"), so whoever holds the URL can make
+/// that one request, to that one object, until it expires.
+pub struct PresignInput<'a> {
+    pub method: &'a str,
+    pub host: &'a str,
+    /// The path as it goes on the wire, already encoded (`encode_path`).
+    pub path: &'a str,
+    /// Parameters signed along with it (`versionId`, `x-amz-expected-bucket-owner`).
+    pub query: &'a [(&'a str, &'a str)],
+    pub region: &'a str,
+    pub service: &'a str,
+    pub unix_time: u64,
+    pub expires_in: u64,
+}
+
+/// The full query string of a presigned request, signature included. Only `host` is signed as a
+/// header and the payload is `UNSIGNED-PAYLOAD`, as S3 expects of a URL handed to someone else.
+pub fn presign(credentials: &Credentials, input: &PresignInput<'_>) -> String {
+    let (amz_date, date) = amz_date(input.unix_time);
+    let scope = format!("{date}/{}/{}/aws4_request", input.region, input.service);
+    let credential = format!("{}/{scope}", credentials.access_key_id);
+    let expires = input.expires_in.to_string();
+
+    let mut params: Vec<(&str, &str)> = input.query.to_vec();
+    params.push(("X-Amz-Algorithm", ALGORITHM));
+    params.push(("X-Amz-Credential", &credential));
+    params.push(("X-Amz-Date", &amz_date));
+    params.push(("X-Amz-Expires", &expires));
+    params.push(("X-Amz-SignedHeaders", "host"));
+    if let Some(token) = credentials.session_token() {
+        params.push(("X-Amz-Security-Token", token));
+    }
+
+    let query = canonical_query(&params);
+    let canonical_request = format!(
+        "{method}\n{path}\n{query}\nhost:{host}\n\nhost\nUNSIGNED-PAYLOAD",
+        method = input.method,
+        path = input.path,
+        host = input.host,
+    );
+    let string_to_sign = format!(
+        "{ALGORITHM}\n{amz_date}\n{scope}\n{}",
+        hex(&Sha256::digest(canonical_request.as_bytes()))
+    );
+
+    let key = signing_key(&credentials.secret_access_key, &date, input.region, input.service);
+    let signature = hex(&hmac(&key, string_to_sign.as_bytes()));
+
+    format!("{query}&X-Amz-Signature={signature}")
+}
+
+/// The signed fields of a browser POST to S3: the policy and what signs it.
+pub struct PostPolicy {
+    pub policy: String,
+    pub credential: String,
+    pub date: String,
+    pub signature: String,
+    pub security_token: Option<String>,
+}
+
+/// Sign an S3 POST policy. `conditions` are the policy's own; the algorithm, credential, date and
+/// token conditions are added here, since the signature covers them.
+pub fn post_policy(
+    credentials: &Credentials,
+    region: &str,
+    unix_time: u64,
+    expires_at: u64,
+    mut conditions: Vec<serde_json::Value>,
+) -> PostPolicy {
+    let (signed_at, date) = amz_date(unix_time);
+    let credential = format!("{}/{date}/{region}/s3/aws4_request", credentials.access_key_id);
+
+    conditions.push(serde_json::json!({ "x-amz-algorithm": ALGORITHM }));
+    conditions.push(serde_json::json!({ "x-amz-credential": credential }));
+    conditions.push(serde_json::json!({ "x-amz-date": signed_at }));
+    if let Some(token) = credentials.session_token() {
+        conditions.push(serde_json::json!({ "x-amz-security-token": token }));
+    }
+
+    let (expiry, _) = amz_date(expires_at);
+    // `20261117T143020Z` to the ISO form the policy wants.
+    let iso = format!(
+        "{}-{}-{}T{}:{}:{}Z",
+        &expiry[0..4],
+        &expiry[4..6],
+        &expiry[6..8],
+        &expiry[9..11],
+        &expiry[11..13],
+        &expiry[13..15]
+    );
+    let document = serde_json::json!({ "expiration": iso, "conditions": conditions }).to_string();
+    let policy = crate::encoding::base64_standard(document.as_bytes());
+
+    let key = signing_key(&credentials.secret_access_key, &date, region, "s3");
+    let signature = hex(&hmac(&key, policy.as_bytes()));
+
+    PostPolicy {
+        policy,
+        credential,
+        signature,
+        date: signed_at,
+        security_token: credentials.session_token().map(str::to_string),
+    }
+}
+
 /// `kSigning = HMAC(HMAC(HMAC(HMAC("AWS4" + secret, date), region), service), "aws4_request")`,
 /// with each link of the chain wiped as soon as the next exists.
 fn signing_key(secret: &str, date: &str, region: &str, service: &str) -> Zeroizing<Vec<u8>> {
@@ -365,6 +470,47 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_presigned_url_matches_the_example_in_the_s3_documentation() {
+        // "Authenticating Requests: Using Query Parameters (AWS Signature Version 4)", example GET.
+        let credentials = Credentials::new("AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", None);
+        let query = presign(
+            &credentials,
+            &PresignInput {
+                method: "GET",
+                host: "examplebucket.s3.amazonaws.com",
+                path: "/test.txt",
+                query: &[],
+                region: "us-east-1",
+                service: "s3",
+                unix_time: 1_369_353_600, // 2013-05-24T00:00:00Z
+                expires_in: 86_400,
+            },
+        );
+
+        assert!(
+            query.ends_with("X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404"),
+            "{query}"
+        );
+    }
+
+    #[test]
+    fn a_post_policy_carries_its_own_signing_conditions() {
+        let credentials = Credentials::new("AKID", "secret", Some("token".into()));
+        let signed = post_policy(&credentials, "us-east-2", 1_794_925_820, 1_794_929_420, vec![serde_json::json!({ "bucket": "b" })]);
+
+        let document: serde_json::Value =
+            serde_json::from_slice(
+                &crate::encoding::from_base64url(signed.policy.replace('+', "-").replace('/', "_").trim_end_matches('=')).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(document["expiration"], "2026-11-17T15:30:20Z");
+        let conditions = document["conditions"].to_string();
+        assert!(conditions.contains("x-amz-security-token") && conditions.contains(&signed.credential));
+        assert_eq!(signed.signature.len(), 64);
+    }
+
     use super::*;
 
     /// The credentials every case in AWS's SigV4 test suite is signed with.
