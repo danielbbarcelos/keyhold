@@ -9,6 +9,14 @@ permissions:
   contents: read
 
 jobs:
+  version:
+    name: Version ahead of the last release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { fetch-depth: 0 }
+      - run: ./scripts/check-version.sh
+
   test:
     name: Tests (${{ matrix.os }})
     strategy:
