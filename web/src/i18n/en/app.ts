@@ -86,4 +86,11 @@ export const APP: Record<string, string> = {
   // components/ui
   'Paleta de comandos': 'Command palette',
   'Buscar um comando': 'Search for a command',
+  // The language switch and the footer of the screens before the vault opens.
+  Idioma: 'Language',
+  'Keyhold {version} · código aberto no {link}': 'Keyhold {version} · open source on {link}',
+  'Aplica-se a este Keyhold, a todos os cofres e às mensagens do Keyhold. A página de um link compartilhado segue o idioma do navegador de quem abre.':
+    "Applies to this Keyhold, to every vault and to Keyhold's messages. The page a shared link opens follows the language of the browser that opens it.",
+  'Vale imediatamente. Nomes de registros, pastas e campos continuam como estão.':
+    'Changes right away. Item, folder and field names stay as they are.',
 }

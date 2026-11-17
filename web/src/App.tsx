@@ -95,7 +95,7 @@ export function App() {
     }
 
     if (!status.identity.initialised) {
-      return <Setup onDone={refresh} />
+      return <Setup version={status.version} onDone={refresh} />
     }
 
     if (!status.lock.unlocked) {
