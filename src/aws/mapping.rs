@@ -654,6 +654,20 @@ pub fn folder_has_contents<'a>(path: &str, names: impl IntoIterator<Item = &'a s
 
 /// The KMS key a new parameter in `folder` should be written with.
 ///
+/// A parameter's KMS key as S3 should receive it: the full ARN. Parameter Store reports a key the way
+/// it was given (`alias/internal-parameters`, a bare key id or an ARN), and a bucket policy that pins
+/// the key compares the header text against ARNs, so the short forms would be refused even though
+/// they name the same key.
+pub fn kms_arn(key: &str, region: &str, account: &str) -> String {
+    if key.starts_with("arn:") {
+        key.to_string()
+    } else if key.starts_with("alias/") {
+        format!("arn:aws:kms:{region}:{account}:{key}")
+    } else {
+        format!("arn:aws:kms:{region}:{account}:key/{key}")
+    }
+}
+
 /// The key of a parameter in the same folder if there is one (its `.keep` included), otherwise of
 /// the nearest folder above it that has one. `None` means the account's default, which is also
 /// what an inherited `alias/aws/ssm` comes down to. `known` is every name already read, with the
@@ -738,6 +752,21 @@ pub fn rotation_date(due: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_key_goes_to_s3_as_an_arn() {
+        use super::kms_arn;
+        assert_eq!(
+            kms_arn("alias/internal-parameters", "us-east-2", "484612795114"),
+            "arn:aws:kms:us-east-2:484612795114:alias/internal-parameters"
+        );
+        assert_eq!(
+            kms_arn("50cd1bc2-f7bd-49b5-a18b-3db7f1c14392", "us-east-2", "484612795114"),
+            "arn:aws:kms:us-east-2:484612795114:key/50cd1bc2-f7bd-49b5-a18b-3db7f1c14392"
+        );
+        let arn = "arn:aws:kms:sa-east-1:111122223333:key/abc";
+        assert_eq!(kms_arn(arn, "us-east-2", "484612795114"), arn);
+    }
+
     use super::*;
 
     fn field(label: &str, kind: &str, value: &str) -> Field {

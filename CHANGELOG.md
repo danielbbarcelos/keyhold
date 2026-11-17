@@ -52,6 +52,11 @@
 
 ### Fixed
 
+- **A file or a shared link of a parameter on a customer key was refused by a bucket that pins the
+  key.** Parameter Store reports the key as it was given (`alias/internal-parameters`), and Keyhold
+  sent that text to S3; a bucket policy that allows only that key compares the header against ARNs,
+  so it refused the upload and Keyhold blamed the role's permissions. The key now goes to S3 as its
+  full ARN.
 - **The longest approval windows were hidden.** Since the duration picker became a searchable list
   in 1.0.5, the list stopped at 288 px with its scrollbar hidden, so 12 h, 24 h, 7 days, 30 days and
   "Para sempre" sat below the fold with nothing to say they were there. Lists of this kind now show
