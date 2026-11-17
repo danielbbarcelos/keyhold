@@ -1,6 +1,9 @@
 # Changelog
 
-## 1.1.0 (unreleased)
+## 1.1.0
+
+A one-time code instead of a token in the address, sealed secrets, an audit trail and shared links
+for AWS vaults, and the whole of Keyhold in English as well as Portuguese.
 
 ### Security
 
