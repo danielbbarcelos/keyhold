@@ -425,6 +425,21 @@ export interface Field {
   list?: boolean
   /** Copied by the record's main button. */
   primary?: boolean
+  /**
+   * Set by the binary on a secret it did not send: the field's position when the record was opened.
+   * The value is fetched with `api.secret` when somebody reveals or copies it, and a save sends this
+   * back unchanged to keep the stored secret.
+   */
+  sealed?: number
+  /** A sealed card's last four digits. */
+  hint?: string
+}
+
+/** A secret field's value, handed over by the binary after writing it to the trail. */
+export interface SecretValue {
+  label: string
+  value: string
+  extra: Record<string, string>
 }
 
 /** A lucide icon in one of the interface's colours, or a picture of the person's own. */
@@ -756,6 +771,12 @@ export const api = {
    * Only the field's label travels — never its value. The binary cannot infer this on its own: it
    * hands over a whole record when a tab opens and has no idea which field was uncovered.
    */
+  /** One secret field, read again by the binary and noted in the trail before it is returned. */
+  secret: (recordId: string, index: number, intent: 'reveal' | 'copy', version?: number) =>
+    call<{ secret: SecretValue }>('POST', `/api/records/${recordId}/secret`, { index, intent, version }).then(
+      (answer) => answer.secret,
+    ),
+
   reportAccess: (recordId: string, kind: 'reveal' | 'copy', field: string) =>
     call<{ noted: boolean }>('POST', `/api/records/${recordId}/accesses`, { kind, field }),
 

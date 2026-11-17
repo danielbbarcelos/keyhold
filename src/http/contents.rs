@@ -56,6 +56,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/records/:id/compromised", post(set_compromised))
         .route("/records/:id/rotation", post(set_rotation))
         .route("/records/:id/accesses", post(report_access))
+        .route("/records/:id/secret", post(reveal_secret))
         .route("/records/:id/attachments", get(list_attachments).post(add_attachment))
         .route("/attachments/:id", get(open_attachment))
         .route("/attachments/:id", delete(delete_attachment))
@@ -525,6 +526,60 @@ async fn report_access(
     Ok(Json(json!({ "noted": true })))
 }
 
+#[derive(Deserialize)]
+struct SecretRequest {
+    /// The field's position in the record (or in the version).
+    index: usize,
+    /// `reveal` or `copy`, for the trail.
+    intent: String,
+    /// An old version instead of the current one.
+    #[serde(default)]
+    version: Option<i64>,
+}
+
+/// One secret field's value, written to the trail before it is handed over.
+///
+/// The only way the interface gets a secret. Reading the record again here, rather than trusting
+/// anything the page holds, is what makes the trail line a fact: for an AWS record it is also a
+/// `GetParameter` of its own in CloudTrail.
+async fn reveal_secret(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<SecretRequest>,
+) -> Answer {
+    let copying = match body.intent.as_str() {
+        "copy" => true,
+        "reveal" => false,
+        _ => return Err(bad_request(anyhow::anyhow!("intent must be reveal or copy"))),
+    };
+
+    if is_aws_id(&id) {
+        return aws::reveal_secret(&state, &id, body.index, copying, body.version).await;
+    }
+
+    let store = state.store.lock().unwrap();
+
+    let payload = match body.version {
+        Some(version) => with_key!(state, |key| records::read_version(&store, key, &id, version)),
+        None => with_key!(state, |key| records::open(&store, key, &id).map(|opened| opened.payload)),
+    }
+    .map_err(bad_request)?;
+
+    let secret = records::secret_of(&payload, body.index).map_err(bad_request)?;
+
+    if crate::settings::log_reads(&store) {
+        audit::note(
+            &store,
+            &state.lock,
+            if copying { audit::action::SECRET_COPIED } else { audit::action::SECRET_REVEALED },
+            Some(&id),
+            Detail::new().with("field", secret["label"].as_str().unwrap_or_default().to_string()),
+        );
+    }
+
+    Ok(Json(json!({ "secret": secret })))
+}
+
 // ── folders ─────────────────────────────────────────────────────────────────────────────────────
 
 async fn list_folders(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
@@ -701,6 +756,8 @@ async fn create_record(
     Path(id): Path<String>,
     Json(body): Json<NewRecord>,
 ) -> Answer {
+    records::refuse_seals(&body.payload).map_err(bad_request)?;
+
     if aws::is_aws_vault(&state, &id) {
         return aws::create_record(
             &state,
@@ -744,7 +801,14 @@ async fn open_record(State(state): State<Arc<AppState>>, Path(id): Path<String>)
 
     let opened = with_key!(state, |key| records::open(&store, key, &id)).map_err(bad_request)?;
 
-    Ok(Json(json!({ "record": opened })))
+    Ok(Json(json!({ "record": sealed_record(&opened) })))
+}
+
+/// An open record as the page may see it: secrets sealed (see `records::sealed_json`).
+fn sealed_record(opened: &records::OpenRecord) -> serde_json::Value {
+    let mut record = json!(opened);
+    record["payload"] = records::sealed_json(&opened.payload);
+    record
 }
 
 /// The code a record's 2FA field gives right now.
@@ -798,13 +862,17 @@ async fn update_record(
             .and_then(|v| v.trim().parse().ok())
     });
 
-    let payload: Payload = serde_json::from_value(body).map_err(bad_request)?;
+    let mut payload: Payload = serde_json::from_value(body).map_err(bad_request)?;
 
     if is_aws_id(&id) {
         return aws::update_record(&state, &id, &payload, expected).await;
     }
 
     let mut store = state.store.lock().unwrap();
+
+    // Secrets the page never had come back sealed; put the stored ones in their place.
+    let stored = with_key!(state, |key| records::open(&store, key, &id)).map_err(bad_request)?;
+    records::unseal(&mut payload, &stored.payload).map_err(bad_request)?;
 
     let updated = with_key!(state, |key| records::update(&mut store, key, &id, &payload))
         .map_err(bad_request)?;
@@ -1002,7 +1070,7 @@ async fn read_version(
     let payload = with_key!(state, |key| records::read_version(&store, key, &id, version))
         .map_err(bad_request)?;
 
-    Ok(Json(json!({ "payload": payload })))
+    Ok(Json(json!({ "payload": records::sealed_json(&payload) })))
 }
 
 /// Bring an old version back.

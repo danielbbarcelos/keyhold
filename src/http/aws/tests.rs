@@ -396,6 +396,19 @@ impl Harness {
         crate::aws::mapping::record_id(&self.vault, name)
     }
 
+    /// A secret field's value, the way the page gets one: asked for, and noted.
+    async fn secret(&self, id: &str, index: usize) -> String {
+        self.secret_in(id, index, None).await
+    }
+
+    async fn secret_in(&self, id: &str, index: usize, version: Option<i64>) -> String {
+        let reply = self
+            .post(&format!("/records/{id}/secret"), json!({ "index": index, "intent": "reveal", "version": version }))
+            .await;
+        assert_eq!(reply.status, 200, "{}", reply.body);
+        reply.body["secret"]["value"].as_str().unwrap().to_string()
+    }
+
     fn folder(&self, path: &str) -> String {
         crate::aws::mapping::folder_id(&self.vault, path)
     }
@@ -566,14 +579,13 @@ async fn an_aws_vault_lists_what_the_role_can_read_in_the_shapes_a_local_vault_u
     let config = h.get(&format!("/records/{}", h.id("/config/app"))).await;
     assert_eq!(config.body["record"]["payload"]["title"], "app");
     assert_eq!(config.body["record"]["payload"]["fields"][0]["label"], "Valor");
-    assert_eq!(
-        config.body["record"]["payload"]["fields"][0]["value"],
-        r#"{"host":"db","password":"x"}"#
-    );
+    assert_eq!(config.body["record"]["payload"]["fields"][0]["sealed"], 0, "sealed for the page");
+    assert_eq!(h.secret(&h.id("/config/app"), 0).await, r#"{"host":"db","password":"x"}"#);
 
     let opened = h.get(&format!("/records/{}", h.id("/app/prod/db"))).await;
     assert_eq!(opened.body["record"]["payload"]["notes"], "só para o deploy");
-    assert_eq!(opened.body["record"]["payload"]["fields"][0]["value"], "hunter2");
+    assert_eq!(opened.body["record"]["payload"]["fields"][0]["value"], "", "sealed for the page");
+    assert_eq!(h.secret(&h.id("/app/prod/db"), 0).await, "hunter2");
 
     let denied = h.get(&format!("/records/{}", h.id("/secreto/chave"))).await;
     assert_eq!(denied.status, 403);
@@ -718,7 +730,8 @@ async fn saving_checks_the_version_and_switches_the_format_with_the_field_count(
     assert_eq!(listed, vec![2, 1]);
 
     let old = h.get(&format!("/records/{id}/versions/1")).await;
-    assert_eq!(old.body["payload"]["fields"][0]["value"], "hunter2");
+    assert_eq!(old.body["payload"]["fields"][0]["value"], "", "an old version is sealed too");
+    assert_eq!(h.secret_in(&id, 0, Some(1)).await, "hunter2");
 
     // A restore checked against a version that is no longer current is refused, like a save.
     let stale = h
@@ -738,7 +751,7 @@ async fn saving_checks_the_version_and_switches_the_format_with_the_field_count(
     assert!(back.tags.contains(&("keyhold:formato".into(), "json".into())));
     let opened = h.get(&format!("/records/{id}")).await;
     assert_eq!(opened.body["record"]["payload"]["notes"], "só para o deploy");
-    assert_eq!(opened.body["record"]["payload"]["fields"][0]["value"], "hunter2");
+    assert_eq!(h.secret(&id, 0).await, "hunter2");
 }
 
 #[tokio::test]
@@ -1264,7 +1277,7 @@ async fn notes_are_kept_in_the_value_and_old_ones_move_there_on_the_next_save() 
 
     let again = h.get(&format!("/records/{id}")).await;
     assert_eq!(again.body["record"]["payload"]["notes"], "só para o deploy");
-    assert_eq!(again.body["record"]["payload"]["fields"][0]["value"], "hunter2");
+    assert_eq!(h.secret(&id, 0).await, "hunter2");
 }
 
 #[tokio::test]
@@ -1305,8 +1318,7 @@ async fn the_format_tag_goes_on_before_the_put_and_comes_off_after_it() {
     let stored = h.parameter("/app/prod/db").unwrap();
     assert_eq!(stored.value, "hunter2");
     assert!(stored.tags.contains(&("keyhold:formato".into(), "json".into())));
-    let opened = h.get(&format!("/records/{id}")).await;
-    assert_eq!(opened.body["record"]["payload"]["fields"][0]["value"], "hunter2", "fresh after the error");
+    assert_eq!(h.secret(&id, 0).await, "hunter2", "fresh after the error");
 
     h.with_ssm(|ssm| ssm.put_denied.clear());
     let calls_before = h.with_ssm(|ssm| ssm.calls.len());
@@ -1321,8 +1333,8 @@ async fn the_format_tag_goes_on_before_the_put_and_comes_off_after_it() {
     let to_plain = h.put(&format!("/records/{id}"), save_body(2, one_password("so-isso"))).await;
     assert_eq!(to_plain.status, 200, "{}", to_plain.body);
     assert!(to_plain.body["warning"].as_str().unwrap().contains("keyhold:formato"), "{}", to_plain.body);
+    assert_eq!(h.secret(&id, 0).await, "so-isso");
     let opened = h.get(&format!("/records/{id}")).await;
-    assert_eq!(opened.body["record"]["payload"]["fields"][0]["value"], "so-isso");
     assert_eq!(opened.body["record"]["payload"]["fields"].as_array().unwrap().len(), 1);
 }
 
@@ -1637,7 +1649,7 @@ async fn a_local_vault_is_copied_whole_with_folders_files_and_favourites_and_the
     assert_eq!(opened.body["record"]["vault_id"], to);
     assert_eq!(opened.body["record"]["favourite"], true);
     assert_eq!(opened.body["record"]["version"], 1, "only the current version travels (C3)");
-    assert_eq!(opened.body["record"]["payload"]["fields"][1]["value"], "s3nha-do-banco");
+    assert_eq!(h.secret(&copied, 1).await, "s3nha-do-banco");
     assert_eq!(opened.body["record"]["payload"]["notes"], "conta corrente");
     assert_eq!(opened.body["record"]["payload"]["icon"]["name"], "landmark");
     let files = h.get(&format!("/records/{copied}/attachments")).await;
@@ -1695,7 +1707,7 @@ async fn conflicts_are_renamed_overwritten_or_left_and_originals_go_to_the_trash
         .await;
     assert_eq!(over.status, 200, "{}", over.body);
     let now = h.get(&format!("/records/{existing}")).await;
-    assert_eq!(now.body["record"]["payload"]["fields"][1]["value"], "nova");
+    assert_eq!(h.secret(&existing, 1).await, "nova");
     assert_eq!(now.body["record"]["version"], 2, "an overwrite is a new version, the old one kept");
 
     // Overwriting a record of another vault is refused.
@@ -1823,12 +1835,11 @@ async fn an_aws_folder_comes_home_and_aws_originals_go_only_with_the_name_typed(
     let db = done.iter().find(|d| d["source_id"] == h.id("/app/prod/db")).unwrap()["dest_id"].as_str().unwrap().to_string();
     let opened = h.get(&format!("/records/{db}")).await;
     assert_eq!(opened.body["record"]["payload"]["title"], "Banco de produção");
-    assert_eq!(opened.body["record"]["payload"]["fields"][0]["value"], "hunter2");
+    assert_eq!(h.secret(&db, 0).await, "hunter2");
     assert_eq!(opened.body["record"]["payload"]["notes"], "só para o deploy");
 
     let url = done.iter().find(|d| d["source_id"] == h.id("/app/prod/url")).unwrap()["dest_id"].as_str().unwrap().to_string();
-    let opened = h.get(&format!("/records/{url}")).await;
-    assert_eq!(opened.body["record"]["payload"]["fields"][0]["value"], "https://exemplo");
+    assert_eq!(h.secret(&url, 0).await, "https://exemplo");
     assert!(crate::records::is_secret_kind(opened.body["record"]["payload"]["fields"][0]["kind"].as_str().unwrap()));
 
     // C7, AWS: never without the vault's name typed, and then for good.
@@ -2084,12 +2095,14 @@ async fn a_string_parameter_holding_json_reads_as_one_password_per_key() {
     )
     .await;
 
-    let opened = h.get(&format!("/records/{}", h.id("/app/legado/config"))).await;
+    let config = h.id("/app/legado/config");
+    let opened = h.get(&format!("/records/{config}")).await;
     let fields = opened.body["record"]["payload"]["fields"].as_array().unwrap().clone();
-    let pairs: Vec<(String, String, String)> = fields
-        .iter()
-        .map(|f| (f["label"].as_str().unwrap().into(), f["kind"].as_str().unwrap().into(), f["value"].as_str().unwrap().into()))
-        .collect();
+    let mut pairs: Vec<(String, String, String)> = Vec::new();
+    for (index, f) in fields.iter().enumerate() {
+        let value = if f["sealed"].is_number() { h.secret(&config, index).await } else { f["value"].as_str().unwrap().into() };
+        pairs.push((f["label"].as_str().unwrap().into(), f["kind"].as_str().unwrap().into(), value));
+    }
     assert_eq!(pairs.len(), 3, "{pairs:?}");
     assert!(pairs.contains(&("port".into(), "password".into(), "5432".into())));
     assert!(pairs.contains(&("password".into(), "password".into(), "p4ss".into())));

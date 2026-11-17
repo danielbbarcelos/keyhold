@@ -58,6 +58,15 @@ async fn start() -> Running {
 }
 
 impl Running {
+    /// A secret field's value, the way the page gets one: asked for on its own.
+    async fn secret(&self, id: &str, index: usize, version: Option<i64>) -> String {
+        let reply = self
+            .post(&format!("/api/records/{id}/secret"), serde_json::json!({ "index": index, "intent": "reveal", "version": version }))
+            .await;
+        assert_eq!(reply.status, 200, "{}", reply.body);
+        reply.json()["secret"]["value"].as_str().unwrap().to_string()
+    }
+
     /// The cookie this tab holds right now.
     fn cookie(&self) -> String {
         self.token.lock().unwrap().clone()
@@ -92,6 +101,17 @@ impl Running {
             Some(host),
         )
         .await
+    }
+
+    async fn put(&self, path: &str, body: serde_json::Value) -> Reply {
+        let reply = http::send(
+            "PUT",
+            &format!("{}{path}", self.base),
+            Some(&self.cookie()),
+            Some(&body.to_string()),
+        )
+        .await;
+        self.adopt(reply)
     }
 
     async fn post(&self, path: &str, body: serde_json::Value) -> Reply {
@@ -749,15 +769,139 @@ async fn a_record_round_trips_through_the_api() {
     assert_eq!(listed.json()["records"][0]["title"], "Produção");
     assert!(!listed.body.contains("hunter2"), "the list handed out a secret: {}", listed.body);
 
-    // Opening one does.
+    // Opening one does not either: the secret is sealed, and asked for on its own.
     let opened = app.get(&format!("/api/records/{id}")).await;
-    assert_eq!(opened.json()["record"]["payload"]["fields"][1]["value"], "hunter2");
+    assert!(!opened.body.contains("hunter2"), "opening handed out a secret: {}", opened.body);
+    assert_eq!(opened.json()["record"]["payload"]["fields"][1]["sealed"], 1);
     assert_eq!(opened.json()["record"]["payload"]["title"], "Produção");
+
+    let secret = app.post(&format!("/api/records/{id}/secret"), serde_json::json!({ "index": 1, "intent": "reveal" })).await;
+    assert_eq!(secret.status, 200, "{}", secret.body);
+    assert_eq!(secret.json()["secret"]["value"], "hunter2");
 
     // The old built-in username and address come back as ordinary fields, around the password.
     assert_eq!(opened.json()["record"]["payload"]["fields"][0]["value"], "deploy");
     assert_eq!(opened.json()["record"]["payload"]["fields"][2]["kind"], "url");
     assert!(opened.json()["record"]["payload"].get("username").is_none());
+}
+
+async fn record_with_secrets(app: &Running, vault: &str) -> String {
+    let made = app
+        .post(
+            &format!("/api/vaults/{vault}/records"),
+            serde_json::json!({
+                "kind": "login",
+                "payload": {
+                    "title": "Banco",
+                    "notes": "",
+                    "fields": [
+                        { "label": "Usuário", "kind": "text", "value": "deploy" },
+                        { "label": "Senha", "kind": "password", "value": "hunter2" },
+                        { "label": "Cartão", "kind": "card", "value": "4111 1111 1111 1234",
+                          "extra": { "holder": "D B", "code": "321", "pin": "9876" } }
+                    ]
+                }
+            }),
+        )
+        .await;
+    assert_eq!(made.status, 200, "{}", made.body);
+    made.json()["record"]["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn a_card_is_sealed_down_to_its_last_four_digits() {
+    let app = start().await;
+    let vault = with_one_vault(&app).await;
+    let id = record_with_secrets(&app, &vault).await;
+
+    let opened = app.get(&format!("/api/records/{id}")).await;
+    let card = &opened.json()["record"]["payload"]["fields"][2];
+
+    assert_eq!(card["value"], "");
+    assert_eq!(card["hint"], "1234");
+    assert_eq!(card["extra"]["holder"], "D B");
+    assert!(card["extra"].get("code").is_none() && card["extra"].get("pin").is_none(), "{card}");
+
+    let secret = app.post(&format!("/api/records/{id}/secret"), serde_json::json!({ "index": 2, "intent": "copy" })).await;
+    assert_eq!(secret.json()["secret"]["value"], "4111 1111 1111 1234");
+    assert_eq!(secret.json()["secret"]["extra"]["code"], "321");
+
+    // A field that is not a secret is not served by this route: the page already has it.
+    let plain = app.post(&format!("/api/records/{id}/secret"), serde_json::json!({ "index": 0, "intent": "reveal" })).await;
+    assert_eq!(plain.status, 400);
+}
+
+#[tokio::test]
+async fn saving_keeps_a_sealed_secret_and_will_not_turn_it_into_plain_text() {
+    let app = start().await;
+    let vault = with_one_vault(&app).await;
+    let id = record_with_secrets(&app, &vault).await;
+
+    // What the editor sends back when nobody touched the secrets: the sealed page, reordered.
+    let opened = app.get(&format!("/api/records/{id}")).await.json();
+    let mut payload = opened["record"]["payload"].clone();
+    let fields = payload["fields"].as_array_mut().unwrap();
+    fields.swap(0, 1);
+    payload["title"] = "Banco (renomeado)".into();
+
+    let saved = app.put(&format!("/api/records/{id}"), payload.clone()).await;
+    assert_eq!(saved.status, 200, "{}", saved.body);
+
+    let reveal = |index: usize| {
+        let app = &app;
+        let id = id.clone();
+        async move {
+            app.post(&format!("/api/records/{id}/secret"), serde_json::json!({ "index": index, "intent": "reveal" }))
+                .await
+                .json()["secret"]
+                .clone()
+        }
+    };
+    assert_eq!(reveal(0).await["value"], "hunter2", "the password moved to the top and kept its value");
+    assert_eq!(reveal(2).await["extra"]["pin"], "9876", "the card kept its PIN");
+
+    // Turning a sealed password into a text field would show it without a reveal.
+    let reopened = app.get(&format!("/api/records/{id}")).await.json();
+    let mut sneaky = reopened["record"]["payload"].clone();
+    sneaky["fields"][0]["kind"] = "text".into();
+    let refused = app.put(&format!("/api/records/{id}"), sneaky).await;
+    assert_eq!(refused.status, 400, "{}", refused.body);
+
+    // Pointing a sealed field at a field that is not a secret is refused too.
+    let mut wrong = reopened["record"]["payload"].clone();
+    wrong["fields"][0]["sealed"] = 1.into();
+    let refused = app.put(&format!("/api/records/{id}"), wrong).await;
+    assert_eq!(refused.status, 400, "{}", refused.body);
+
+    // And a new record has nothing to keep a secret from.
+    let made = app
+        .post(
+            &format!("/api/vaults/{vault}/records"),
+            serde_json::json!({ "kind": "login", "payload": { "title": "X", "notes": "",
+                "fields": [{ "label": "Senha", "kind": "password", "value": "", "sealed": 0 }] } }),
+        )
+        .await;
+    assert_eq!(made.status, 400, "{}", made.body);
+}
+
+#[tokio::test]
+async fn an_old_version_is_sealed_and_its_secrets_are_asked_for_by_version() {
+    let app = start().await;
+    let vault = with_one_vault(&app).await;
+    let id = record_with_secrets(&app, &vault).await;
+
+    let opened = app.get(&format!("/api/records/{id}")).await.json();
+    let mut payload = opened["record"]["payload"].clone();
+    payload["fields"][1] = serde_json::json!({ "label": "Senha", "kind": "password", "value": "nova-senha" });
+    assert_eq!(app.put(&format!("/api/records/{id}"), payload).await.status, 200);
+
+    let old = app.get(&format!("/api/records/{id}/versions/1")).await;
+    assert!(!old.body.contains("hunter2"), "{}", old.body);
+
+    let secret = app
+        .post(&format!("/api/records/{id}/secret"), serde_json::json!({ "index": 1, "intent": "reveal", "version": 1 }))
+        .await;
+    assert_eq!(secret.json()["secret"]["value"], "hunter2");
 }
 
 #[tokio::test]
@@ -898,16 +1042,14 @@ async fn saving_a_record_keeps_what_it_replaced() {
     let history = app.get(&format!("/api/records/{id}/versions")).await;
     assert_eq!(history.json()["versions"].as_array().unwrap().len(), 1);
 
-    let old = app.get(&format!("/api/records/{id}/versions/1")).await;
-    assert_eq!(old.json()["payload"]["fields"][0]["value"], "antiga");
+    assert_eq!(app.secret(&id, 0, Some(1)).await, "antiga");
 
     let restored = app
         .post(&format!("/api/records/{id}/versions/1/restore"), serde_json::json!({}))
         .await;
     assert_eq!(restored.json()["record"]["version"], 3);
 
-    let now = app.get(&format!("/api/records/{id}")).await;
-    assert_eq!(now.json()["record"]["payload"]["fields"][0]["value"], "antiga");
+    assert_eq!(app.secret(&id, 0, None).await, "antiga");
 }
 
 #[tokio::test]
@@ -1022,7 +1164,7 @@ async fn a_record_can_be_moved_to_another_vault_and_still_opens() {
     let opened = app.get(&format!("/api/records/{id}")).await.json();
 
     assert_eq!(opened["record"]["vault_id"], second);
-    assert_eq!(opened["record"]["payload"]["fields"][1]["value"], "uma senha");
+    assert_eq!(app.secret(&id, 1, None).await, "uma senha");
 }
 
 // ── health, rotation and the trash (F5) ─────────────────────────────────────────────────────────
@@ -1095,8 +1237,7 @@ async fn rotating_a_vault_keeps_its_contents_readable() {
     assert_eq!(rotated.status, 200);
     assert_eq!(rotated.json()["vault"]["key_version"], 2);
 
-    let opened = app.get(&format!("/api/records/{id}")).await;
-    assert_eq!(opened.json()["record"]["payload"]["fields"][0]["value"], "hunter2");
+    assert_eq!(app.secret(&id, 0, None).await, "hunter2");
 }
 
 #[tokio::test]

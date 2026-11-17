@@ -65,6 +65,15 @@ rest of the policy. With `default-src 'none'`, `img-src 'self' data:`, `font-src
 `background-image: url(https://attacker/…)` exfiltration has no reachable origin. Injected styles
 can deface this page; they cannot phone home.
 
+**The page does not hold secrets it is not showing.** Opening a record sends its secret fields
+sealed: an empty value and the field's position (a card keeps its last four digits). Revealing or
+copying asks the binary for that one field, and the binary reads the record again (for an AWS
+record, a `GetParameter` of its own in CloudTrail) and writes the trail line before it answers. A
+script on the page sees a secret only once somebody has asked to see it, and the trail's "revealed"
+and "copied" are things the binary saw happen, not things the page chose to report. Saving a record
+sends sealed fields back with their position, and the binary puts the stored value back; a sealed
+value can only stay in a secret field, so turning a password into a text field does not show it.
+
 Beyond the policy: the whole bundle is compiled into the binary — there is no directory to drop a
 file into, and nothing is fetched at runtime. No markdown or rich-text renderer anywhere. A test
 fails the build on `innerHTML`, `eval`, `new Function`, or any remote URL in the interface source.

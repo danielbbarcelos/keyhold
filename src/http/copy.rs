@@ -687,8 +687,8 @@ async fn read_aws(state: &AppState, vault_id: &str, id: &str) -> Result<Read, Fa
         _ => return Err(bad_request("o registro não está no cofre de origem")),
     }
 
-    let Json(opened) = aws::open_record(state, id).await?;
-    let record = &opened["record"];
+    // The unsealed read: a copy carries the secrets, the page never sees them.
+    let record = &aws::record_json(state, id).await?;
     let payload: Payload = serde_json::from_value(record["payload"].clone()).map_err(bad_request)?;
     let favourite = record["favourite"].as_bool().unwrap_or(false);
 
