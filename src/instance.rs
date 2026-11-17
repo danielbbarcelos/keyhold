@@ -511,12 +511,48 @@ fn mac_dialog(text: &str, buttons: &[&str], default: &str) -> Option<String> {
     answered(&output.stdout)
 }
 
-/// Hand the URL to the desktop.
+/// Write the page that forwards a browser to `address`, and say where it is.
 ///
-/// The token is in the fragment, which is why this is safe to pass as an argument: the fragment
-/// never reaches a server, and `xdg-open` is not a server. It is still visible in this process's
-/// own `/proc/self/cmdline` for as long as the helper runs, which is the reason the token is
-/// worthless the moment keyhold exits.
+/// `address` carries a one-time code, and an address on a command line is readable by every user
+/// of the machine (`/proc/<pid>/cmdline`, `ps`). A file in the state directory, `0600` inside
+/// `0700`, is readable by this user alone, so the opener is handed this page's path instead. The
+/// page has no script: a refresh to the address, and a link for a browser that ignores the refresh.
+pub fn write_opener(address: &str) -> std::io::Result<std::path::PathBuf> {
+    let dir = crate::paths::state_dir();
+
+    // Pages left by an earlier one: only the newest code is ever outstanding, and a process that
+    // stopped before removing its page left a code that was already dead.
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+
+            if name.starts_with("open-") && name.ends_with(".html") {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+
+    let name = format!("open-{}.html", crate::session::SessionToken::generate().expose());
+    let page = dir.join(name);
+
+    // The address is built from our own scheme, name, port and a base64url code; escaping is a
+    // belt for a name somebody gave `set-host`.
+    let escaped = address.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;").replace('>', "&gt;");
+    let html = format!(
+        "<!doctype html><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">\
+         <meta http-equiv=\"refresh\" content=\"0;url={escaped}\"><title>Keyhold</title>\
+         <a href=\"{escaped}\">Abrir o Keyhold</a>\n"
+    );
+
+    crate::paths::write_private_file(&page, html.as_bytes())?;
+
+    Ok(page)
+}
+
+/// Hand an address or a file to the desktop's opener.
+///
+/// Never an address with a code in it: see `write_opener`, whose page is what goes through here.
 pub fn open_browser(url: &str) {
     // On Windows, `start` would read the `&` in a URL as a second command; the URL protocol
     // handler takes the address as one argument.

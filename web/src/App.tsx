@@ -5,7 +5,7 @@ import { Setup } from './screens/Setup'
 import { Unlock } from './screens/Unlock'
 import { Workspace } from './workspace/Workspace'
 import { clearNow } from './clipboard'
-import { hasToken } from './session'
+import { hasToken, wasReplayed } from './session'
 import { applyAppearance } from './theme'
 import { LogoLockup } from './workspace/Logo'
 import { applyLayout } from './workspace/Splitter'
@@ -134,11 +134,12 @@ function Offline({ onRetry }: { onRetry: () => void }) {
 }
 
 /**
- * A tab without the session token: a bookmark, or the address typed by hand.
+ * A tab without a session: a bookmark after a restart, an address typed by hand, or a tab whose
+ * opening code had already been used by somebody else.
  *
- * The token is never handed to this page. The button asks the running Keyhold to open its own
- * address, token included, in the browser — the same thing "Abrir e continuar" does from a second
- * start — and this tab is left behind, to be closed.
+ * Nothing that opens a session is ever handed to this page. The button asks the running Keyhold to
+ * open a window of its own, the same thing "Abrir e continuar" does from a second start, and this
+ * tab is left behind, to be closed.
  */
 function OpenFromBookmark() {
   const [state, setState] = useState<'idle' | 'busy' | 'opened' | 'failed'>('idle')
@@ -166,12 +167,17 @@ function OpenFromBookmark() {
   return (
     <Notice title={state === 'opened' ? 'Keyhold aberto em uma nova aba' : 'Abrir o Keyhold'}>
       {state === 'opened' ? (
-        'Esta aba pode ser fechada. A credencial da sessão é enviada apenas para a nova aba, nunca para um endereço salvo.'
+        'Esta aba pode ser fechada. A sessão vai apenas para a nova aba, nunca para um endereço salvo.'
       ) : (
         <span className="flex flex-col items-start gap-4">
+          {wasReplayed() && (
+            <span className="text-destructive">
+              O endereço que abriu esta aba já tinha sido usado antes. Outro programa pode ter lido o endereço, e a
+              sessão criada com ele foi encerrada por segurança.
+            </span>
+          )}
           <span>
-            Esta aba não possui a credencial da sessão, que muda sempre que o Keyhold é aberto. O
-            Keyhold abre uma nova aba já com a credencial.
+            Esta aba não possui uma sessão do Keyhold. O Keyhold abre uma nova aba já com a sessão.
           </span>
           <Button onClick={() => void open()} disabled={state === 'busy'}>
             {state === 'busy' && <Loader2 className="animate-spin" />}

@@ -29,9 +29,9 @@ src/
   lib.rs       the same code the tests drive
   paths.rs     where files live, and the permissions they are held to
   instance.rs  one vault, one process: the claim, and taking over a running one
-  session.rs   the per-run token: generated, compared in constant time, never persisted
+  session.rs   one-time codes and per-origin session cookies: memory only, constant-time compare
   db.rs        the vault file: open, restrict, migrate
-  http.rs      the loopback surface: token gate, policy headers, embedded bundle
+  http.rs      the loopback surface: session gate, policy headers, embedded bundle
 web/
   src/         the interface. No storage, no remote origin, no markup rendering
 tests/
@@ -106,5 +106,6 @@ Locked is not a screen. Locked is the absence of the key: the derived material i
 process cannot read the vault until somebody types the master password again. Quitting Keyhold is
 therefore the strongest possible lock, and a crash is a lock too.
 
-This is why the session token is per-run and never stored. A tab from a previous run is a tab whose
-provenance this process cannot vouch for, so it does not get to keep talking.
+This is why sessions are per-run and live only in memory, and why unlocking replaces them. A tab from
+a previous run is a tab whose provenance this process cannot vouch for, so it does not get to keep
+talking.

@@ -80,8 +80,9 @@ pub struct PendingRequest {
 pub struct AgentState {
     pending: Mutex<Vec<PendingRequest>>,
     answers: Mutex<HashMap<String, bool>>,
-    /// The interface's own URL, token included, so a desktop question can put the window back.
-    /// Set once by the binary; absent in tests, where nothing should open a browser.
+    /// The interface's own address (scheme, name and port, nothing secret), so a desktop question
+    /// can put the window back. Set once by the binary; absent in tests, where nothing should open a
+    /// browser.
     door: OnceLock<String>,
     /// When the interface last polled while somebody was actually looking at it, in seconds.
     looked_at: AtomicU64,
@@ -90,7 +91,7 @@ pub struct AgentState {
 }
 
 impl AgentState {
-    /// Where the interface lives, token included. `None` until the binary sets it, and in tests.
+    /// Where the interface lives. `None` until the binary sets it, and in tests.
     pub fn door(&self) -> Option<&str> {
         self.door.get().map(String::as_str)
     }
@@ -787,9 +788,9 @@ struct DesktopKnock(Option<tokio::task::JoinHandle<()>>);
 
 impl DesktopKnock {
     fn start(state: Arc<AppState>, id: String) -> Self {
-        let Some(door) = state.agent.door.get().cloned() else {
+        if state.agent.door.get().is_none() {
             return Self(None);
-        };
+        }
 
         let task = tokio::spawn(async move {
             // A focused interface polls within a second and shows the dialog itself. Give it that
@@ -810,7 +811,7 @@ impl DesktopKnock {
             let _release = Release(&state.agent.asking);
 
             if crate::instance::ask_to_open(&knock_text(&request)).await {
-                crate::instance::open_browser(&door);
+                crate::http::present(&state);
             }
         });
 

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Security
+
+- **The address no longer carries the session.** It carries a one-time code (30 seconds, one
+  exchange), and the code never goes on a command line: Keyhold writes a small page into its state
+  directory (`0600`) and hands the browser that page's path. The page trades the code for an
+  `HttpOnly`, `SameSite=Strict` cookie named after the port and removes the code from the address
+  before anything renders. Every API request also needs the `X-Keyhold` header and this origin.
+- **A code used twice closes the session it opened**, and the tab says the address had already been
+  used.
+- **Unlocking replaces the session**, so a cookie a browser restored from disk opens nothing after
+  the next unlock.
+- **Opens on `keyhold.localhost`** when the system resolves it (and no `set-host` name exists), so
+  the session cookie does not travel to other local servers on `127.0.0.1`.
+- Nothing prints an address with a credential any more. `keyhold --present` opens the window.
+
 ### Fixed
 
 - **The longest approval windows were hidden.** Since the duration picker became a searchable list

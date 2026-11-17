@@ -140,7 +140,9 @@ while somebody is using it, so a schedule would fire whenever the machine happen
 - `keyhold` binds `127.0.0.1` on an OS-assigned free port. The bind address is not configurable —
   there is no setting that makes it listen anywhere else.
 - A 32-byte session token per run, delivered in the URL fragment, compared in constant time,
-  required by every `/api` route, and never written to disk.
+  required by every `/api` route, and never written to disk. *Since replaced:* the address now
+  carries a one-time code handed to the browser through a `0600` page, traded for a per-origin
+  `HttpOnly` cookie that also needs the `X-Keyhold` header (see the threat model, T5).
 - The interface bundle compiled into the binary. Nothing is read from disk at runtime and nothing
   is fetched from the network.
 - A strict `Content-Security-Policy` on every response, plus `nosniff`, `no-referrer`,

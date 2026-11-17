@@ -10,7 +10,7 @@ not required to file.
 
 Anything that would let somebody read vault contents without the master password, weaken the
 encryption or the key derivation, escape the interface's content policy, or reach the API without a
-valid session token.
+valid session.
 
 ## What does not
 
