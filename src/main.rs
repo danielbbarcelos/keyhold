@@ -219,6 +219,10 @@ async fn serve(cli: Cli) -> Result<()> {
     // it will run on is the one the person chose last time, not the default.
     let policy = keyhold::settings::lock_policy(&store);
     let agent_wanted = keyhold::settings::agent_surface(&store);
+    // The language every message is written in, from the first one on.
+    if let Some(lang) = keyhold::settings::language(&store) {
+        keyhold::i18n::set(lang);
+    }
 
     // A fixed port by default, so a bookmark or a browser's saved login keeps working run after run.
     // Asked for explicitly, a port is that port or an error; by default, a taken 7717 falls back to

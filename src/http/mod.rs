@@ -99,6 +99,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/visibility", post(visibility))
         .route("/settings/lock", put(set_lock_policy))
         .route("/settings/appearance", put(set_appearance))
+        .route("/settings/language", put(set_language))
         .route("/settings/retention", put(set_retention))
         .route("/settings/log-reads", put(set_log_reads))
         .route("/settings/field-autocomplete", put(set_field_autocomplete))
@@ -393,6 +394,7 @@ async fn status(State(state): State<Arc<AppState>>) -> Answer {
         "field_autocomplete": settings::field_autocomplete(&store),
         "set_host_hint_dismissed": settings::set_host_hint_dismissed(&store),
         "appearance": settings::appearance(&store),
+        "language": settings::language(&store).map(|lang| lang.tag()),
         "generator": settings::generator(&store),
         "layout": settings::layout(&store),
         "attemptsLeft": MAX_FAILURES.saturating_sub(*state.failures.lock().unwrap()),
@@ -1052,6 +1054,22 @@ async fn set_retention(
 
 /// Theme and accent. Allowed while locked, like everything else on the unlock screen's side of the
 /// line: it carries nothing about the vault.
+#[derive(Deserialize)]
+struct LanguageBody {
+    language: String,
+}
+
+/// The language of this Keyhold: the interface's and every message the binary writes. Like the
+/// appearance, it does not need the vault open, so the first screen and the lock screen can change
+/// it.
+async fn set_language(State(state): State<Arc<AppState>>, Json(body): Json<LanguageBody>) -> Answer {
+    let store = state.store.lock().unwrap();
+    let lang = crate::i18n::Lang::from_tag(&body.language);
+    settings::set_language(&store, lang).map_err(bad_request)?;
+
+    Ok(Json(json!({ "language": lang.tag() })))
+}
+
 async fn set_appearance(
     State(state): State<Arc<AppState>>,
     Json(body): Json<settings::Appearance>,
