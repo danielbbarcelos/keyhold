@@ -2692,3 +2692,277 @@ async fn trying_again_forgets_and_probes_the_trail() {
     let opened = h.get(&format!("/records/{}", h.id("/app/prod/db"))).await;
     assert_eq!(opened.body["record"]["audit"]["state"], "on");
 }
+
+// ── sharing, against an S3 that keeps what it is given ─────────────────────────────────────────
+
+#[derive(Default)]
+struct Bucket {
+    /// key -> versions, oldest first: (version id, bytes, content type)
+    objects: BTreeMap<String, Vec<(String, Vec<u8>, String)>>,
+    next: u64,
+}
+
+type SharedBucket = Arc<Mutex<Bucket>>;
+
+async fn bucket_endpoint(State(shared): State<SharedBucket>, request: Request) -> Response {
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+    let content_type = request.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
+    let body = axum::body::to_bytes(request.into_body(), usize::MAX).await.unwrap().to_vec();
+    let query: Vec<(String, String)> = uri
+        .query()
+        .unwrap_or_default()
+        .split('&')
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            let (k, v) = p.split_once('=').unwrap_or((p, ""));
+            (k.to_string(), percent_decode(v))
+        })
+        .collect();
+    let param = |name: &str| query.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+    // Path-style: /bucket/key...
+    let path = percent_decode(uri.path());
+    let key = path.trim_start_matches('/').split_once('/').map(|(_, k)| k.to_string()).unwrap_or_default();
+    let mut bucket = shared.lock().unwrap();
+
+    match method.as_str() {
+        "PUT" => {
+            bucket.next += 1;
+            let version = format!("v{}", bucket.next);
+            bucket.objects.entry(key).or_default().push((version.clone(), body, content_type));
+            (StatusCode::OK, [("x-amz-version-id", version)], "").into_response()
+        }
+        "GET" if key.is_empty() && param("list-type").is_some() => {
+            let prefix = param("prefix").unwrap_or_default();
+            let mut xml = String::from("<ListBucketResult><IsTruncated>false</IsTruncated>");
+            for (name, versions) in &bucket.objects {
+                if name.starts_with(&prefix) && !versions.is_empty() {
+                    xml.push_str(&format!(
+                        "<Contents><Key>{name}</Key><Size>{}</Size><LastModified>2026-11-17T00:00:00.000Z</LastModified></Contents>",
+                        versions.last().unwrap().1.len()
+                    ));
+                }
+            }
+            xml.push_str("</ListBucketResult>");
+            (StatusCode::OK, xml).into_response()
+        }
+        "GET" => match bucket.objects.get(&key).and_then(|v| v.last()) {
+            Some((_, bytes, kind)) => (StatusCode::OK, [("content-type", kind.clone())], bytes.clone()).into_response(),
+            None => (StatusCode::NOT_FOUND, "<Error><Code>NoSuchKey</Code><Message>no</Message></Error>").into_response(),
+        },
+        "DELETE" => {
+            match param("versionId") {
+                Some(version) => {
+                    if let Some(versions) = bucket.objects.get_mut(&key) {
+                        versions.retain(|(v, _, _)| *v != version);
+                    }
+                }
+                None => {
+                    bucket.objects.remove(&key);
+                }
+            }
+            (StatusCode::NO_CONTENT, "").into_response()
+        }
+        "POST" => {
+            // A browser form: only the key is needed here.
+            let text = String::from_utf8_lossy(&body).to_string();
+            let key = text
+                .split("name=\"key\"\r\n\r\n")
+                .nth(1)
+                .and_then(|rest| rest.split("\r\n").next())
+                .unwrap_or_default()
+                .to_string();
+            bucket.next += 1;
+            let version = format!("v{}", bucket.next);
+            bucket.objects.entry(key).or_default().push((version, Vec::new(), "application/octet-stream".into()));
+            (StatusCode::NO_CONTENT, "").into_response()
+        }
+        _ => (StatusCode::METHOD_NOT_ALLOWED, "").into_response(),
+    }
+}
+
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(&text[i + 1..i + 3], 16) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+async fn start_bucket(shared: SharedBucket) -> String {
+    let app = axum::Router::new().fallback(bucket_endpoint).with_state(shared);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{address}")
+}
+
+/// What the recipient's page does, in Rust: read the fragment, open the envelope with the link
+/// key, open the content with the link key and the password.
+async fn open_as_recipient(link: &str, password: Option<&str>) -> Result<(Value, Value), String> {
+    use crate::share::crypto;
+
+    let (_, fragment) = link.split_once('#').ok_or("no fragment")?;
+    let pairs: BTreeMap<String, String> =
+        fragment.split('&').filter_map(|p| p.split_once('=')).map(|(k, v)| (k.to_string(), percent_decode(v))).collect();
+    let key: [u8; 32] = crate::encoding::from_base64url(&pairs["k"]).unwrap().try_into().unwrap();
+    let expires: u64 = pairs["x"].parse().unwrap();
+    let aad = crypto::aad(&pairs["i"], expires);
+
+    let client = reqwest::Client::new();
+    let sealed = client.get(&pairs["e"]).send().await.map_err(|e| e.to_string())?;
+    if !sealed.status().is_success() {
+        return Err(format!("envelope {}", sealed.status()));
+    }
+    let envelope: Value =
+        serde_json::from_slice(&crypto::open(&crypto::envelope_key(&key), &sealed.bytes().await.unwrap(), &aad).map_err(|e| e.to_string())?).unwrap();
+
+    let stretched = envelope["password"].as_object().map(|p| {
+        (crate::encoding::from_base64url(p["salt"].as_str().unwrap()).unwrap(), p["iterations"].as_u64().unwrap() as u32)
+    });
+    let content_key = crypto::content_key(&key, match (&stretched, password) {
+        (Some((salt, iterations)), Some(password)) => Some((password, salt.as_slice(), *iterations)),
+        _ => None,
+    });
+    let sealed = client.get(envelope["content"].as_str().unwrap()).send().await.map_err(|e| e.to_string())?;
+    if !sealed.status().is_success() {
+        return Err(format!("content {}", sealed.status()));
+    }
+    let content: Value =
+        serde_json::from_slice(&crypto::open(&content_key, &sealed.bytes().await.unwrap(), &aad).map_err(|_| "wrong password".to_string())?).unwrap();
+
+    Ok((envelope, content))
+}
+
+async fn start_with_bucket() -> (Harness, SharedBucket) {
+    let bucket: SharedBucket = Arc::default();
+    let base = start_bucket(bucket.clone()).await;
+    let h = start(account, Some("keyhold-producao".into()), Some(base)).await;
+    (h, bucket)
+}
+
+#[tokio::test]
+async fn a_shared_link_opens_with_its_password_and_carries_only_what_was_ticked() {
+    let (h, bucket) = start_with_bucket().await;
+    let id = h.id("/app/prod/api");
+
+    let shared = h
+        .post(
+            &format!("/records/{id}/share"),
+            json!({ "fields": [1], "notes": false, "hours": 2, "password": true, "recipient": "fornecedor@exemplo.test" }),
+        )
+        .await;
+    assert_eq!(shared.status, 200, "{}", shared.body);
+    let link = shared.body["link"].as_str().unwrap().to_string();
+    let password = shared.body["password"].as_str().unwrap().to_string();
+    assert_eq!(password.len(), 20);
+    assert!(!link.contains("s3nha"), "nothing of the record in the link");
+
+    // Inside the record's boundary, and nothing in clear in the bucket.
+    {
+        let bucket = bucket.lock().unwrap();
+        let keys: Vec<&String> = bucket.objects.keys().collect();
+        assert!(keys.iter().all(|k| k.starts_with("app/.keyhold/shares/")), "{keys:?}");
+        for versions in bucket.objects.values() {
+            let bytes = &versions.last().unwrap().1;
+            let text = String::from_utf8_lossy(bytes);
+            assert!(!text.contains("s3nha") && !text.contains("deploy"), "a secret in clear in the bucket");
+        }
+    }
+
+    let (envelope, content) = open_as_recipient(&link, Some(&password)).await.unwrap();
+    assert_eq!(envelope["sender"], "ana.souza");
+    assert_eq!(envelope["title"], "API");
+    assert_eq!(content["fields"].as_array().unwrap().len(), 1);
+    assert_eq!(content["fields"][0]["value"], "s3nha");
+    assert!(open_as_recipient(&link, Some("errada")).await.is_err(), "a wrong password opens nothing");
+    assert!(open_as_recipient(&link, None).await.is_err(), "the link alone opens nothing");
+
+    // The share was noted before it happened.
+    assert!(h.events().iter().any(|(_, _, m)| m["action"] == "record.shared" && m["recipient"] == "fornecedor@exemplo.test"));
+}
+
+#[tokio::test]
+async fn the_page_reports_back_and_a_revoked_link_leaves_nothing_behind() {
+    let (h, bucket) = start_with_bucket().await;
+    let id = h.id("/app/prod/api");
+    let shared = h.post(&format!("/records/{id}/share"), json!({ "fields": [0, 1], "hours": 1 })).await;
+    assert_eq!(shared.status, 200, "{}", shared.body);
+    let link = shared.body["link"].as_str().unwrap().to_string();
+    let share_id = shared.body["share"]["id"].as_str().unwrap().to_string();
+
+    // The page posts its "opened" marker with the signed form the envelope carries.
+    let (envelope, _) = open_as_recipient(&link, None).await.unwrap();
+    let opened = &envelope["markers"]["opened"];
+    // A browser's multipart form, written out: the fields, then an empty file.
+    let boundary = "keyholdtestboundary";
+    let mut body = String::new();
+    for (name, value) in opened["fields"].as_object().unwrap() {
+        body.push_str(&format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{}\r\n", value.as_str().unwrap()));
+    }
+    body.push_str(&format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"blob\"\r\n\r\n\r\n--{boundary}--\r\n"));
+    reqwest::Client::new()
+        .post(opened["url"].as_str().unwrap())
+        .header("content-type", format!("multipart/form-data; boundary={boundary}"))
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert!(opened["fields"]["policy"].is_string(), "the marker is a signed POST, limited by its policy");
+
+    let listed = h.get(&format!("/records/{id}/shares")).await;
+    assert_eq!(listed.body["shares"][0]["opened"], true, "{}", listed.body);
+    assert!(h.events().iter().any(|(_, _, m)| m["action"] == "share.opened"), "the marker became a trail event");
+
+    let revoked = h.call("DELETE", &format!("/shares/{share_id}"), None).await;
+    assert_eq!(revoked.status, 200, "{}", revoked.body);
+    assert!(bucket.lock().unwrap().objects.values().all(|versions| versions.is_empty()), "every version is gone");
+    assert!(open_as_recipient(&link, None).await.is_err());
+    assert_eq!(h.get(&format!("/records/{id}/shares")).await.body["shares"], json!([]));
+}
+
+#[tokio::test]
+async fn first_access_needs_a_password_and_the_page_deletes_the_exact_version() {
+    let (h, bucket) = start_with_bucket().await;
+    let id = h.id("/app/prod/api");
+
+    let refused = h.post(&format!("/records/{id}/share"), json!({ "fields": [1], "first_access": true })).await;
+    assert_eq!(refused.status, 400, "{}", refused.body);
+
+    let shared = h.post(&format!("/records/{id}/share"), json!({ "fields": [1], "first_access": true, "password": true })).await;
+    assert_eq!(shared.status, 200, "{}", shared.body);
+    let link = shared.body["link"].as_str().unwrap().to_string();
+    let password = shared.body["password"].as_str().unwrap().to_string();
+
+    let (envelope, _) = open_as_recipient(&link, Some(&password)).await.unwrap();
+    let delete = envelope["delete"].as_str().unwrap();
+    assert!(delete.contains("versionId="), "deleted for good, not hidden behind a marker");
+    reqwest::Client::new().delete(delete).send().await.unwrap();
+
+    assert!(open_as_recipient(&link, Some(&password)).await.is_err(), "after the page opened it, it is gone");
+    let content_left = bucket.lock().unwrap().objects.iter().any(|(k, v)| k.ends_with("content.bin") && !v.is_empty());
+    assert!(!content_left);
+}
+
+#[tokio::test]
+async fn a_2fa_seed_is_never_shared_and_sharing_can_be_switched_off() {
+    let (h, _bucket) = start_with_bucket().await;
+    let id = h.id("/app/prod/api");
+
+    h.state.aws.with(&h.state.lock, |inner| {
+        inner.bucket_settings.insert(h.vault.clone(), crate::aws::audit::BucketSettings { share_off: true, ..Default::default() });
+    });
+    let refused = h.post(&format!("/records/{id}/share"), json!({ "fields": [1], "hours": 1 })).await;
+    assert_eq!(refused.status, 403, "{}", refused.body);
+    assert_eq!(refused.body["aws"], "share_refused");
+}

@@ -58,6 +58,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/records/:id/accesses", post(report_access))
         .route("/records/:id/secret", post(reveal_secret))
         .route("/records/:id/activity", get(record_activity))
+        .route("/records/:id/share", post(share_record))
+        .route("/records/:id/share-file", post(share_file))
+        .route("/records/:id/shares", get(record_shares))
+        .route("/shares/:id", delete(revoke_share))
         .route("/records/:id/attachments", get(list_attachments).post(add_attachment))
         .route("/attachments/:id", get(open_attachment))
         .route("/attachments/:id", delete(delete_attachment))
@@ -623,6 +627,86 @@ async fn record_activity(
         .collect();
 
     Ok(Json(json!({ "source": "local", "events": rows, "more": false })))
+}
+
+/// A link to the record for somebody outside (AWS vaults: see `aws::share_record`).
+async fn share_record(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<aws::ShareBody>,
+) -> Answer {
+    if !is_aws_id(&id) {
+        return Err(bad_request(anyhow::anyhow!("um cofre local compartilha por arquivo, não por link")));
+    }
+
+    aws::share_record(&state, &id, body).await
+}
+
+async fn record_shares(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    if !is_aws_id(&id) {
+        return Ok(Json(json!({ "shares": [] })));
+    }
+
+    aws::record_shares(&state, &id).await
+}
+
+async fn revoke_share(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    aws::revoke_share(&state, &id).await
+}
+
+#[derive(Deserialize)]
+struct ShareFileBody {
+    #[serde(flatten)]
+    choice: crate::share::Choice,
+    #[serde(default = "default_format")]
+    format: String,
+    #[serde(default)]
+    recipient: Option<String>,
+}
+
+fn default_format() -> String {
+    "txt".into()
+}
+
+/// Length of a local share's ZIP password. The format fixes PBKDF2-HMAC-SHA1 at 1000 iterations,
+/// so the password carries the whole of the protection: 24 random characters from 54 is about 138
+/// bits, out of reach of any guessing.
+const ZIP_PASSWORD_LENGTH: usize = 24;
+
+/// A local record as a ZIP with AES-256, for an e-mail attachment. Nothing leaves this computer
+/// but the file the person downloads.
+async fn share_file(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<ShareFileBody>,
+) -> Answer {
+    if is_aws_id(&id) {
+        return Err(bad_request(anyhow::anyhow!("um cofre AWS compartilha por link")));
+    }
+
+    let store = state.store.lock().unwrap();
+    let opened = with_key!(state, |key| records::open(&store, key, &id)).map_err(bad_request)?;
+    let (fields, notes, _) = crate::share::content(&opened.payload, &body.choice).map_err(bad_request)?;
+    let (name, bytes) = crate::share::as_file(&opened.payload.title, &fields, notes.as_deref(), &body.format).map_err(bad_request)?;
+
+    let password = crate::share::crypto::generated_password(ZIP_PASSWORD_LENGTH);
+    let archive = crate::share::zip::encrypted_zip(&name, &bytes, &password, crate::identity::now_seconds());
+
+    let recipient = body.recipient.as_deref().map(str::trim).filter(|r| !r.is_empty()).map(str::to_string);
+    let mut detail = Detail::new()
+        .with("fields", fields.iter().map(|f| f.label.clone()).collect::<Vec<_>>().join(", "))
+        .with("format", body.format.clone());
+    if let Some(recipient) = &recipient {
+        detail = detail.with("recipient", recipient.clone());
+    }
+    audit::note(&store, &state.lock, audit::action::RECORD_SHARED, Some(&id), detail);
+
+    Ok(Json(json!({
+        "name": "compartilhamento.zip",
+        "inner": name,
+        "data": crate::encoding::base64url(&archive),
+        "password": password,
+    })))
 }
 
 // ── folders ─────────────────────────────────────────────────────────────────────────────────────

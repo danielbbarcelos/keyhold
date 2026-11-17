@@ -2256,6 +2256,302 @@ async fn retry_audit(State(state): State<Arc<AppState>>, Path(vault_id): Path<St
     Ok(Json(json!({ "audit": probe(&state, &place, &names).await })))
 }
 
+// ── sharing a record ────────────────────────────────────────────────────────────────────────────
+//
+// See `crate::share` for what may go and how it is sealed. Here: where the objects go (inside the
+// record's permission boundary, `<segment>/.keyhold/shares/<id>/`), the signed URLs, and the
+// record of the share kept in the sealed AWS configuration.
+
+#[derive(serde::Deserialize)]
+pub(crate) struct ShareBody {
+    #[serde(flatten)]
+    choice: crate::share::Choice,
+    /// Hours the link lasts; ignored for first access.
+    #[serde(default)]
+    hours: Option<u64>,
+    #[serde(default)]
+    first_access: bool,
+    #[serde(default)]
+    password: bool,
+    #[serde(default)]
+    recipient: Option<String>,
+}
+
+/// Five minutes: a link signed with credentials about to end would die before anybody opened it.
+const SHARE_MIN_SECONDS: u64 = 300;
+
+fn share_refusal(text: impl Into<String>) -> Failure {
+    aws_refusal(StatusCode::FORBIDDEN, "share_refused", text)
+}
+
+pub(crate) async fn share_record(state: &AppState, id: &str, body: ShareBody) -> Answer {
+    use crate::share::{self, crypto};
+
+    let (vault_id, name) = target_record(id)?;
+    let place = place(state, &vault_id).await?;
+    let settings = bucket_settings(state, &place).await;
+
+    if settings.share_off {
+        return Err(share_refusal("o compartilhamento está desligado para este cofre (tag keyhold:share=off no bucket)"));
+    }
+    let bucket = bucket_of(&place)?;
+    // A bucket with a dot is reached path-style, on a host shared by every bucket of the region:
+    // the recipient's page would share its origin with strangers.
+    if bucket.contains('.') {
+        return Err(share_refusal("o compartilhamento precisa de um bucket sem ponto no nome"));
+    }
+
+    let absolute = mapping::absolute(&name);
+    let segments: Vec<&str> = absolute.trim_start_matches('/').split('/').collect();
+    let boundary = if segments.len() > 1 {
+        segments[0].to_string()
+    } else {
+        settings
+            .share_prefix
+            .clone()
+            .ok_or_else(|| share_refusal("um registro na raiz da conta só pode ser compartilhado com a tag keyhold:share-prefix no bucket"))?
+    };
+
+    let now = now_unix();
+    let session_end = place.credentials.expires_at().unwrap_or(now + 3600);
+    if session_end.saturating_sub(now) < SHARE_MIN_SECONDS {
+        return Err(session_expired());
+    }
+    let expires_at = if body.first_access {
+        session_end
+    } else {
+        (now + body.hours.unwrap_or(1).clamp(1, 12) * 3600).min(session_end)
+    };
+    if body.first_access && !body.password {
+        return Err(bad_request("o primeiro acesso exige a senha de abertura"));
+    }
+
+    let (opened, _) = open_parameter(state, &place, &name).await?;
+    let (fields, notes, _left_out) = share::content(&opened.payload, &body.choice).map_err(bad_request)?;
+    let recipient = body.recipient.as_deref().map(str::trim).filter(|r| !r.is_empty()).map(str::to_string);
+
+    // The event lands before anything is written to the bucket.
+    trail(
+        state,
+        &place,
+        &name,
+        id,
+        "record.shared",
+        json!({
+            "recipient": recipient,
+            "fields": fields.iter().map(|f| f.label.clone()).collect::<Vec<_>>(),
+            "notes": notes.is_some(),
+            "first_access": body.first_access,
+            "password": body.password,
+            "expires_at": expires_at,
+        }),
+        Weight::Sensitive,
+    )
+    .await?;
+
+    let sender = caller(state, &place).await.unwrap_or_else(|_| place.connection.title.clone());
+    let metadata = metadata_of(&place, &name).await?;
+    let key_id = Some(key_of(&metadata, &name)?).filter(|k| k != mapping::DEFAULT_SSM_KEY);
+    let s3 = s3_of(state, &place)?;
+    let s3_error = |e| s3_failure(e, &bucket, &place.vault.region);
+
+    let share_id = crate::encoding::base32(&crypto::random32()[..16]).to_lowercase();
+    let prefix = format!("{boundary}/.keyhold/shares/{share_id}/");
+    let aad = crypto::aad(&share_id, expires_at);
+    let link_key = crypto::random32();
+    let password = body.password.then(|| crypto::generated_password(20));
+    let salt = crypto::random32();
+    let ttl = expires_at.saturating_sub(now).max(1);
+    let mut objects: Vec<(String, Option<String>)> = Vec::new();
+
+    // The content: the fields, under the link key and the password.
+    let content_key = crypto::content_key(
+        &link_key,
+        password.as_deref().map(|p| (p, &salt[..16], crypto::PASSWORD_ITERATIONS)),
+    );
+    let sealed = crypto::seal(&content_key, &share::content_json(&fields, notes.as_deref()), &aad).map_err(bad_request)?;
+    let content_key_name = format!("{prefix}content.bin");
+    let written = s3.put_object(&bucket, &content_key_name, &sealed, key_id.as_deref(), Some("application/octet-stream")).await.map_err(s3_error)?;
+    objects.push((content_key_name.clone(), written.version_id.clone()));
+
+    let content_url = s3.presigned_url("GET", &bucket, &content_key_name, &[], ttl).map_err(aws_failure)?;
+    let delete_url = match (body.first_access, written.version_id.as_deref()) {
+        (true, Some(version)) => Some(s3.presigned_url("DELETE", &bucket, &content_key_name, &[("versionId", version)], ttl).map_err(aws_failure)?),
+        (true, None) => Some(s3.presigned_url("DELETE", &bucket, &content_key_name, &[], ttl).map_err(aws_failure)?),
+        _ => None,
+    };
+
+    let mut markers = serde_json::Map::new();
+    for kind in ["opened", "revealed", "wrong"] {
+        let (url, fields) = s3.post_target(&bucket, &format!("{prefix}m-{kind}"), key_id.as_deref(), expires_at).map_err(aws_failure)?;
+        markers.insert(kind.into(), json!(share::Marker::new(url, fields)));
+    }
+
+    // The envelope: what the page shows before "Revelar", under the link key alone.
+    let envelope = share::Envelope {
+        v: 1,
+        title: opened.payload.title.clone(),
+        sender,
+        expires_at,
+        first: body.first_access,
+        password: password.as_ref().map(|_| json!({ "salt": crate::encoding::base64url(&salt[..16]), "iterations": crypto::PASSWORD_ITERATIONS })),
+        content: content_url,
+        delete: delete_url,
+        markers,
+    };
+    let sealed = crypto::seal(&crypto::envelope_key(&link_key), &serde_json::to_vec(&envelope).map_err(bad_request)?, &aad).map_err(bad_request)?;
+    let envelope_name = format!("{prefix}envelope.bin");
+    let written = s3.put_object(&bucket, &envelope_name, &sealed, key_id.as_deref(), Some("application/octet-stream")).await.map_err(s3_error)?;
+    objects.push((envelope_name.clone(), written.version_id));
+    let envelope_url = s3.presigned_url("GET", &bucket, &envelope_name, &[], ttl).map_err(aws_failure)?;
+
+    // The page: the same bytes for every share.
+    let page_name = format!("{prefix}index.html");
+    let written = s3
+        .put_object(&bucket, &page_name, share::recipient_page().as_bytes(), key_id.as_deref(), Some("text/html; charset=utf-8"))
+        .await
+        .map_err(s3_error)?;
+    objects.push((page_name.clone(), written.version_id));
+    let page_url = s3.presigned_url("GET", &bucket, &page_name, &[], ttl).map_err(aws_failure)?;
+
+    for kind in ["opened", "revealed", "wrong"] {
+        objects.push((format!("{prefix}m-{kind}"), None));
+    }
+
+    let link = format!("{page_url}{}", share::fragment(&link_key, &envelope_url, &share_id, expires_at));
+
+    let record = crate::aws::config::SharedLink {
+        id: share_id.clone(),
+        vault_id: vault_id.clone(),
+        record_id: id.to_string(),
+        bucket: bucket.clone(),
+        prefix,
+        created_at: now,
+        expires_at,
+        first_access: body.first_access,
+        password: password.is_some(),
+        recipient: recipient.clone(),
+        objects,
+        seen: Vec::new(),
+    };
+    change(state, |config, _| {
+        config.shares.retain(|share| share.expires_at > now);
+        config.shares.push(record);
+        Ok(())
+    })?;
+
+    Ok(Json(json!({
+        "link": link,
+        "password": password,
+        "share": { "id": share_id, "expires_at": expires_at, "first_access": body.first_access, "recipient": recipient },
+    })))
+}
+
+/// The record's links still open, with what their pages reported. A marker seen for the first
+/// time becomes a trail event ("abriu o link", "revelou o conteúdo").
+pub(crate) async fn record_shares(state: &AppState, id: &str) -> Answer {
+    let now = now_unix();
+    let config = load(state)?;
+    let mine: Vec<crate::aws::config::SharedLink> =
+        config.shares.iter().filter(|share| share.record_id == id && share.expires_at > now).cloned().collect();
+
+    if mine.is_empty() {
+        return Ok(Json(json!({ "shares": [] })));
+    }
+
+    let (vault_id, name) = target_record(id)?;
+    let place = place(state, &vault_id).await?;
+    let s3 = s3_of(state, &place)?;
+    let mut answer = Vec::new();
+    let mut newly_seen: Vec<(String, String)> = Vec::new();
+
+    for share in &mine {
+        let found = s3.list_objects_v2(&share.bucket, &format!("{}m-", share.prefix)).await.unwrap_or_default();
+        let has = |kind: &str| found.iter().any(|o| o.key.ends_with(&format!("m-{kind}")));
+
+        for kind in ["opened", "revealed", "wrong"] {
+            if has(kind) && !share.seen.iter().any(|s| s == kind) {
+                newly_seen.push((share.id.clone(), kind.to_string()));
+                let action = match kind {
+                    "opened" => "share.opened",
+                    "revealed" => "share.revealed",
+                    _ => "share.wrong_password",
+                };
+                // The person is the sharer's stream; the detail says it was the recipient's page.
+                let _ = trail(state, &place, &name, id, action, json!({ "share": share.id, "recipient": share.recipient }), Weight::Background).await;
+            }
+        }
+
+        answer.push(json!({
+            "id": share.id,
+            "created_at": share.created_at,
+            "expires_at": share.expires_at,
+            "first_access": share.first_access,
+            "password": share.password,
+            "recipient": share.recipient,
+            "opened": has("opened"),
+            "revealed": has("revealed"),
+        }));
+    }
+
+    if !newly_seen.is_empty() {
+        change(state, |config, _| {
+            for (share_id, kind) in &newly_seen {
+                if let Some(share) = config.shares.iter_mut().find(|s| &s.id == share_id) {
+                    share.seen.push(kind.clone());
+                }
+            }
+            Ok(())
+        })?;
+    }
+
+    Ok(Json(json!({ "shares": answer })))
+}
+
+/// Revoke a link: delete its objects, versions and all, so nothing of it stays in the bucket.
+pub(crate) async fn revoke_share(state: &AppState, share_id: &str) -> Answer {
+    let config = load(state)?;
+    let share = config
+        .shares
+        .iter()
+        .find(|share| share.id == share_id)
+        .cloned()
+        .ok_or_else(|| not_found("o link não existe mais"))?;
+
+    let place = place(state, &share.vault_id).await?;
+    let s3 = s3_of(state, &place)?;
+    let mut failed = Vec::new();
+
+    for (key, version) in &share.objects {
+        let outcome = match version {
+            Some(version) => s3.delete_object_version(&share.bucket, key, version).await,
+            None => s3.delete_object(&share.bucket, key).await,
+        };
+        if let Err(error) = outcome {
+            if !matches!(error, AwsError::NotFound(_)) {
+                failed.push(mapping::leaf(key).to_string());
+            }
+        }
+    }
+
+    if !failed.is_empty() {
+        return Err(share_refusal(format!(
+            "o link não foi revogado por completo: {} não foi apagado do bucket. Tente de novo",
+            failed.join(", ")
+        )));
+    }
+
+    change(state, |config, _| {
+        config.shares.retain(|s| s.id != share.id);
+        Ok(())
+    })?;
+
+    let (_, name) = target_record(&share.record_id)?;
+    trail(state, &place, &name, &share.record_id, "share.revoked", json!({ "share": share.id }), Weight::Background).await?;
+
+    Ok(Json(json!({ "revoked": true })))
+}
+
 /// The record a body describes, checked against what AWS can hold: the description (the title
 /// alone), the value (fields, icon and notes), and whether that value is Keyhold's JSON.
 fn prepared(payload: &Payload) -> Result<(Payload, String, String, bool), Failure> {
