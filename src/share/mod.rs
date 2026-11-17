@@ -271,4 +271,45 @@ mod tests {
         assert!(fragment.contains("&e=https%3A%2F%2Fb.s3"));
         assert!(fragment.ends_with("&i=abc&x=99"));
     }
+
+    /// Not a check: writes a share a real browser can open, to try the page's WebCrypto against
+    /// what this module seals. `KEYHOLD_DEMO_DIR=<dir> cargo test --lib write_a_demo_share -- --ignored`,
+    /// then serve `<dir>` on 127.0.0.1:8799 and open the printed address.
+    #[test]
+    #[ignore]
+    fn write_a_demo_share() {
+        use crypto::*;
+
+        let dir = std::path::PathBuf::from(std::env::var("KEYHOLD_DEMO_DIR").expect("KEYHOLD_DEMO_DIR"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = "http://127.0.0.1:8799";
+
+        for (name, password, first) in [("comsenha", Some("SenhaDeAbertura2026"), true), ("semsenha", None, false)] {
+            let id = format!("demo{name}");
+            let expires = crate::identity::now_seconds() + 3600;
+            let aad = aad(&id, expires);
+            let key = random32();
+            let salt = [9u8; 16];
+
+            let (fields, notes, _) = content(&payload(), &Choice { fields: vec![0, 1, 3], notes: true }).unwrap();
+            let content_key = content_key(&key, password.map(|p| (p, &salt[..], PASSWORD_ITERATIONS)));
+            std::fs::write(dir.join(format!("{name}-content.bin")), seal(&content_key, &content_json(&fields, notes.as_deref()), &aad).unwrap()).unwrap();
+
+            let envelope = Envelope {
+                v: 1,
+                title: "Postgres produção".into(),
+                sender: "Ana Souza".into(),
+                expires_at: expires,
+                first,
+                password: password.map(|_| json!({ "salt": crate::encoding::base64url(&salt), "iterations": PASSWORD_ITERATIONS })),
+                content: format!("{base}/{name}-content.bin"),
+                delete: None,
+                markers: serde_json::Map::new(),
+            };
+            std::fs::write(dir.join(format!("{name}-envelope.bin")), seal(&envelope_key(&key), &serde_json::to_vec(&envelope).unwrap(), &aad).unwrap()).unwrap();
+            std::fs::write(dir.join(format!("{name}.html")), recipient_page()).unwrap();
+
+            println!("{base}/{name}.html{}", fragment(&key, &format!("{base}/{name}-envelope.bin"), &id, expires));
+        }
+    }
 }
