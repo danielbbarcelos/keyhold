@@ -414,6 +414,29 @@ async fn trail_endpoint(State(shared): State<SharedTrail>, request: Request) -> 
             }
             (StatusCode::OK, axum::Json(json!({}))).into_response()
         }
+        "Logs_20140328.FilterLogEvents" => {
+            // Only the two patterns Keyhold sends: by record, and by action.
+            let pattern = input["filterPattern"].as_str().unwrap_or_default().to_string();
+            let wanted = |message: &Value| {
+                if let Some(record) = pattern.strip_prefix("{ $.record = \"").and_then(|p| p.strip_suffix("\" }")) {
+                    return message["record"] == record;
+                }
+                if let Some(action) = pattern.strip_prefix("{ $.action = \"").and_then(|p| p.strip_suffix("\" }")) {
+                    return message["action"] == action;
+                }
+                true
+            };
+            let events: Vec<Value> = trail
+                .events
+                .iter()
+                .enumerate()
+                .filter(|(_, (g, _, m))| *g == group && wanted(m))
+                .map(|(i, (_, stream, message))| {
+                    json!({ "logStreamName": stream, "timestamp": 1, "ingestionTime": 1_000 + i as i64, "message": message.to_string() })
+                })
+                .collect();
+            (StatusCode::OK, axum::Json(json!({ "events": events }))).into_response()
+        }
         other => error(&format!("Unexpected{other}")),
     }
 }
@@ -2604,4 +2627,68 @@ async fn moving_and_saving_say_what_changed_and_never_what_it_was() {
     let event = h.events().into_iter().find(|(_, _, m)| m["action"] == "record.moved").expect("a move event");
     assert_eq!(event.2["from"], "/app/prod/api");
     assert_eq!(event.2["to"], "/app/dev/api");
+}
+
+#[tokio::test]
+async fn a_records_activity_comes_from_its_boundary_with_who_and_when_from_aws() {
+    let h = start(account, None, None).await;
+    let id = h.id("/app/prod/db");
+
+    assert_eq!(h.get(&format!("/records/{id}")).await.status, 200);
+    assert_eq!(h.secret(&id, 0).await, "hunter2");
+    // Another record's event, in the same log group, is not this record's activity.
+    assert_eq!(h.get(&format!("/records/{}", h.id("/app/prod/api"))).await.status, 200);
+
+    let activity = h.get(&format!("/records/{id}/activity")).await;
+    assert_eq!(activity.status, 200, "{}", activity.body);
+    assert_eq!(activity.body["group"], "/keyhold/audit/app");
+    let events = activity.body["events"].as_array().unwrap().clone();
+    assert!(events.iter().all(|e| e["record"] == id.as_str()), "{events:?}");
+    let revealed = events.iter().find(|e| e["action"] == "field.revealed").expect("the reveal");
+    assert_eq!(revealed["person"], "ana.souza");
+    assert_eq!(revealed["detail"]["field"], "Valor", "a plain parameter is one field called Valor");
+    assert!(revealed["at_ms"].as_i64().unwrap() >= 1_000, "the time is CloudWatch's");
+    assert!(events[0]["at_ms"].as_i64() >= events[events.len() - 1]["at_ms"].as_i64(), "newest first");
+
+    // A person who cannot read the trail is told so, not shown an error.
+    h.trail_mode(TrailMode::Denied);
+    let denied = h.get(&format!("/records/{id}/activity")).await;
+    assert_eq!(denied.status, 200);
+    assert_eq!(denied.body["denied"], true);
+}
+
+#[tokio::test]
+async fn the_vault_trail_filters_by_action_and_person_and_names_the_records() {
+    let h = start(account, None, None).await;
+    let id = h.id("/app/prod/db");
+    h.get(&format!("/records/{id}")).await;
+    h.secret(&id, 0).await;
+
+    let all = h.get(&format!("/aws/vaults/{}/trail", h.vault)).await;
+    assert_eq!(all.status, 200, "{}", all.body);
+    assert_eq!(all.body["people"], json!(["ana.souza"]));
+
+    let reveals = h.get(&format!("/aws/vaults/{}/trail?action=field.revealed", h.vault)).await;
+    let events = reveals.body["events"].as_array().unwrap().clone();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0]["title"], "Banco de produção");
+
+    let nobody = h.get(&format!("/aws/vaults/{}/trail?person=bruno.lima", h.vault)).await;
+    assert!(nobody.body["events"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn trying_again_forgets_and_probes_the_trail() {
+    let h = start(account, None, None).await;
+    h.trail_mode(TrailMode::Denied);
+    let listed = h.get(&format!("/vaults/{}/records", h.vault)).await;
+    assert!(listed.body["audit"]["groups"].as_array().unwrap().iter().all(|g| g["state"] == "off"));
+
+    h.trail_mode(TrailMode::Up);
+    let retried = h.post(&format!("/aws/vaults/{}/audit/retry", h.vault), json!({})).await;
+    assert_eq!(retried.status, 200, "{}", retried.body);
+    assert!(retried.body["audit"]["groups"].as_array().unwrap().iter().all(|g| g["state"] == "on"), "{}", retried.body);
+
+    let opened = h.get(&format!("/records/{}", h.id("/app/prod/db"))).await;
+    assert_eq!(opened.body["record"]["audit"]["state"], "on");
 }

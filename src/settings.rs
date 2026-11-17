@@ -131,6 +131,19 @@ pub fn set_field_autocomplete(vault: &Store, on: bool) -> Result<bool> {
     Ok(on)
 }
 
+const SET_HOST_HINT: &str = "set_host_hint_dismissed";
+
+/// Whether the person dismissed the hint shown when Keyhold opens on 127.0.0.1 (see `docs/AWS.md`
+/// and the threat model on the session cookie). On this machine, not in the browser: the interface
+/// keeps nothing in web storage.
+pub fn set_host_hint_dismissed(vault: &Store) -> bool {
+    read(vault, SET_HOST_HINT).ok().flatten().map(|raw| raw == "true").unwrap_or(false)
+}
+
+pub fn dismiss_set_host_hint(vault: &Store) -> Result<()> {
+    write(vault, SET_HOST_HINT, "true")
+}
+
 const APPEARANCE: &str = "appearance";
 
 /// How the interface looks: which theme and which accent colour.

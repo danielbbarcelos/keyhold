@@ -28,6 +28,19 @@
   and saving queue theirs. An account without a trail is reported per boundary when a vault is
   listed, and the bucket tag `keyhold:audit=required` makes the trail mandatory.
 
+### New
+
+- **Atividade, on every record.** A tab with the record's own events: from the account's trail in
+  an AWS vault (who is the person's Identity Center name, when is when AWS received it, 30 days and
+  "Carregar mais"), from this computer's Trilha in a local vault.
+- **The Trilha reads an AWS vault's trail.** Pick the source from the path in the top bar ("Este
+  computador" or an AWS vault) and filter by person, action and period. Somebody without
+  permission to read the whole trail is told so and pointed to each record's Atividade.
+- **"sem trilha na AWS"** next to an AWS vault's name and on its records, when the account has no
+  trail there, with the reason and "Tentar de novo".
+- **A hint when Keyhold opens on 127.0.0.1**, on Início, with the `set-host` command that gives it a
+  name of its own. Dismissed on this machine.
+
 ### Fixed
 
 - **The longest approval windows were hidden.** Since the duration picker became a searchable list

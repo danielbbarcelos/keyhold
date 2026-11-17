@@ -78,6 +78,8 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/aws/connections", post(create_connection))
         .route("/aws/connections/:id", put(update_connection).delete(delete_connection))
         .route("/aws/vaults/:id/check", post(check_vault))
+        .route("/aws/vaults/:id/trail", get(vault_trail))
+        .route("/aws/vaults/:id/audit/retry", post(retry_audit))
 }
 
 // ── errors ──────────────────────────────────────────────────────────────────────────────────────
@@ -2045,6 +2047,215 @@ async fn probe(state: &AppState, place: &Place, names: &[String]) -> Value {
     json!({ "groups": answer, "required": settings.required, "settings_unreadable": settings.unreadable })
 }
 
+// ── reading the trail ───────────────────────────────────────────────────────────────────────────
+
+/// How far back a record's activity looks by default, and the vault's trail.
+const ACTIVITY_DAYS: i64 = 30;
+const TRAIL_DAYS: i64 = 7;
+const ACTIVITY_PAGE: usize = 50;
+const TRAIL_PAGE: usize = 500;
+
+fn day_ms() -> i64 {
+    86_400_000
+}
+
+/// One event as the screen shows it. The person is the stream's name and the time CloudWatch's,
+/// never what the event's body claims (see `aws::audit`).
+fn event_json(event: &crate::aws::LogEvent) -> Value {
+    let body: Value = serde_json::from_str(&event.message).unwrap_or_default();
+    let mut detail = body.clone();
+    if let Some(object) = detail.as_object_mut() {
+        for key in ["v", "action", "record", "parameter", "client"] {
+            object.remove(key);
+        }
+    }
+
+    json!({
+        "at_ms": event.ingestion_time,
+        "person": event.log_stream_name,
+        "action": body["action"],
+        "record": body["record"],
+        "parameter": body["parameter"],
+        "detail": detail,
+    })
+}
+
+fn audit_state_json(status: Option<&crate::aws::audit::Status>, group: &str) -> Value {
+    use crate::aws::audit::Status;
+
+    match status {
+        Some(Status::Audited) => json!({ "group": group, "state": "on" }),
+        Some(Status::Off(reason)) => json!({ "group": group, "state": "off", "reason": reason }),
+        None => json!({ "group": group, "state": "unknown" }),
+    }
+}
+
+/// What the trail of a record's boundary came to in this unlock, without asking AWS.
+pub(crate) fn record_audit_state(state: &AppState, place: &Place, name: &str) -> Value {
+    let settings = state
+        .aws
+        .with(&state.lock, |inner| inner.bucket_settings.get(&place.vault_id).cloned())
+        .flatten()
+        .unwrap_or_default();
+    let group = crate::aws::audit::log_group(settings.prefix(), &mapping::absolute(name));
+    let key = format!("{}|{group}", place.connection.id);
+    let status = state.aws.with(&state.lock, |inner| inner.audit.get(&key).cloned()).flatten();
+
+    audit_state_json(status.as_ref(), &group)
+}
+
+/// A record's own events, newest first. `before` (milliseconds) asks for the page before it.
+pub(crate) async fn record_activity(state: &AppState, id: &str, before: Option<i64>) -> Answer {
+    let (vault_id, name) = target_record(id)?;
+    let place = place(state, &vault_id).await?;
+    let settings = bucket_settings(state, &place).await;
+    let group = crate::aws::audit::log_group(settings.prefix(), &mapping::absolute(&name));
+    let logs = state.aws.logs(&place.vault.region, place.credentials.clone()).map_err(aws_failure)?;
+
+    let end = before.unwrap_or_else(|| now_ms() + 60_000);
+    let start = end - ACTIVITY_DAYS * day_ms();
+    // The record id is base32 and the pattern quotes it: nothing in it can break out of the filter.
+    let pattern = format!("{{ $.record = \"{id}\" }}");
+
+    match logs.filter_log_events(&group, Some(&pattern), Some(start), Some(end), ACTIVITY_PAGE * 4).await {
+        Ok(mut events) => {
+            events.sort_by(|a, b| b.ingestion_time.cmp(&a.ingestion_time));
+            let more = events.len() > ACTIVITY_PAGE;
+            events.truncate(ACTIVITY_PAGE);
+
+            Ok(Json(json!({
+                "source": "aws",
+                "group": group,
+                "days": ACTIVITY_DAYS,
+                "events": events.iter().map(event_json).collect::<Vec<_>>(),
+                "more": more,
+                "audit": record_audit_state(state, &place, &name),
+            })))
+        }
+        Err(AwsError::AccessDenied(_)) => Ok(Json(json!({ "source": "aws", "group": group, "denied": true, "events": [] }))),
+        Err(AwsError::NotFound(_)) => Ok(Json(json!({ "source": "aws", "group": group, "missing": true, "events": [] }))),
+        Err(other) => Err(aws_failure(other)),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct TrailQuery {
+    #[serde(default)]
+    person: Option<String>,
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    days: Option<i64>,
+}
+
+/// The whole trail of an AWS vault, for whoever may read its log groups.
+async fn vault_trail(
+    State(state): State<Arc<AppState>>,
+    Path(vault_id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<TrailQuery>,
+) -> Answer {
+    let place = place(&state, &vault_id).await?;
+    let snapshot = snapshot(&state, &place).await?;
+    let settings = bucket_settings(&state, &place).await;
+    let logs = state.aws.logs(&place.vault.region, place.credentials.clone()).map_err(aws_failure)?;
+
+    let mut groups: Vec<String> = snapshot
+        .parameters
+        .iter()
+        .map(|p| crate::aws::audit::log_group(settings.prefix(), &mapping::absolute(&p.name)))
+        .collect();
+    if let Some(root) = place.vault.root() {
+        groups.push(crate::aws::audit::log_group(settings.prefix(), &format!("{}/x", mapping::absolute(root))));
+    }
+    groups.sort();
+    groups.dedup();
+
+    let days = query.days.unwrap_or(TRAIL_DAYS).clamp(1, 90);
+    let end = now_ms() + 60_000;
+    let start = end - days * day_ms();
+    // Only the action is filtered by CloudWatch; the action names are ours and fixed.
+    let pattern = query
+        .action
+        .as_deref()
+        .filter(|a| a.chars().all(|c| c.is_ascii_lowercase() || c == '.' || c == '_'))
+        .map(|action| format!("{{ $.action = \"{action}\" }}"));
+
+    let titles: HashMap<String, String> = snapshot
+        .parameters
+        .iter()
+        .map(|p| {
+            let title = mapping::payload_from(
+                &p.name,
+                snapshot.metadata.get(&p.name).and_then(|m| m.description.as_deref()),
+                "",
+                None,
+            )
+            .title;
+            (mapping::absolute(&p.name), title)
+        })
+        .collect();
+
+    let mut events = Vec::new();
+    let mut denied = Vec::new();
+    let mut missing = Vec::new();
+
+    for group in &groups {
+        match logs.filter_log_events(group, pattern.as_deref(), Some(start), Some(end), TRAIL_PAGE).await {
+            Ok(found) => events.extend(found),
+            Err(AwsError::AccessDenied(_)) => denied.push(group.clone()),
+            Err(AwsError::NotFound(_)) => missing.push(group.clone()),
+            Err(other) => return Err(aws_failure(other)),
+        }
+    }
+
+    let mut people: Vec<String> = events.iter().map(|e| e.log_stream_name.clone()).collect();
+    people.sort();
+    people.dedup();
+
+    if let Some(person) = query.person.as_deref().filter(|p| !p.is_empty()) {
+        events.retain(|e| e.log_stream_name == person);
+    }
+    events.sort_by(|a, b| b.ingestion_time.cmp(&a.ingestion_time));
+    events.truncate(TRAIL_PAGE);
+
+    let rows: Vec<Value> = events
+        .iter()
+        .map(|event| {
+            let mut row = event_json(event);
+            let title = row["parameter"].as_str().and_then(|p| titles.get(p)).cloned();
+            row["title"] = json!(title);
+            row
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "groups": groups,
+        "denied": denied,
+        "missing": missing,
+        "days": days,
+        "people": people,
+        "events": rows,
+    })))
+}
+
+/// "Tentar de novo" on the badge: forget what this unlock learned about the vault's trail and ask
+/// again.
+async fn retry_audit(State(state): State<Arc<AppState>>, Path(vault_id): Path<String>) -> Answer {
+    let place = place(&state, &vault_id).await?;
+
+    state.aws.with(&state.lock, |inner| {
+        let prefix = format!("{}|", place.connection.id);
+        inner.audit.retain(|key, _| !key.starts_with(&prefix));
+        inner.callers.remove(&place.connection.id);
+        inner.bucket_settings.remove(&vault_id);
+    });
+
+    let snapshot = snapshot(&state, &place).await?;
+    let names: Vec<String> = snapshot.parameters.iter().map(|p| p.name.clone()).collect();
+
+    Ok(Json(json!({ "audit": probe(&state, &place, &names).await })))
+}
+
 /// The record a body describes, checked against what AWS can hold: the description (the title
 /// alone), the value (fields, icon and notes), and whether that value is Keyhold's JSON.
 fn prepared(payload: &Payload) -> Result<(Payload, String, String, bool), Failure> {
@@ -2141,6 +2352,10 @@ pub(crate) async fn open_record(state: &AppState, id: &str) -> Answer {
     // What goes to the page: secrets sealed (see `records::sealed_json`).
     let payload: Payload = serde_json::from_value(record["payload"].clone()).map_err(|e| Failure(StatusCode::BAD_GATEWAY, e.to_string(), None))?;
     record["payload"] = crate::records::sealed_json(&payload);
+
+    let (vault_id, name) = target_record(id)?;
+    let place = place(state, &vault_id).await?;
+    record["audit"] = record_audit_state(state, &place, &name);
 
     Ok(Json(json!({ "record": record })))
 }

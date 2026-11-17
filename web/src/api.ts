@@ -37,6 +37,8 @@ export interface Status {
   log_reads: boolean
   /** Whether the browser may fill in and save a record's password and hidden fields. */
   field_autocomplete?: boolean
+  /** The hint shown when Keyhold opens on 127.0.0.1 was dismissed on this machine. */
+  set_host_hint_dismissed?: boolean
   appearance: Appearance
   /** What "Gerar senha" starts from. */
   generator?: Recipe
@@ -478,7 +480,69 @@ export interface AttachmentInfo {
   created_at: string
 }
 
-export type OpenRecord = RecordHeader & { payload: Payload; plaintext?: boolean; /** An AWS record's parameter name. */ parameter?: string }
+export type OpenRecord = RecordHeader & {
+  payload: Payload
+  plaintext?: boolean
+  /** An AWS record's parameter name. */
+  parameter?: string
+  /** An AWS record: what writing to its trail came to in this unlock. */
+  audit?: AuditGroup
+}
+
+/** One AWS audit log group, as far as this unlock knows. */
+export interface AuditGroup {
+  group: string
+  state: 'on' | 'off' | 'unknown'
+  /** Why it is off, in a sentence for the screen. */
+  reason?: string
+}
+
+/** What a vault's listing says about its trail, per permission boundary. */
+export interface AuditSummary {
+  groups: AuditGroup[]
+  required: boolean
+  settings_unreadable: boolean
+}
+
+/**
+ * One line of activity. In an AWS vault the person is the audit stream's name and the time is when
+ * AWS received the event; in a local vault the person is `null` ("Você") or an agent.
+ */
+export interface ActivityEvent {
+  action: string
+  person: string | null
+  /** AWS: milliseconds since the epoch. */
+  at_ms?: number
+  /** Local: ISO time. */
+  at?: string
+  detail: Record<string, unknown>
+  record?: string
+  parameter?: string
+  /** The vault trail names the record when it is still in the listing. */
+  title?: string | null
+}
+
+export interface Activity {
+  source: 'aws' | 'local'
+  group?: string
+  days?: number
+  events: ActivityEvent[]
+  more?: boolean
+  /** No permission to read the trail. */
+  denied?: boolean
+  /** The log group does not exist. */
+  missing?: boolean
+  audit?: AuditGroup
+}
+
+export interface VaultTrail {
+  groups: string[]
+  denied: string[]
+  missing: string[]
+  days: number
+  people: string[]
+  events: ActivityEvent[]
+}
 
 export interface VersionEntry {
   version: number
@@ -613,7 +677,7 @@ export const api = {
   deleteFolder: (id: string) => call<{ deleted: boolean }>('DELETE', `/api/folders/${id}`),
 
   records: (vaultId: string, archived = false) =>
-    call<{ records: RecordPreview[] }>(
+    call<{ records: RecordPreview[]; audit?: AuditSummary }>(
       'GET',
       `/api/vaults/${vaultId}/records?archived=${archived}`,
     ),
@@ -631,6 +695,22 @@ export const api = {
     call<{ code: string; remaining: number }>('GET', `/api/records/${recordId}/totp/${index}`),
 
   openRecord: (id: string) => call<{ record: OpenRecord }>('GET', `/api/records/${id}`),
+
+  /** A record's own events, newest first; `before` (ms) for the page before. */
+  activity: (id: string, before?: number) =>
+    call<Activity>('GET', `/api/records/${id}/activity${before ? `?before=${before}` : ''}`),
+
+  vaultTrail: (vaultId: string, filter: { person?: string; action?: string; days?: number }) => {
+    const query = new URLSearchParams()
+    if (filter.person) query.set('person', filter.person)
+    if (filter.action) query.set('action', filter.action)
+    if (filter.days) query.set('days', String(filter.days))
+    return call<VaultTrail>('GET', `/api/aws/vaults/${vaultId}/trail?${query.toString()}`)
+  },
+
+  retryAudit: (vaultId: string) => call<{ audit: AuditSummary }>('POST', `/api/aws/vaults/${vaultId}/audit/retry`),
+
+  dismissSetHostHint: () => call<{ set_host_hint_dismissed: boolean }>('DELETE', '/api/settings/set-host-hint'),
 
   /**
    * `expectedVersion` makes the save refuse (409) when somebody else changed the record in the

@@ -36,6 +36,7 @@ import {
   type Status,
   type VaultSummary,
   type Field,
+  type AuditSummary,
 } from '../../api'
 import { COLOURS } from '../colours'
 import { emptyPayload } from '../fields'
@@ -56,6 +57,7 @@ import { RecordView } from '../record/RecordView'
 import { Crumb, TopBar, VaultSwitcher } from '../shell'
 import { toast, toastError } from '../toast'
 import { TrashPanel } from '../TrashPanel'
+import { AuditBadge } from './AuditBadge'
 import { EditVaultDialog } from '../VaultsPanel'
 import { FolderView } from './FolderView'
 import { folderChain, folderPath } from './paths'
@@ -100,6 +102,8 @@ export function VaultPage({
 }) {
   const [folders, setFolders] = useState<FolderNode[]>([])
   const [records, setRecords] = useState<RecordPreview[]>([])
+  // An AWS vault's trail, per permission boundary, as its listing reported it.
+  const [audit, setAudit] = useState<AuditSummary | null>(null)
   const [trash, setTrash] = useState<RecordPreview[]>([])
   const [attention, setAttention] = useState<Attention>(new Map())
   // "Editar" from the attention popover: the record opens, then its editor.
@@ -223,6 +227,7 @@ export function VaultPage({
 
       setFolders(tree.folders)
       setRecords(list.records.filter((record) => !record.archived))
+      setAudit(list.audit ?? null)
       setTrash(bin.records)
       setUnavailable(null)
       setLoaded(true)
@@ -882,6 +887,7 @@ export function VaultPage({
         onManage={onManageVaults}
         onCopy={() => setCopying({ vaultId: vault.id, what: `o cofre ${vault.name}` })}
       />
+      <AuditBadge vaultId={vault.id} audit={audit} onChange={setAudit} />
       <Button
         variant="ghost"
         size="sm"

@@ -9,6 +9,7 @@ import {
   FolderInput,
   Pencil,
   ShieldAlert,
+  ShieldOff,
   Star,
   Trash2,
   Vault,
@@ -26,6 +27,7 @@ import { RecordTile } from '../icons'
 import { MenuButton } from '../menu'
 import { toast, toastError } from '../toast'
 import { VersionDialog } from '../VersionDialog'
+import { Activity } from './Activity'
 import { RecordAlerts } from './Alerts'
 import { FieldRow } from './FieldRow'
 import { folderPath, when } from '../vault/paths'
@@ -67,7 +69,7 @@ export function RecordView({
   /** Take one alert off the record (a new version). */
   onRemoveAlert?: (index: number) => void
 }) {
-  const [tab, setTab] = useState<'campos' | 'arquivos' | 'historico'>('campos')
+  const [tab, setTab] = useState<'campos' | 'arquivos' | 'historico' | 'atividade'>('campos')
   const [versions, setVersions] = useState<VersionEntry[]>([])
   const [files, setFiles] = useState<number | null>(null)
   const [viewing, setViewing] = useState<number | null>(null)
@@ -123,6 +125,21 @@ export function RecordView({
               <Pill icon={ShieldAlert} tone="rose">
                 comprometido desde {record.compromised_at.slice(0, 10).split('-').reverse().join('/')}
               </Pill>
+            )}
+            {record.audit?.state === 'off' && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0} className="inline-flex">
+                    <Pill icon={ShieldOff} tone="amber">
+                      sem trilha na AWS
+                    </Pill>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  O que se faz neste registro não fica registrado na AWS: {record.audit.reason}. O Keyhold funciona
+                  normalmente; quem administra a conta resolve isso.
+                </TooltipContent>
+              </Tooltip>
             )}
             {record.rotation_due_at && (
               <Pill icon={CalendarClock} tone={overdue ? 'rose' : undefined}>
@@ -255,6 +272,9 @@ export function RecordView({
         <Tab on={tab === 'historico'} count={versions.length} onClick={() => setTab('historico')}>
           Histórico
         </Tab>
+        <Tab on={tab === 'atividade'} onClick={() => setTab('atividade')}>
+          Atividade
+        </Tab>
       </div>
 
       {tab === 'campos' && (
@@ -311,6 +331,8 @@ export function RecordView({
           )}
         </div>
       )}
+
+      {tab === 'atividade' && <Activity recordId={record.id} />}
 
       {viewing !== null && (
         <VersionDialog

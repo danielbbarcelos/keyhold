@@ -57,6 +57,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/records/:id/rotation", post(set_rotation))
         .route("/records/:id/accesses", post(report_access))
         .route("/records/:id/secret", post(reveal_secret))
+        .route("/records/:id/activity", get(record_activity))
         .route("/records/:id/attachments", get(list_attachments).post(add_attachment))
         .route("/attachments/:id", get(open_attachment))
         .route("/attachments/:id", delete(delete_attachment))
@@ -578,6 +579,50 @@ async fn reveal_secret(
     }
 
     Ok(Json(json!({ "secret": secret })))
+}
+
+#[derive(Deserialize)]
+struct ActivityQuery {
+    /// Milliseconds: the page before this moment ("Carregar mais").
+    #[serde(default)]
+    before: Option<i64>,
+}
+
+/// A record's own events, newest first, in one shape for both kinds of vault: an AWS record's from
+/// its account's trail (who is the stream's name), a local one's from this machine's trail (who is
+/// "you" or an agent).
+async fn record_activity(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<ActivityQuery>,
+) -> Answer {
+    if is_aws_id(&id) {
+        return aws::record_activity(&state, &id, query.before).await;
+    }
+
+    let store = state.store.lock().unwrap();
+    let events = with_key!(state, |key| audit::recent(&store, key, 1000)).map_err(bad_request)?;
+
+    let rows: Vec<serde_json::Value> = events
+        .into_iter()
+        .filter(|event| event.scope.as_deref() == Some(id.as_str()))
+        .take(50)
+        .map(|event| {
+            // The local trail says "secret"; the AWS one says "field". The screen reads one.
+            let action = match event.action.as_str() {
+                audit::action::SECRET_REVEALED => "field.revealed".to_string(),
+                audit::action::SECRET_COPIED => "field.copied".to_string(),
+                other => other.to_string(),
+            };
+            let person = match &event.actor {
+                audit::Actor::You => serde_json::Value::Null,
+                audit::Actor::Agent { process, .. } => json!(format!("agente {process}")),
+            };
+            json!({ "at": event.at, "person": person, "action": action, "detail": event.detail })
+        })
+        .collect();
+
+    Ok(Json(json!({ "source": "local", "events": rows, "more": false })))
 }
 
 // ── folders ─────────────────────────────────────────────────────────────────────────────────────
