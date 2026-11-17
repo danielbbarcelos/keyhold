@@ -158,15 +158,21 @@ fn session_expired() -> Failure {
 /// What an S3 error means for a vault's bucket, naming the bucket and the permissions (A18).
 fn s3_failure(error: AwsError, bucket: &str, region: &str) -> Failure {
     match error {
-        AwsError::AccessDenied(_) => aws_refusal(
-            StatusCode::FORBIDDEN,
-            "access_denied",
-            tr!(
+        AwsError::AccessDenied(message) => {
+            // S3 says which policy refused (an explicit deny in the bucket policy, a missing allow in
+            // the role) when the request is from the same account: worth more than our guess.
+            eprintln!("  s3      access denied on {bucket}: {message}");
+            let mut text = tr!(
                 "sem permissão no bucket {bucket}. O papel desta conta precisa de \
                  s3:ListBucket, s3:GetObject, s3:PutObject e s3:DeleteObject nele, e de \
                  kms:GenerateDataKey e kms:Decrypt na chave dos parâmetros", bucket = bucket
-            ),
-        ),
+            );
+            let detail = message.trim();
+            if !detail.is_empty() && !detail.eq_ignore_ascii_case("access denied") {
+                text = format!("{text}. AWS: {detail}");
+            }
+            aws_refusal(StatusCode::FORBIDDEN, "access_denied", text)
+        }
         AwsError::NotFound(message) if message.to_lowercase().contains("bucket") => aws_refusal(
             StatusCode::NOT_FOUND,
             "not_found",
