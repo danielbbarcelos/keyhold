@@ -32,6 +32,8 @@ export interface LockState {
 
 export interface Status {
   version: string
+  /** The repository, from Cargo.toml: the interface carries no address of its own. */
+  homepage?: string
   identity: IdentityState
   lock: LockState
   retention_days: number
