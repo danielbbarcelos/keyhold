@@ -82,10 +82,8 @@ export function LanguageToggle({ onChanged }: { onChanged?: () => void }) {
   )
 }
 
-const REPOSITORY = 'https://github.com/danielbbarcelos/keyhold'
-
 /** The foot of the screens before the vault opens: the language, the version, where the code is. */
-export function PageFooter({ version, onChanged }: { version?: string; onChanged?: () => void }) {
+export function PageFooter({ version, homepage, onChanged }: { version?: string; homepage?: string; onChanged?: () => void }) {
   const [before, after] = t('Keyhold {version} · código aberto no {link}', { version: version ?? '' }).split('{link}')
 
   return (
@@ -93,9 +91,13 @@ export function PageFooter({ version, onChanged }: { version?: string; onChanged
       <LanguageToggle onChanged={onChanged} />
       <p>
         {before}
-        <a href={REPOSITORY} target="_blank" rel="noopener noreferrer" className="text-link hover:underline">
-          GitHub
-        </a>
+        {homepage ? (
+          <a href={homepage} target="_blank" rel="noopener noreferrer" className="text-link hover:underline">
+            GitHub
+          </a>
+        ) : (
+          'GitHub'
+        )}
         {after}
       </p>
     </footer>

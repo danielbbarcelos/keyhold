@@ -388,6 +388,8 @@ async fn status(State(state): State<Arc<AppState>>) -> Answer {
 
     Ok(Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
+        // Where the code is, for the footer of the first screens (the interface holds no address).
+        "homepage": env!("CARGO_PKG_HOMEPAGE"),
         "identity": identity,
         "lock": lock,
         "retention_days": settings::retention_days(&store),

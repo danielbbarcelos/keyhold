@@ -45,7 +45,7 @@ const steps = (): Array<{ id: Step; label: string }> => [
   { id: 'recovery', label: t('Chave de recuperação') },
 ]
 
-export function Setup({ version, onDone }: { version?: string; onDone: () => void }) {
+export function Setup({ version, homepage, onDone }: { version?: string; homepage?: string; onDone: () => void }) {
   const [step, setStep] = useState<Step>('choose')
   const [protection, setProtection] = useState<Protection>('password')
   const [password, setPassword] = useState('')
@@ -275,7 +275,7 @@ export function Setup({ version, onDone }: { version?: string; onDone: () => voi
         </CardFooter>
       </Card>
       </div>
-      <PageFooter version={version} />
+      <PageFooter version={version} homepage={homepage} />
     </main>
   )
 }
