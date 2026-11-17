@@ -1,8 +1,8 @@
 # Setting up AWS for Keyhold
 
-> **Status.** Vaults, attachments and the permissions for them work today. The audit trail, shared
-> links and the bucket tags described below are being built: the template already creates what they
-> need, which is harmless until a Keyhold version uses it, and this page will say which version does.
+> **Status.** Everything on this page works from Keyhold 1.1.0: vaults, attachments, the audit trail,
+> shared links and the bucket tags. An older Keyhold ignores the trail and the tags, so the template
+> is safe to apply before everybody updates.
 
 This page is for whoever administers the AWS account. The person using Keyhold configures nothing
 beyond picking the account, the region, the bucket and (optionally) the path when creating the vault.
