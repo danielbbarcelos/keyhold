@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-{{SCRIPT_HASH}}'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; form-action 'none'; base-uri 'none'">
+<title>Keyhold</title>
+<style>
+  :root { --bg: #f3f3f5; --fg: #1f2024; --card: #ffffff; --muted: #5e5f67; --faint: #8b8c94; --line: #e2e2e7; --field: #ffffff; --primary: #e8b04b; --primary-fg: #1f1606; --amber-soft: #fbf3e2; --amber: #8a5a07; --rose: #b4334a; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1e1f23; --fg: #e6e6e9; --card: #24252a; --muted: #a6a7ae; --faint: #7d7e86; --line: #313238; --field: #202125; --amber-soft: rgb(232 176 75 / 12%); --amber: #e8b04b; --rose: #ec8a9b; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 32px 16px; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  main { width: 100%; max-width: 28rem; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 28px; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
+  .brand img { width: 40px; height: 40px; }
+  .brand .light { display: none; }
+  @media (prefers-color-scheme: light) { .brand .dark { display: none; } .brand .light { display: block; } }
+  h1 { margin: 0 0 6px; font-size: 20px; line-height: 1.35; font-weight: 650; }
+  .meta { margin: 0 0 20px; color: var(--muted); font-size: 13px; }
+  .notice { margin: 0 0 16px; padding: 12px 14px; border-radius: 12px; background: var(--amber-soft); color: var(--fg); font-size: 13px; }
+  label { display: block; margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+  input { width: 100%; height: 40px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--field); color: var(--fg); font: inherit; }
+  button.primary { width: 100%; height: 40px; margin-top: 14px; border: 0; border-radius: 9px; background: var(--primary); color: var(--primary-fg); font: inherit; font-weight: 600; cursor: pointer; }
+  button.primary:disabled { opacity: .6; cursor: default; }
+  .error { margin: 10px 0 0; color: var(--rose); font-size: 13px; }
+  .fields { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .field { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .field:first-child { border-top: 0; }
+  .field div { min-width: 0; flex: 1; }
+  .field small { display: block; color: var(--muted); font-size: 12px; }
+  .field span { display: block; word-break: break-all; white-space: pre-wrap; }
+  .field .hidden { letter-spacing: .2em; color: var(--muted); }
+  .icon { flex-shrink: 0; width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
+  .icon:hover { background: var(--line); color: var(--fg); }
+  .notes { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+  .after { margin: 12px 0 0; color: var(--muted); font-size: 13px; }
+  footer { margin-top: 20px; color: var(--faint); font-size: 12px; text-align: center; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand"><img class="dark" alt="" src="data:image/png;base64,{{ICON_DARK}}"><img class="light" alt="" src="data:image/png;base64,{{ICON_LIGHT}}">Keyhold</div>
+
+  <section id="loading"><p class="meta">Abrindo o compartilhamento…</p></section>
+
+  <section id="closed" hidden>
+    <h1 id="headline"></h1>
+    <p class="meta" id="expiry"></p>
+    <p class="notice" id="first" hidden>O conteúdo é apagado depois de aberto por esta página. Abrir a página não apaga nada; só o botão Revelar.</p>
+    <div id="password-box" hidden>
+      <label for="password">Senha de abertura</label>
+      <input id="password" type="password" autocomplete="off" spellcheck="false">
+    </div>
+    <button class="primary" id="reveal" type="button">Revelar</button>
+    <p class="error" id="error" hidden></p>
+  </section>
+
+  <section id="open" hidden>
+    <h1 id="headline-open"></h1>
+    <p class="meta" id="expiry-open"></p>
+    <div class="fields" id="fields"></div>
+    <div class="notes" id="notes" hidden><small>Observação</small><span id="notes-text"></span></div>
+    <p class="after" id="after"></p>
+  </section>
+
+  <section id="gone" hidden>
+    <h1>Este link não está mais disponível</h1>
+    <p class="meta">O link expirou, foi revogado ou já foi aberto. Peça a quem compartilhou que envie de novo.</p>
+  </section>
+
+  <footer>Compartilhado pelo Keyhold. Os campos são decifrados aqui, no seu navegador.</footer>
+</main>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var subtle = window.crypto && window.crypto.subtle;
+  var enc = new TextEncoder();
+  var dec = new TextDecoder();
+
+  function show(id) {
+    ['loading', 'closed', 'open', 'gone'].forEach(function (one) { $(one).hidden = one !== id; });
+  }
+
+  // Never inside another page: a frame could dress the Revelar button up as something else.
+  if (window.top !== window.self || !subtle) { show('gone'); return; }
+
+  function fromB64url(text) {
+    var base = String(text || '').replace(/-/g, '+').replace(/_/g, '/');
+    while (base.length % 4) base += '=';
+    var raw = atob(base);
+    var out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  function hkdf(ikm, info) {
+    return subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']).then(function (key) {
+      return subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: enc.encode(info) }, key, 256);
+    });
+  }
+
+  function pbkdf2(password, salt, iterations) {
+    return subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']).then(function (key) {
+      return subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: salt, iterations: iterations }, key, 256);
+    });
+  }
+
+  function open(rawKey, sealed, aad) {
+    var bytes = new Uint8Array(sealed);
+    return subtle.importKey('raw', rawKey, 'AES-GCM', false, ['decrypt']).then(function (key) {
+      return subtle.decrypt({ name: 'AES-GCM', iv: bytes.slice(0, 12), additionalData: aad }, key, bytes.slice(12));
+    });
+  }
+
+  function marker(entry) {
+    if (!entry) return;
+    var form = new FormData();
+    Object.keys(entry.fields).forEach(function (name) { form.append(name, entry.fields[name]); });
+    form.append('file', new Blob([], { type: entry.fields['Content-Type'] || 'application/octet-stream' }));
+    fetch(entry.url, { method: 'POST', body: form, credentials: 'omit', referrerPolicy: 'no-referrer' }).catch(function () {});
+  }
+
+  function when(seconds) {
+    var date = new Date(seconds * 1000);
+    var today = new Date();
+    var time = date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return date.toDateString() === today.toDateString() ? 'hoje, ' + time : date.toLocaleDateString('pt-BR') + ', ' + time;
+  }
+
+  var params = new URLSearchParams(location.hash.slice(1));
+  var linkKey, shareId = params.get('i') || '', expires = Number(params.get('x') || 0);
+  try { linkKey = fromB64url(params.get('k')); } catch (e) { linkKey = null; }
+  var envelopeUrl = params.get('e') || '';
+
+  if (!linkKey || linkKey.length !== 32 || !envelopeUrl || !expires || Date.now() / 1000 > expires) { show('gone'); return; }
+  // The envelope is only ever read from this page's own origin, the bucket.
+  if (envelopeUrl.indexOf(location.origin + '/') !== 0) { show('gone'); return; }
+
+  var aad = enc.encode(shareId + '|' + expires);
+  var envelope = null;
+
+  hkdf(linkKey, 'keyhold-share-envelope-v1')
+    .then(function (key) {
+      return fetch(envelopeUrl, { credentials: 'omit', cache: 'no-store' }).then(function (response) {
+        if (!response.ok) throw new Error('gone');
+        return response.arrayBuffer();
+      }).then(function (sealed) { return open(key, sealed, aad); });
+    })
+    .then(function (plain) {
+      envelope = JSON.parse(dec.decode(plain));
+      var headline = envelope.sender + ' compartilhou o registro ' + envelope.title + ' com você';
+      $('headline').textContent = headline;
+      $('headline-open').textContent = headline;
+      var line = envelope.first ? 'Apagado depois de aberto pela página' : 'Disponível até ' + when(envelope.expires_at);
+      $('expiry').textContent = line;
+      $('expiry-open').textContent = line;
+      $('first').hidden = !envelope.first;
+      $('password-box').hidden = !envelope.password;
+      show('closed');
+      marker(envelope.markers && envelope.markers.opened);
+    })
+    .catch(function () { show('gone'); });
+
+  function contentKey() {
+    if (!envelope.password) return hkdf(linkKey, 'keyhold-share-content-v1');
+    return pbkdf2($('password').value, fromB64url(envelope.password.salt), envelope.password.iterations).then(function (stretched) {
+      var ikm = new Uint8Array(32 + 32);
+      ikm.set(linkKey, 0);
+      ikm.set(new Uint8Array(stretched), 32);
+      return hkdf(ikm, 'keyhold-share-content-v1');
+    });
+  }
+
+  function row(label, value, secret) {
+    var line = document.createElement('div');
+    line.className = 'field';
+    var text = document.createElement('div');
+    var small = document.createElement('small');
+    small.textContent = label;
+    var span = document.createElement('span');
+    span.textContent = secret ? '••••••••••••' : value;
+    if (secret) span.className = 'hidden';
+    text.appendChild(small);
+    text.appendChild(span);
+    line.appendChild(text);
+    if (secret) {
+      var eye = document.createElement('button');
+      eye.type = 'button';
+      eye.className = 'icon';
+      eye.textContent = 'ver';
+      eye.setAttribute('aria-label', 'Mostrar');
+      eye.addEventListener('click', function () {
+        var showing = span.className !== 'hidden';
+        span.textContent = showing ? '••••••••••••' : value;
+        span.className = showing ? 'hidden' : '';
+        eye.textContent = showing ? 'ver' : 'ocultar';
+      });
+      line.appendChild(eye);
+    }
+    var copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'icon';
+    copy.textContent = 'copiar';
+    copy.setAttribute('aria-label', 'Copiar ' + label);
+    copy.addEventListener('click', function () {
+      navigator.clipboard.writeText(value).then(function () { copy.textContent = 'copiado'; setTimeout(function () { copy.textContent = 'copiar'; }, 1500); });
+    });
+    line.appendChild(copy);
+    return line;
+  }
+
+  var SECRET = { password: 1, pin: 1, hidden: 1, multiline_hidden: 1, security_question: 1, card: 1 };
+  var PARTS = { holder: 'Nome no cartão', expiry: 'Validade', code: 'Código de segurança', pin: 'PIN', question: 'Pergunta' };
+
+  $('reveal').addEventListener('click', function () {
+    $('reveal').disabled = true;
+    $('error').hidden = true;
+
+    contentKey()
+      .then(function (key) {
+        return fetch(envelope.content, { credentials: 'omit', cache: 'no-store' }).then(function (response) {
+          if (!response.ok) throw new Error('gone');
+          return response.arrayBuffer();
+        }).then(function (sealed) {
+          return open(key, sealed, aad).catch(function () { throw new Error('password'); });
+        });
+      })
+      .then(function (plain) {
+        var content = JSON.parse(dec.decode(plain));
+        var list = $('fields');
+        (content.fields || []).forEach(function (field) {
+          var secret = !!SECRET[field.kind];
+          if (field.kind === 'security_question' && field.extra && field.extra.question) list.appendChild(row(PARTS.question, field.extra.question, false));
+          list.appendChild(row(field.label, field.value, secret));
+          Object.keys(field.extra || {}).forEach(function (part) {
+            if (part === 'question') return;
+            list.appendChild(row(field.label + ', ' + (PARTS[part] || part), field.extra[part], part === 'code' || part === 'pin'));
+          });
+        });
+        if (content.notes) { $('notes-text').textContent = content.notes; $('notes').hidden = false; }
+        $('after').textContent = envelope.first
+          ? 'O conteúdo foi apagado do servidor. Copie o que precisar antes de fechar esta página.'
+          : 'Copie o que precisar. Depois de ' + when(envelope.expires_at) + ' este link deixa de abrir.';
+        show('open');
+        marker(envelope.markers && envelope.markers.revealed);
+        if (envelope.first && envelope.delete) {
+          fetch(envelope.delete, { method: 'DELETE', credentials: 'omit' }).catch(function () {});
+        }
+      })
+      .catch(function (error) {
+        $('reveal').disabled = false;
+        if (error && error.message === 'password') {
+          $('error').textContent = 'A senha de abertura não confere.';
+          $('error').hidden = false;
+          marker(envelope.markers && envelope.markers.wrong);
+        } else {
+          show('gone');
+        }
+      });
+  });
+})();
+</script>
+</body>
+</html>

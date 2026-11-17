@@ -189,6 +189,104 @@ impl S3Client {
     }
 
     /// Every object whose key starts with `prefix`, following continuation tokens to the end.
+    /// A URL that makes one request (`method`) on one object until `expires_in` seconds pass, or
+    /// until the credentials that signed it expire, whichever is first. `extra` is signed with it
+    /// (`versionId`); the expected bucket owner always is, so the URL is refused by a bucket that
+    /// changed hands.
+    pub fn presigned_url(
+        &self,
+        method: &str,
+        bucket: &str,
+        key: &str,
+        extra: &[(&str, &str)],
+        expires_in: u64,
+    ) -> AwsResult<String> {
+        validate_bucket(bucket)?;
+        validate_key(key)?;
+
+        let (origin, path) = self.locate(bucket, Some(key));
+        let probe = reqwest::Url::parse(&format!("{origin}{path}"))
+            .map_err(|e| AwsError::Invalid(format!("bad S3 endpoint: {e}")))?;
+        let host = host_header(&probe)?;
+
+        let mut query: Vec<(&str, &str)> = extra.to_vec();
+        if let Some(owner) = self.expected_owner.as_deref() {
+            query.push(("x-amz-expected-bucket-owner", owner));
+        }
+
+        let signed = sigv4::presign(
+            &self.credentials,
+            &sigv4::PresignInput {
+                method,
+                host: &host,
+                path: &path,
+                query: &query,
+                region: &self.region,
+                service: "s3",
+                unix_time: now_unix(),
+                expires_in: expires_in.clamp(1, 604_800),
+            },
+        );
+
+        Ok(format!("{origin}{path}?{signed}"))
+    }
+
+    /// Where and how a browser may POST exactly `key`, empty, until `expires_at`: the page's
+    /// markers ("opened", "revealed"). The policy pins the key, a zero length and the content type,
+    /// so whoever holds the page cannot store anything else in the bucket.
+    pub fn post_target(
+        &self,
+        bucket: &str,
+        key: &str,
+        kms_key_id: Option<&str>,
+        expires_at: u64,
+    ) -> AwsResult<(String, Vec<(String, String)>)> {
+        validate_bucket(bucket)?;
+        validate_key(key)?;
+
+        let (origin, path) = self.locate(bucket, None);
+        let url = format!("{origin}{path}");
+        let content_type = "application/octet-stream";
+
+        let mut fields: Vec<(String, String)> = vec![
+            ("key".into(), key.into()),
+            ("Content-Type".into(), content_type.into()),
+            ("x-amz-server-side-encryption".into(), "aws:kms".into()),
+        ];
+        let mut conditions = vec![
+            serde_json::json!({ "bucket": bucket }),
+            serde_json::json!(["eq", "$key", key]),
+            serde_json::json!(["eq", "$Content-Type", content_type]),
+            serde_json::json!(["content-length-range", 0, 0]),
+            serde_json::json!({ "x-amz-server-side-encryption": "aws:kms" }),
+        ];
+        if let Some(kms_key_id) = kms_key_id {
+            fields.push(("x-amz-server-side-encryption-aws-kms-key-id".into(), kms_key_id.into()));
+            conditions.push(serde_json::json!({ "x-amz-server-side-encryption-aws-kms-key-id": kms_key_id }));
+        }
+
+        let signed = sigv4::post_policy(&self.credentials, &self.region, now_unix(), expires_at, conditions);
+        fields.push(("x-amz-algorithm".into(), "AWS4-HMAC-SHA256".into()));
+        fields.push(("x-amz-credential".into(), signed.credential));
+        fields.push(("x-amz-date".into(), signed.date));
+        if let Some(token) = signed.security_token {
+            fields.push(("x-amz-security-token".into(), token));
+        }
+        fields.push(("policy".into(), signed.policy));
+        fields.push(("x-amz-signature".into(), signed.signature));
+
+        Ok((url, fields))
+    }
+
+    /// Delete one version of an object for good: on a versioned bucket, a plain delete only hides
+    /// the object behind a marker and keeps the bytes.
+    pub async fn delete_object_version(&self, bucket: &str, key: &str, version_id: &str) -> AwsResult<()> {
+        let response = self
+            .request("DELETE", bucket, Some(key), &[("versionId", version_id)], &[], Vec::new())
+            .await?;
+        self.check(&response)
+    }
+
     /// The bucket's tags, where an administrator leaves settings for every vault on it (see
     /// `docs/AWS.md`). A bucket without tags answers `NoSuchTagSet`, which is no tags.
     pub async fn get_bucket_tagging(&self, bucket: &str) -> AwsResult<Vec<(String, String)>> {
