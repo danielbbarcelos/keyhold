@@ -1,0 +1,57 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadAndWriteParameters",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter",
+        "ssm:GetParameters",
+        "ssm:GetParametersByPath",
+        "ssm:GetParameterHistory",
+        "ssm:ListTagsForResource",
+        "ssm:PutParameter",
+        "ssm:DeleteParameter",
+        "ssm:DeleteParameters",
+        "ssm:AddTagsToResource",
+        "ssm:RemoveTagsFromResource"
+      ],
+      "Resource": [
+        "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/SEGMENT",
+        "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/SEGMENT/*"
+      ]
+    },
+    {
+      "Sid": "EncryptAndDecryptThroughParameterStoreAndS3",
+      "Effect": "Allow",
+      "Action": ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": ["ssm.REGION.amazonaws.com", "s3.REGION.amazonaws.com"]
+        }
+      }
+    },
+    {
+      "Sid": "ListAttachments",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::BUCKET",
+      "Condition": {
+        "StringLike": { "s3:prefix": ["SEGMENT/", "SEGMENT/*"] }
+      }
+    },
+    {
+      "Sid": "ReadAndWriteAttachments",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::BUCKET/SEGMENT/*"
+    },
+    {
+      "Sid": "ReadVaultSettings",
+      "Effect": "Allow",
+      "Action": "s3:GetBucketTagging",
+      "Resource": "arn:aws:s3:::BUCKET"
+    }
+  ]
+}

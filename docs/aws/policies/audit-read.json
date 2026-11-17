@@ -1,0 +1,14 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadAuditTrail",
+      "Effect": "Allow",
+      "Action": "logs:FilterLogEvents",
+      "Resource": [
+        "arn:aws:logs:REGION:ACCOUNT_ID:log-group:/keyhold/audit/SEGMENT",
+        "arn:aws:logs:REGION:ACCOUNT_ID:log-group:/keyhold/audit/SEGMENT:*"
+      ]
+    }
+  ]
+}

@@ -179,6 +179,10 @@ some people only one branch usually leaves it out. Without it, the title, the fo
 the KMS key of each parameter are read from its history instead (`ssm:GetParameterHistory`), once
 per parameter and again only when it changes.
 
+For whoever administers the account, [docs/AWS.md](docs/AWS.md) has the whole setup: a CloudFormation
+template for the bucket and the audit log groups, ready IAM policies per role, and what Keyhold
+checks on sign-in.
+
 Good to know: parameter **names, folder paths and titles** are metadata AWS keeps unencrypted, and
 anyone allowed to describe parameters in the account can see them. Values and notes are encrypted.
 
