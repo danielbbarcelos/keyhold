@@ -43,18 +43,19 @@ import { knock } from '../notify'
  *
  * `process` is the one worth reaching for. It ends when the assistant does, which is the window
  * somebody actually means when they say "stop asking me during this session".
+ *
+ * Few steps on purpose: nobody weighs two hours against four, and a list that needs scrolling hides
+ * its longest windows, which are the ones somebody came looking for. Thirty days is the daemon's own
+ * ceiling for a timed window.
  */
 const WINDOWS: Array<{ value: string; label: string; window: GrantWindow }> = [
   { value: 'once', label: 'Somente desta vez', window: { kind: 'once' } },
   { value: '15', label: '15 minutos', window: { kind: 'minutes', minutes: 15 } },
-  { value: '30', label: '30 minutos', window: { kind: 'minutes', minutes: 30 } },
   { value: '60', label: '1 hora', window: { kind: 'minutes', minutes: 60 } },
-  { value: '120', label: '2 horas', window: { kind: 'minutes', minutes: 120 } },
-  { value: '240', label: '4 horas', window: { kind: 'minutes', minutes: 240 } },
   { value: '480', label: '8 horas', window: { kind: 'minutes', minutes: 480 } },
-  { value: '720', label: '12 horas', window: { kind: 'minutes', minutes: 720 } },
   { value: '1440', label: '24 horas', window: { kind: 'minutes', minutes: 1440 } },
   { value: '10080', label: '7 dias', window: { kind: 'minutes', minutes: 10080 } },
+  { value: '21600', label: '15 dias', window: { kind: 'minutes', minutes: 21600 } },
   { value: '43200', label: '30 dias', window: { kind: 'minutes', minutes: 43200 } },
   { value: 'always', label: 'Para sempre', window: { kind: 'always' } },
 ]
@@ -279,7 +280,7 @@ export function AgentApproval({ onAnswered }: { onAnswered: () => void }) {
                   <PopoverContent className="w-(--radix-popover-trigger-width) p-0" align="start">
                     <Command>
                       <CommandInput placeholder="Buscar período" />
-                      <CommandList>
+                      <CommandList className="max-h-[min(23rem,55dvh)]">
                         <CommandEmpty>Nenhum período com esse nome.</CommandEmpty>
                         {choices.map((one) => (
                           <CommandItem

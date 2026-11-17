@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **The longest approval windows were hidden.** Since the duration picker became a searchable list
+  in 1.0.5, the list stopped at 288 px with its scrollbar hidden, so 12 h, 24 h, 7 days, 30 days and
+  "Para sempre" sat below the fold with nothing to say they were there. Lists of this kind now show
+  their scrollbar, and the approval's list is tall enough to show every window.
+
+### Changed
+
+- **Fewer, clearer approval windows, and 15 days.** The windows are now: just this once, while the
+  assistant is open, 15 minutes, 1 hour, 8 hours, 24 hours, 7 days, 15 days, 30 days and for good.
+  30 minutes, 2, 4 and 12 hours are gone.
+
 ## 1.0.6
 
 Titles and folder names in an AWS vault rooted at a path.
