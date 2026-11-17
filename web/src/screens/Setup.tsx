@@ -20,6 +20,7 @@ import { Separator } from '@/components/ui/separator'
 import { PasswordInput } from '@/components/common/PasswordInput'
 
 import { api, ApiError, type Protection } from '../api'
+import { t } from '../i18n'
 
 /**
  * Setting up a vault: three steps, in the order that makes the consequences land before the
@@ -37,10 +38,10 @@ import { api, ApiError, type Protection } from '../api'
 
 type Step = 'choose' | 'password' | 'recovery'
 
-const STEPS: Array<{ id: Step; label: string }> = [
-  { id: 'choose', label: 'Proteção' },
-  { id: 'password', label: 'Senha-mestra' },
-  { id: 'recovery', label: 'Chave de recuperação' },
+const steps = (): Array<{ id: Step; label: string }> => [
+  { id: 'choose', label: t('Proteção') },
+  { id: 'password', label: t('Senha-mestra') },
+  { id: 'recovery', label: t('Chave de recuperação') },
 ]
 
 export function Setup({ onDone }: { onDone: () => void }) {
@@ -53,6 +54,9 @@ export function Setup({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
+  // The strength stays highlighted in either language: the sentence is split where it goes.
+  const generated = t('Senha gerada com {bits} de entropia.').split('{bits}')
+
   async function attempt(action: () => Promise<void>) {
     setBusy(true)
 
@@ -60,7 +64,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
       await action()
       setError('')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
+      setError(cause instanceof ApiError ? cause.message : t('O Keyhold não respondeu. Tente novamente.'))
     } finally {
       setBusy(false)
     }
@@ -72,7 +76,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
         <CardHeader className="px-8">
           <LogoLockup className="mb-4 h-[44px] w-auto self-start" />
           <nav className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
-            {STEPS.map((entry, index) => (
+            {steps().map((entry, index) => (
               <span key={entry.id} className="flex items-center gap-2">
                 {index > 0 && <span aria-hidden="true">·</span>}
                 <span className={entry.id === step ? 'font-medium text-foreground' : undefined}>
@@ -84,29 +88,31 @@ export function Setup({ onDone }: { onDone: () => void }) {
 
           {step === 'choose' && (
             <>
-              <CardTitle>Escolha a proteção do cofre</CardTitle>
+              <CardTitle>{t('Escolha a proteção do cofre')}</CardTitle>
               <CardDescription>
-                As duas opções cifram o conteúdo do cofre. A diferença é onde fica a chave que o abre.
+                {t('As duas opções cifram o conteúdo do cofre. A diferença é onde fica a chave que o abre.')}
               </CardDescription>
             </>
           )}
 
           {step === 'password' && (
             <>
-              <CardTitle>Senha-mestra</CardTitle>
+              <CardTitle>{t('Senha-mestra')}</CardTitle>
               <CardDescription>
-                A senha-mestra não é armazenada e não pode ser redefinida. Use uma senha longa e
-                exclusiva, ou gere uma com o Keyhold.
+                {t(
+                  'A senha-mestra não é armazenada e não pode ser redefinida. Use uma senha longa e exclusiva, ou gere uma com o Keyhold.',
+                )}
               </CardDescription>
             </>
           )}
 
           {step === 'recovery' && (
             <>
-              <CardTitle>Anote a chave de recuperação</CardTitle>
+              <CardTitle>{t('Anote a chave de recuperação')}</CardTitle>
               <CardDescription>
-                É a única forma de abrir este cofre caso a senha-mestra seja perdida. Ela é exibida
-                apenas uma vez, não é armazenada e não pode ser gerada novamente.
+                {t(
+                  'É a única forma de abrir este cofre caso a senha-mestra seja perdida. Ela é exibida apenas uma vez, não é armazenada e não pode ser gerada novamente.',
+                )}
               </CardDescription>
             </>
           )}
@@ -119,29 +125,30 @@ export function Setup({ onDone }: { onDone: () => void }) {
                 selected={protection === 'password'}
                 onSelect={() => setProtection('password')}
                 icon={<KeyRound className="size-4" />}
-                title="Com uma senha-mestra"
-                badge={<Badge>recomendado</Badge>}
+                title={t('Com uma senha-mestra')}
+                badge={<Badge>{t('recomendado')}</Badge>}
               >
-                A chave que abre o cofre é derivada da sua senha e não existe em nenhum outro lugar.
-                Uma cópia do arquivo do cofre não revela nada sem a senha.
+                {t(
+                  'A chave que abre o cofre é derivada da sua senha e não existe em nenhum outro lugar. Uma cópia do arquivo do cofre não revela nada sem a senha.',
+                )}
               </Option>
 
               <Option
                 selected={protection === 'device'}
                 onSelect={() => setProtection('device')}
                 icon={<ShieldCheck className="size-4" />}
-                title="Sem senha, protegido por esta máquina"
+                title={t('Sem senha, protegido por esta máquina')}
               >
-                O cofre abre sem senha. A chave fica em um arquivo ao lado do cofre: quem conseguir
-                ler seus arquivos (um backup, uma pasta sincronizada, outro programa) também abre o
-                cofre.
+                {t(
+                  'O cofre abre sem senha. A chave fica em um arquivo ao lado do cofre: quem conseguir ler seus arquivos (um backup, uma pasta sincronizada, outro programa) também abre o cofre.',
+                )}
               </Option>
             </div>
           )}
 
           {step === 'password' && (
             <div className="space-y-2">
-              <Label htmlFor="master">Senha-mestra</Label>
+              <Label htmlFor="master">{t('Senha-mestra')}</Label>
 
               <PasswordInput
                 id="master"
@@ -160,9 +167,10 @@ export function Setup({ onDone }: { onDone: () => void }) {
 
               {entropy !== null && (
                 <p className="text-sm text-muted-foreground">
-                  Senha gerada com <span className="text-foreground">{entropy} bits</span> de
-                  entropia. Copie a senha para um lugar seguro antes de continuar. Ela não é exibida
-                  novamente.
+                  {generated[0]}
+                  <span className="text-foreground">{entropy} bits</span>
+                  {generated[1]}{' '}
+                  {t('Copie a senha para um lugar seguro antes de continuar. Ela não é exibida novamente.')}
                 </p>
               )}
             </div>
@@ -175,14 +183,15 @@ export function Setup({ onDone }: { onDone: () => void }) {
               </p>
 
               <p className="text-sm text-muted-foreground">
-                Sem a senha-mestra e sem a chave de recuperação, o conteúdo do cofre não pode ser
-                recuperado por ninguém.
+                {t(
+                  'Sem a senha-mestra e sem a chave de recuperação, o conteúdo do cofre não pode ser recuperado por ninguém.',
+                )}
               </p>
 
               <Separator />
 
               <div className="space-y-2">
-                <Label htmlFor="confirm">Digite a chave novamente para confirmar</Label>
+                <Label htmlFor="confirm">{t('Digite a chave novamente para confirmar')}</Label>
                 <Input
                   id="confirm"
                   value={typedBack}
@@ -210,7 +219,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
                     })
               }
             >
-              Continuar
+              {t('Continuar')}
             </Button>
           )}
 
@@ -228,7 +237,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
                 }
               >
                 <Wand2 />
-                Gerar uma senha forte
+                {t('Gerar uma senha forte')}
               </Button>
 
               <Button
@@ -242,7 +251,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
                 }
               >
                 {busy && <Loader2 className="animate-spin" />}
-                Criar cofre
+                {t('Criar cofre')}
               </Button>
             </>
           )}
@@ -258,7 +267,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
               }
             >
               {busy && <Loader2 className="animate-spin" />}
-              Confirmar e abrir o cofre
+              {t('Confirmar e abrir o cofre')}
             </Button>
           )}
         </CardFooter>

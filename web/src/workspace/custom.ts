@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { api, type CustomIcon, type Field, type RecordType } from '../api'
+import { locale, t } from '../i18n'
 import { newField } from './fields'
 
 /**
@@ -50,7 +51,7 @@ export function useCustom(): { icons: CustomIcon[]; types: RecordType[]; loaded:
 
 /** The library by name, so an icon is where somebody looks for it. */
 function sorted(list: CustomIcon[]): CustomIcon[] {
-  return [...list].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base', numeric: true }))
+  return [...list].sort((a, b) => a.name.localeCompare(b.name, locale(), { sensitivity: 'base', numeric: true }))
 }
 
 export async function saveIcons(next: CustomIcon[]): Promise<void> {
@@ -68,7 +69,7 @@ export async function addIcon(name: string, image: string): Promise<{ id: string
   if (already) return { id: already.id, added: false }
 
   const id = crypto.randomUUID()
-  await saveIcons([...(icons ?? []), { id, name: name.trim() || 'Sem nome', image }])
+  await saveIcons([...(icons ?? []), { id, name: name.trim() || t('Sem nome'), image }])
 
   return { id, added: true }
 }

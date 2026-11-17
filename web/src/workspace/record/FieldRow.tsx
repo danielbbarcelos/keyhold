@@ -3,6 +3,7 @@ import { Check, Copy, ExternalLink, Eye, EyeOff } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { locale, t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 import { Clip, Splitter } from '../Splitter'
@@ -52,7 +53,7 @@ export function FieldRow({ field, index, recordId, badge, live = true, version }
               badge === 'primary' ? 'bg-primary-soft text-primary-text' : 'bg-stone-soft text-muted-foreground',
             )}
           >
-            {badge === 'primary' ? 'principal' : 'na lista'}
+            {badge === 'primary' ? t('principal') : t('na lista')}
           </span>
         )}
         <Splitter which="label" className="-right-3.5 -my-3 opacity-0 group-hover/field:opacity-100" />
@@ -104,7 +105,7 @@ function Value({ field, index, recordId, live, version }: { field: Field; index:
         <Secret
           label={label}
           source={source}
-          above={<span className="block text-sm">{field.extra?.question || 'Sem pergunta'}</span>}
+          above={<span className="block text-sm">{field.extra?.question || t('Sem pergunta')}</span>}
         />
       )
 
@@ -114,7 +115,7 @@ function Value({ field, index, recordId, live, version }: { field: Field; index:
     case 'date':
       return (
         <Plain
-          value={/^\d{4}-\d{2}-\d{2}$/.test(field.value) ? field.value.split('-').reverse().join('/') : field.value}
+          value={/^\d{4}-\d{2}-\d{2}$/.test(field.value) ? dateOf(field.value) : field.value}
           label={label}
         />
       )
@@ -163,7 +164,7 @@ function Url({ value, label, recordId }: { value: string; label: string; recordI
       </span>
       <Ops>
         {href && (
-          <IconButton label="Abrir" onClick={() => window.open(href, '_blank', 'noopener,noreferrer')}>
+          <IconButton label={t('Abrir')} onClick={() => window.open(href, '_blank', 'noopener,noreferrer')}>
             <ExternalLink />
           </IconButton>
         )}
@@ -208,7 +209,7 @@ function Secret({
       <Ops>
         {present && (
           <IconButton
-            label={shown ? `Ocultar (${remaining}s restantes)` : 'Revelar por 20 segundos'}
+            label={shown ? t('Ocultar ({n}s restantes)', { n: remaining }) : t('Revelar por 20 segundos')}
             onClick={toggle}
           >
             {shown ? <EyeOff /> : <Eye />}
@@ -258,14 +259,14 @@ function Card({ source, label }: { source: Source; label: string }) {
       </span>
       <Ops>
         {present && (
-          <IconButton label={shown ? `Ocultar (${remaining}s restantes)` : 'Revelar por 20 segundos'} onClick={toggle}>
+          <IconButton label={shown ? t('Ocultar ({n}s restantes)', { n: remaining }) : t('Revelar por 20 segundos')} onClick={toggle}>
             {shown ? <EyeOff /> : <Eye />}
           </IconButton>
         )}
         {(number || isSealed) && (
           <CopyButton
             value={isSealed ? () => fetchSecret(source, 'copy').then((secret) => secret.value.replace(/\s+/g, '')) : number}
-            label={`${label} (número)`}
+            label={t('{label} (número)', { label })}
             recordId={source.recordId}
             report={!isSealed}
           />
@@ -300,7 +301,7 @@ function Totp({ recordId, trail, index, label }: { recordId?: string; trail?: st
         }
       } catch (cause) {
         if (alive) {
-          setFailed(cause instanceof Error ? cause.message : 'sem código')
+          setFailed(cause instanceof Error ? cause.message : t('sem código'))
         }
       }
     }
@@ -328,7 +329,7 @@ function Totp({ recordId, trail, index, label }: { recordId?: string; trail?: st
   if (!recordId) {
     return (
       <>
-        <span className="text-sm text-faint">o código é exibido no registro salvo</span>
+        <span className="text-sm text-faint">{t('o código é exibido no registro salvo')}</span>
         <Ops />
       </>
     )
@@ -404,7 +405,7 @@ function useReveal(source: Source, label: string): [SecretValue | null, number, 
       fetchSecret(source, 'reveal')
         .then(setShown)
         .catch((cause) =>
-          toast('Não foi possível revelar', cause instanceof ApiError ? cause.message : 'Tente de novo.', 'error'),
+          toast(t('Não foi possível revelar'), cause instanceof ApiError ? cause.message : t('Tente de novo.'), 'error'),
         )
       return
     }
@@ -448,7 +449,7 @@ export function CopyButton({
 
   return (
     <IconButton
-      label={copied > 0 ? `A área de transferência é limpa em ${copied}s` : `Copiar (limpa em ${seconds}s)`}
+      label={copied > 0 ? t('A área de transferência é limpa em {n}s', { n: copied }) : t('Copiar (limpa em {n}s)', { n: seconds })}
       onClick={() => {
         // A refusal from the binary is kept apart from a clipboard that would not take the value.
         let refused: unknown = null
@@ -466,14 +467,14 @@ export function CopyButton({
             // nobody can trust.
             if (recordId && report) void api.reportAccess(recordId, 'copy', label).catch(() => {})
             setCopied(seconds)
-            toast(`${label} copiado`, `A área de transferência é limpa em ${seconds} segundos.`)
+            toast(t('{label} copiado', { label }), t('A área de transferência é limpa em {n} segundos.', { n: seconds }))
           })
           .catch(() =>
             toast(
-              'Não foi possível copiar',
+              t('Não foi possível copiar'),
               refused instanceof ApiError
                 ? refused.message
-                : 'O navegador bloqueou o acesso à área de transferência nesta página.',
+                : t('O navegador bloqueou o acesso à área de transferência nesta página.'),
               'error',
             ),
           )
@@ -513,6 +514,13 @@ function Drain({ seconds }: { seconds: number }) {
       style={{ width: `${(seconds / REVEAL_SECONDS) * 100}%` }}
     />
   )
+}
+
+/** A `YYYY-MM-DD` date in the order the language reads it. */
+function dateOf(value: string): string {
+  const [year, month, day] = value.split('-').map(Number)
+
+  return new Date(year, month - 1, day).toLocaleDateString(locale(), { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 /** Only web addresses become links: a `javascript:` value in a vault is still just text. */

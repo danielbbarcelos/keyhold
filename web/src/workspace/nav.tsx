@@ -1,5 +1,6 @@
 import { SquareArrowOutUpRight } from 'lucide-react'
 
+import { t } from '../i18n'
 import { tabAddress } from '../session'
 import { RowMenu, type MenuEntry } from './menu'
 
@@ -59,7 +60,7 @@ export function openInNewTab(to: Destination): void {
 }
 
 export function newTabEntry(to: Destination): MenuEntry {
-  return { kind: 'item', label: 'Abrir em nova guia', icon: SquareArrowOutUpRight, onSelect: () => openInNewTab(to) }
+  return { kind: 'item', label: t('Abrir em nova guia'), icon: SquareArrowOutUpRight, onSelect: () => openInNewTab(to) }
 }
 
 /**

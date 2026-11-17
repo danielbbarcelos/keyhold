@@ -1,5 +1,6 @@
 import { Skeleton } from '@/components/ui/skeleton'
 
+import { t } from '../i18n'
 import { TopBar } from './shell'
 
 /**
@@ -14,7 +15,7 @@ const WIDTHS = ['w-2/3', 'w-1/2', 'w-3/4', 'w-2/5', 'w-3/5', 'w-1/2', 'w-2/3', '
 
 export function TreeSkeleton() {
   return (
-    <aside className="flex min-h-0 flex-col rounded-[14px] border bg-card" aria-busy="true" aria-label="Carregando o cofre">
+    <aside className="flex min-h-0 flex-col rounded-[14px] border bg-card" aria-busy="true" aria-label={t('Carregando o cofre')}>
       <div className="flex items-center gap-2 px-3 pt-3 pb-2.5">
         <Skeleton className="h-8 flex-1 rounded-lg" />
         <Skeleton className="h-8 w-[62px] rounded-lg" />
@@ -41,7 +42,7 @@ export function TreeSkeleton() {
 
 export function RecordSkeleton() {
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[14px] border bg-card" aria-busy="true" aria-label="Abrindo o registro">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[14px] border bg-card" aria-busy="true" aria-label={t('Abrindo o registro')}>
       <div className="flex items-start gap-4 px-5 pt-5">
         <Skeleton className="size-12 shrink-0 rounded-xl" />
         <div className="min-w-0 flex-1 space-y-2.5 pt-1">

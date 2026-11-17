@@ -17,6 +17,7 @@ export const MARK = { 'X-Keyhold': '1' } as const
 
 let open = false
 let replayed = false
+let language: string | null = null
 
 /**
  * Redeem the code in the address, if there is one, and find out whether this tab has a session.
@@ -54,6 +55,10 @@ export async function adoptSession(): Promise<void> {
     })
 
     open = response.ok
+    if (response.ok) {
+      const status = await response.json().catch(() => ({}))
+      language = typeof status.language === 'string' ? status.language : null
+    }
   } catch {
     open = false
   }
@@ -71,6 +76,12 @@ export function disown(): void {
 
 export function hasToken(): boolean {
   return open
+}
+
+/** The language the binary keeps for this Keyhold, as the first status said it; `null` when nobody
+ * chose yet, or when this tab has no session to ask with. */
+export function savedLanguage(): string | null {
+  return language
 }
 
 /** Whether the code in the address had already been used when this tab presented it. */

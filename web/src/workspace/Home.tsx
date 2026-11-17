@@ -13,6 +13,7 @@ import {
   type Status,
   type VaultSummary,
 } from '../api'
+import { locale, t } from '../i18n'
 import { RecordTile } from './icons'
 import { AwsMark } from './AwsMark'
 import { linkProps, TabMenu } from './nav'
@@ -29,12 +30,25 @@ export interface Seen {
   at: number
 }
 
-const ISSUE: Record<HealthIssue, { label: string; tone: 'rose' | 'amber' }> = {
-  compromised: { label: 'comprometido', tone: 'rose' },
-  rotation: { label: 'troca vencida', tone: 'rose' },
-  reused: { label: 'senha repetida', tone: 'amber' },
-  weak: { label: 'senha fraca', tone: 'amber' },
-  stale: { label: 'senha antiga', tone: 'amber' },
+const issueOf = (): Record<HealthIssue, { label: string; tone: 'rose' | 'amber' }> => ({
+  compromised: { label: t('comprometido'), tone: 'rose' },
+  rotation: { label: t('troca vencida'), tone: 'rose' },
+  reused: { label: t('senha repetida'), tone: 'amber' },
+  weak: { label: t('senha fraca'), tone: 'amber' },
+  stale: { label: t('senha antiga'), tone: 'amber' },
+})
+
+/** A sentence with a bold number inside: the number goes wherever the language puts `{n}`. */
+function Count({ text, n, className }: { text: string; n: number; className?: string }) {
+  const [before, after = ''] = text.split('{n}')
+
+  return (
+    <>
+      {before}
+      <b className={className}>{n}</b>
+      {after}
+    </>
+  )
 }
 
 export function Home({
@@ -83,7 +97,8 @@ export function Home({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vaults])
 
-  const hello = 'Visão geral'
+  const hello = t('Visão geral')
+  const ISSUE = issueOf()
   const attention = records.filter((record) => issues.has(record.id) || record.compromised_at)
   const favourites = records.filter((record) => record.favourite)
   const vaultName = (id: string) => vaults.find((vault) => vault.id === id)?.name ?? ''
@@ -111,19 +126,25 @@ export function Home({
         actions={
           <Button variant="outline" onClick={onNewVault}>
             <Plus />
-            Novo cofre
+            {t('Novo cofre')}
           </Button>
         }
       >
-        <Title>Início</Title>
+        <Title>{t('Início')}</Title>
       </TopBar>
 
       <Body>
         <h1 className="text-[22px] font-semibold tracking-tight">{hello}</h1>
         <p className="mt-1 text-muted-foreground">
-          {open.length} {open.length === 1 ? 'cofre' : 'cofres'}, {records.length}{' '}
-          {records.length === 1 ? 'registro' : 'registros'}
-          {attention.length > 0 && `, ${attention.length} ${attention.length === 1 ? 'pede' : 'pedem'} atenção`}.
+          {[
+            open.length === 1 ? t('1 cofre') : t('{n} cofres', { n: open.length }),
+            records.length === 1 ? t('1 registro') : t('{n} registros', { n: records.length }),
+            attention.length > 0 &&
+              (attention.length === 1 ? t('1 pede atenção') : t('{n} pedem atenção', { n: attention.length })),
+          ]
+            .filter(Boolean)
+            .join(', ')}
+          .
         </p>
 
         <SetHostHint dismissed={status.set_host_hint_dismissed ?? false} />
@@ -146,26 +167,30 @@ export function Home({
                     <b className="block truncate text-[15px] font-semibold">{vault.name}</b>
                     <span className="flex items-center gap-1 text-xs text-faint">
                       {vault.kind === 'aws' ? <AwsMark className="size-3.5" /> : <HardDrive className="size-3" />}
-                      {vault.kind === 'aws' ? `AWS Parameter Store, ${vault.aws?.region ?? ''}` : 'Cofre local'}
+                      {vault.kind === 'aws' ? `AWS Parameter Store, ${vault.aws?.region ?? ''}` : t('Cofre local')}
                     </span>
                   </span>
                 </span>
                 {unreadable.has(vault.id) ? (
                   <span className="mt-4 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]">
-                    <b className="font-semibold text-amber">Indisponível</b>
+                    <b className="font-semibold text-amber">{t('Indisponível')}</b>
                     <span className="text-faint">
-                      {vault.kind === 'aws' ? 'sem sessão na AWS. Abra o cofre para renovar' : 'não foi possível ler este cofre'}
+                      {vault.kind === 'aws' ? t('sem sessão na AWS. Abra o cofre para renovar') : t('não foi possível ler este cofre')}
                     </span>
                   </span>
                 ) : (
                 <span className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
                   <span>
-                    <b className="font-semibold text-foreground">{inside.length}</b> registros
+                    <Count text={t('{n} registros')} n={inside.length} className="font-semibold text-foreground" />
                   </span>
                   <span className={cn(flagged > 0 && 'text-amber')}>
-                    <b className={cn('font-semibold', flagged > 0 ? 'text-amber' : 'text-foreground')}>{flagged}</b> atenção
+                    <Count
+                      text={t('{n} atenção')}
+                      n={flagged}
+                      className={cn('font-semibold', flagged > 0 ? 'text-amber' : 'text-foreground')}
+                    />
                   </span>
-                  <span>{vault.agent_access ? 'agente liberado' : 'agente bloqueado'}</span>
+                  <span>{vault.agent_access ? t('agente liberado') : t('agente bloqueado')}</span>
                 </span>
                 )}
               </button>
@@ -178,13 +203,13 @@ export function Home({
             className="flex min-h-[118px] flex-col items-center justify-center gap-2 rounded-[14px] border border-dashed text-sm text-muted-foreground hover:bg-hover"
           >
             <Plus className="size-5" />
-            Novo cofre
+            {t('Novo cofre')}
           </button>
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-2">
           <Panel>
-            <PanelHead title={seen.length ? 'Abertos recentemente' : 'Alterados recentemente'} />
+            <PanelHead title={seen.length ? t('Abertos recentemente') : t('Alterados recentemente')} />
             {recent.map((record) => (
               <RecordLine key={record.id} record={record} folder={vaultOf(record.vault_id)} onOpen={() => onOpen(record)}>
                 <span className="text-xs text-faint">
@@ -192,17 +217,17 @@ export function Home({
                 </span>
               </RecordLine>
             ))}
-            {recent.length === 0 && <Empty>Nenhum registro criado. Abra um cofre e crie o primeiro.</Empty>}
+            {recent.length === 0 && <Empty>{t('Nenhum registro criado. Abra um cofre e crie o primeiro.')}</Empty>}
           </Panel>
 
           <Panel>
-            <PanelHead title="Favoritos e atenção">
+            <PanelHead title={t('Favoritos e atenção')}>
               <div className="flex rounded-lg border bg-raised p-0.5">
                 {(
                   [
-                    ['tudo', 'Tudo'],
-                    ['favoritos', 'Favoritos'],
-                    ['atencao', 'Atenção'],
+                    ['tudo', t('Tudo')],
+                    ['favoritos', t('Favoritos')],
+                    ['atencao', t('Atenção')],
                   ] as const
                 ).map(([id, label]) => (
                   <button
@@ -242,48 +267,79 @@ export function Home({
             {starred.length === 0 && (
               <Empty>
                 {tab === 'atencao'
-                  ? 'Nenhum registro pede atenção. Senhas fracas, repetidas ou vencidas são exibidas aqui.'
-                  : 'Nenhum favorito. Marque a estrela de um registro para exibi-lo aqui.'}
+                  ? t('Nenhum registro pede atenção. Senhas fracas, repetidas ou vencidas são exibidas aqui.')
+                  : t('Nenhum favorito. Marque a estrela de um registro para exibi-lo aqui.')}
               </Empty>
             )}
           </Panel>
         </div>
 
         <Panel className="mt-5">
-          <PanelHead title="Atividade e agentes">
+          <PanelHead title={t('Atividade e agentes')}>
             <TabMenu to={{ place: 'trail' }}>
               <Button variant="ghost" size="sm" {...linkProps({ place: 'trail' }, onTrail)}>
-                Visualizar a trilha
+                {t('Visualizar a trilha')}
                 <ArrowRight />
               </Button>
             </TabMenu>
           </PanelHead>
-          <Line icon={Lock} tone="amber" title={unlockedAt ? `Destrancado desde ${new Date(unlockedAt.endsWith('Z') ? unlockedAt : `${unlockedAt}Z`).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Destrancado'}
-            detail={seconds === null ? 'sem tranca automática' : `tranca em ${seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${seconds} s`} sem uso`}>
+          <Line
+            icon={Lock}
+            tone="amber"
+            title={
+              unlockedAt
+                ? t('Destrancado desde {time}', {
+                    time: new Date(unlockedAt.endsWith('Z') ? unlockedAt : `${unlockedAt}Z`).toLocaleTimeString(locale(), {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    }),
+                  })
+                : t('Destrancado')
+            }
+            detail={
+              seconds === null
+                ? t('sem tranca automática')
+                : t('tranca em {time} sem uso', { time: seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${seconds} s` })
+            }
+          >
             <Button variant="outline" size="sm" onClick={onLock}>
-              Trancar
+              {t('Trancar')}
             </Button>
           </Line>
           {agentEvents.map((event) => (
             <Line
               key={event.seq}
               icon={Bot}
-              title={`${event.actor.process ?? 'Agente'} ${event.result === 'denied' ? 'teve um pedido negado' : event.action === 'secret.copied' ? 'copiou um segredo' : 'leu um segredo'}${event.scope ? ` de ${records.find((record) => record.id === event.scope)?.title ?? 'um registro'}` : ''}`}
+              title={agentLine(
+                event.actor.process ?? t('Agente'),
+                event.result === 'denied' ? 'denied' : event.action === 'secret.copied' ? 'copied' : 'read',
+                event.scope ? (records.find((record) => record.id === event.scope)?.title ?? t('um registro')) : null,
+              )}
               detail={when(event.at)}
             />
           ))}
           <Line
             icon={ShieldCheck}
-            title={grants.length === 0 ? 'Nenhuma permissão ativa' : `${grants.length} ${grants.length === 1 ? 'permissão ativa' : 'permissões ativas'}`}
+            title={
+              grants.length === 0
+                ? t('Nenhuma permissão ativa')
+                : grants.length === 1
+                  ? t('1 permissão ativa')
+                  : t('{n} permissões ativas', { n: grants.length })
+            }
             detail={(() => {
               const on = open.filter((vault) => vault.agent_access).length
 
-              return on === 0 ? 'agente bloqueado em todos os cofres' : `agente liberado em ${on} ${on === 1 ? 'cofre' : 'cofres'}`
+              return on === 0
+                ? t('agente bloqueado em todos os cofres')
+                : on === 1
+                  ? t('agente liberado em 1 cofre')
+                  : t('agente liberado em {n} cofres', { n: on })
             })()}
           >
             <TabMenu to={{ place: 'settings', section: 'agentes' }}>
               <Button variant="ghost" size="sm" {...linkProps({ place: 'settings', section: 'agentes' }, onSettings)}>
-                Visualizar em Ajustes
+                {t('Visualizar em Ajustes')}
               </Button>
             </TabMenu>
           </Line>
@@ -357,6 +413,18 @@ function Line({
   )
 }
 
+/** "Claude copiou um segredo de Banco Inter": one sentence per action, with and without the record. */
+function agentLine(who: string, did: 'denied' | 'copied' | 'read', record: string | null): string {
+  if (did === 'denied') {
+    return record ? t('{who} teve um pedido negado de {record}', { who, record }) : t('{who} teve um pedido negado', { who })
+  }
+  if (did === 'copied') {
+    return record ? t('{who} copiou um segredo de {record}', { who, record }) : t('{who} copiou um segredo', { who })
+  }
+
+  return record ? t('{who} leu um segredo de {record}', { who, record }) : t('{who} leu um segredo', { who })
+}
+
 function Empty({ children }: { children: React.ReactNode }) {
   return <p className="px-5 py-6 text-sm text-faint">{children}</p>
 }
@@ -380,24 +448,29 @@ function SetHostHint({ dismissed }: { dismissed: boolean }) {
           <Globe className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <b className="block text-sm font-medium">O Keyhold abriu em 127.0.0.1</b>
+          <b className="block text-sm font-medium">{t('O Keyhold abriu em 127.0.0.1')}</b>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
-            Este sistema não reconhece o endereço keyhold.localhost, então o Keyhold abriu pelo 127.0.0.1. Nesse endereço,
-            o navegador também entrega o cookie da sua sessão a outros programas que rodam neste computador, como
-            servidores de desenvolvimento e contêineres, que podem gravá-lo em log. Para usar o endereço próprio, rode uma
-            vez no terminal e abra o Keyhold de novo:
+            {t(
+              'Este sistema não reconhece o endereço keyhold.localhost, então o Keyhold abriu pelo 127.0.0.1. Nesse endereço, o navegador também entrega o cookie da sua sessão a outros programas que rodam neste computador, como servidores de desenvolvimento e contêineres, que podem gravá-lo em log. Para usar o endereço próprio, rode uma vez no terminal e abra o Keyhold de novo:',
+            )}
           </p>
           <div className="mt-3 flex max-w-[560px] items-center gap-2 rounded-[9px] border bg-field py-1 pr-1 pl-3">
             <code className="min-w-0 flex-1 truncate font-mono text-[13px]">{command}</code>
             <Button
               variant="ghost"
               size="icon"
-              aria-label="Copiar comando"
+              aria-label={t('Copiar comando')}
               onClick={() =>
                 void navigator.clipboard
                   .writeText(command)
-                  .then(() => toast('Comando copiado'))
-                  .catch(() => toast('Não foi possível copiar', 'O navegador bloqueou o acesso à área de transferência nesta página.', 'error'))
+                  .then(() => toast(t('Comando copiado')))
+                  .catch(() =>
+                    toast(
+                      t('Não foi possível copiar'),
+                      t('O navegador bloqueou o acesso à área de transferência nesta página.'),
+                      'error',
+                    ),
+                  )
               }
             >
               <Copy />
@@ -406,8 +479,8 @@ function SetHostHint({ dismissed }: { dismissed: boolean }) {
         </div>
         <button
           type="button"
-          aria-label="Dispensar"
-          title="Dispensar"
+          aria-label={t('Dispensar')}
+          title={t('Dispensar')}
           className="grid size-6 shrink-0 place-items-center rounded-md text-faint hover:bg-hover hover:text-foreground"
           onClick={() => {
             setHidden(true)

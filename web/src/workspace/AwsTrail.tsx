@@ -10,9 +10,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { locale, t } from '@/i18n'
 
 import { api, ApiError, type VaultSummary, type VaultTrail } from '../api'
-import { FILTERABLE, kindOf, momentOf } from './activity'
+import { filterable, kindOf, momentOf } from './activity'
 import { AwsMark } from './AwsMark'
 
 /**
@@ -44,17 +45,17 @@ export function TrailSource({
             className="inline-flex h-8 items-center gap-2 rounded-lg px-2 text-[15px] font-semibold text-foreground hover:bg-stone-soft"
           >
             {current ? <AwsMark size="xs" className="size-4" /> : <Laptop className="size-4 text-faint" />}
-            {current ? current.name : 'Este computador'}
+            {current ? current.name : t('Este computador')}
             <ChevronDown className="size-3.5 text-faint" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-64">
           <DropdownMenuItem onSelect={() => onPick(null)}>
             <Laptop />
-            Este computador
+            {t('Este computador')}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-xs text-faint">Cofres AWS</DropdownMenuLabel>
+          <DropdownMenuLabel className="text-xs text-faint">{t('Cofres AWS')}</DropdownMenuLabel>
           {aws.map((vault) => (
             <DropdownMenuItem key={vault.id} onSelect={() => onPick(vault.id)}>
               <AwsMark size="xs" className="size-4" />
@@ -67,11 +68,11 @@ export function TrailSource({
   )
 }
 
-const PERIODS: Array<[number, string]> = [
-  [1, 'Último dia'],
-  [7, 'Últimos 7 dias'],
-  [30, 'Últimos 30 dias'],
-  [90, 'Últimos 90 dias'],
+const periods = (): Array<[number, string]> => [
+  [1, t('Último dia')],
+  [7, t('Últimos {n} dias', { n: 7 })],
+  [30, t('Últimos {n} dias', { n: 30 })],
+  [90, t('Últimos {n} dias', { n: 90 })],
 ]
 
 /** One AWS vault's trail, read from its account's log groups. */
@@ -96,13 +97,14 @@ export function AwsTrail({ vault, onOpenVault }: { vault: VaultSummary; onOpenVa
         // The people menu keeps everyone seen, not only who the current filter left.
         setPeople((known) => [...new Set([...known, ...found.people])].sort())
       })
-      .catch((cause) => alive && setError(cause instanceof ApiError ? cause.message : 'Não foi possível ler a trilha.'))
+      .catch((cause) => alive && setError(cause instanceof ApiError ? cause.message : t('Não foi possível ler a trilha.')))
 
     return () => {
       alive = false
     }
   }, [vault.id, person, action, days])
 
+  const actions = filterable()
   const allDenied = trail !== null && trail.groups.length > 0 && trail.denied.length === trail.groups.length
 
   return (
@@ -110,20 +112,20 @@ export function AwsTrail({ vault, onOpenVault }: { vault: VaultSummary; onOpenVa
       <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3.5">
         <Filter
           icon={User}
-          label={person || 'Todas as pessoas'}
-          options={[['', 'Todas as pessoas'], ...people.map((one): [string, string] => [one, one])]}
+          label={person || t('Todas as pessoas')}
+          options={[['', t('Todas as pessoas')], ...people.map((one): [string, string] => [one, one])]}
           onPick={setPerson}
         />
         <Filter
           icon={ListFilter}
-          label={FILTERABLE.find(([id]) => id === action)?.[1] ?? 'Todas as ações'}
-          options={[['', 'Todas as ações'], ...FILTERABLE]}
+          label={actions.find(([id]) => id === action)?.[1] ?? t('Todas as ações')}
+          options={[['', t('Todas as ações')], ...actions]}
           onPick={setAction}
         />
         <Filter
           icon={CalendarRange}
-          label={PERIODS.find(([n]) => n === days)?.[1] ?? `Últimos ${days} dias`}
-          options={PERIODS.map(([n, label]): [string, string] => [String(n), label])}
+          label={periods().find(([n]) => n === days)?.[1] ?? t('Últimos {n} dias', { n: days })}
+          options={periods().map(([n, label]): [string, string] => [String(n), label])}
           onPick={(value) => setDays(Number(value))}
         />
         <span className="flex-1" />
@@ -134,31 +136,30 @@ export function AwsTrail({ vault, onOpenVault }: { vault: VaultSummary; onOpenVa
         {error ? (
           <p className="p-6 text-sm text-rose">{error}</p>
         ) : !trail ? (
-          <p className="p-6 text-sm text-faint">Lendo a trilha na AWS…</p>
+          <p className="p-6 text-sm text-faint">{t('Lendo a trilha na AWS…')}</p>
         ) : allDenied ? (
           <div className="mx-auto flex max-w-md flex-col items-center gap-3 px-5 py-16 text-center">
             <span className="grid size-10 place-items-center rounded-xl bg-stone-soft text-muted-foreground">
               <Lock className="size-5" />
             </span>
-            <b className="text-[15px] font-semibold">Sua permissão não inclui ler a trilha inteira deste cofre</b>
+            <b className="text-[15px] font-semibold">{t('Sua permissão não inclui ler a trilha inteira deste cofre')}</b>
             <p className="text-sm text-muted-foreground">
-              Quem administra a conta decide quem lê a trilha do cofre todo (a política audit-read). O que acontece em cada
-              registro continua na aba Atividade dele.
+              {t('Quem administra a conta decide quem lê a trilha do cofre todo (a política audit-read). O que acontece em cada registro continua na aba Atividade dele.')}
             </p>
             <Button variant="outline" size="sm" onClick={onOpenVault}>
-              Abrir {vault.name}
+              {t('Abrir {name}', { name: vault.name })}
             </Button>
           </div>
         ) : trail.events.length === 0 ? (
-          <p className="px-5 py-10 text-center text-sm text-faint">Nenhum evento neste período.</p>
+          <p className="px-5 py-10 text-center text-sm text-faint">{t('Nenhum evento neste período.')}</p>
         ) : (
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-card">
               <tr className="border-b text-left text-xs text-faint">
-                <th className="px-5 py-2.5 font-normal">Hora</th>
-                <th className="px-3 py-2.5 font-normal">Evento</th>
-                <th className="px-3 py-2.5 font-normal">Quem</th>
-                <th className="px-3 py-2.5 font-normal">Onde</th>
+                <th className="px-5 py-2.5 font-normal">{t('Hora')}</th>
+                <th className="px-3 py-2.5 font-normal">{t('Evento')}</th>
+                <th className="px-3 py-2.5 font-normal">{t('Quem')}</th>
+                <th className="px-3 py-2.5 font-normal">{t('Onde')}</th>
               </tr>
             </thead>
             <tbody>
@@ -170,7 +171,7 @@ export function AwsTrail({ vault, onOpenVault }: { vault: VaultSummary; onOpenVa
                   event.title ?? event.parameter ?? '',
                   typeof detail.field === 'string' ? detail.field : '',
                   typeof detail.attachment === 'string' ? detail.attachment : '',
-                  typeof detail.from === 'string' && typeof detail.to === 'string' ? `de ${detail.from} para ${detail.to}` : '',
+                  typeof detail.from === 'string' && typeof detail.to === 'string' ? t('de {from} para {to}', { from: detail.from, to: detail.to }) : '',
                 ]
                   .filter(Boolean)
                   .join(', ')
@@ -178,7 +179,7 @@ export function AwsTrail({ vault, onOpenVault }: { vault: VaultSummary; onOpenVa
                 return (
                   <tr key={`${event.at_ms}-${index}`} className="border-b last:border-b-0">
                     <td className="px-5 py-3 font-mono text-[13px] whitespace-nowrap text-muted-foreground">
-                      {at ? (today ? at.toLocaleTimeString('pt-BR') : at.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })) : ''}
+                      {at ? (today ? at.toLocaleTimeString(locale()) : at.toLocaleString(locale(), { dateStyle: 'short', timeStyle: 'short' })) : ''}
                     </td>
                     <td className="px-3 py-3">
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-soft px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
@@ -201,8 +202,7 @@ export function AwsTrail({ vault, onOpenVault }: { vault: VaultSummary; onOpenVa
       </div>
 
       <p className="border-t px-5 py-3 text-[13px] text-faint">
-        A hora é a de quando a AWS recebeu o evento, e o nome é o usuário no Identity Center. O que foi feito fora do
-        Keyhold, pelo console da AWS ou pela CLI, fica no AWS CloudTrail da conta.
+        {t('A hora é a de quando a AWS recebeu o evento, e o nome é o usuário no Identity Center. O que foi feito fora do Keyhold, pelo console da AWS ou pela CLI, fica no AWS CloudTrail da conta.')}
       </p>
     </div>
   )

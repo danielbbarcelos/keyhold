@@ -4,15 +4,28 @@ import { Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { Tip } from '@/components/ui/tip'
+import { getLang, locale, t } from '@/i18n'
 
 /**
  * A date, picked from a small calendar in the interface's own look rather than the browser's.
  *
  * The value is `YYYY-MM-DD` (or empty), the same string a native date input would give, so it can
- * stand in anywhere one was. Typing is still possible: the field accepts `dd/mm/aaaa`.
+ * stand in anywhere one was. Typing is still possible: the field accepts `dd/mm/aaaa` in Portuguese
+ * and `mm/dd/yyyy` in English, the same order it shows.
  */
-const MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
-const DAYS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
+
+/** "março de 2026" / "March 2026", from the browser's own names. */
+function monthTitle(month: Date): string {
+  return new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric' }).format(month)
+}
+
+/** The week's initials from Sunday, as the grid lays them out: D S T Q Q S S / S M T W T F S. */
+function weekdays(): string[] {
+  const format = new Intl.DateTimeFormat(locale(), { weekday: 'narrow' })
+
+  // 2023-01-01 was a Sunday.
+  return Array.from({ length: 7 }, (_, index) => format.format(new Date(2023, 0, 1 + index)))
+}
 
 function toIso(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -29,13 +42,13 @@ function fromIso(value: string): Date | null {
 function shown(value: string): string {
   const date = fromIso(value)
 
-  return date ? date.toLocaleDateString('pt-BR') : ''
+  return date ? date.toLocaleDateString(locale(), { day: '2-digit', month: '2-digit', year: 'numeric' }) : ''
 }
 
 export function DatePicker({
   value,
   onChange,
-  placeholder = 'Sem data',
+  placeholder = t('Sem data'),
   className,
 }: {
   value: string
@@ -71,9 +84,11 @@ export function DatePicker({
 
     if (typed.trim() === '') onChange('')
     else if (match) {
-      const date = new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]))
+      const [day, monthOfYear] =
+        getLang() === 'en' ? [Number(match[2]), Number(match[1])] : [Number(match[1]), Number(match[2])]
+      const date = new Date(Number(match[3]), monthOfYear - 1, day)
       // 31/02 would roll into March without a word; a date that is not the one typed is refused.
-      if (date.getDate() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1) onChange(toIso(date))
+      if (date.getDate() === day && date.getMonth() === monthOfYear - 1) onChange(toIso(date))
     }
     setTyped(null)
   }
@@ -88,7 +103,7 @@ export function DatePicker({
     >
       <div className={cn('relative', className)}>
         <input
-          aria-label="Data"
+          aria-label={t('Data')}
           value={typed ?? shown(value)}
           placeholder={placeholder}
           onChange={(event) => setTyped(event.target.value)}
@@ -98,21 +113,20 @@ export function DatePicker({
         />
         <span className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center">
           {value && (
-            <Tip label="Remover a data"><button
+            <Tip label={t('Remover a data')}><button
               type="button"
-             
-              aria-label="Remover a data"
+              aria-label={t('Remover a data')}
               onClick={() => onChange('')}
               className="grid size-7 place-items-center rounded-md text-faint hover:bg-hover hover:text-foreground"
             >
               <X className="size-3.5" />
             </button></Tip>
           )}
-          <Tip label="Escolher no calendário">
+          <Tip label={t('Escolher no calendário')}>
           <PopoverTrigger asChild>
             <button
               type="button"
-              aria-label="Escolher no calendário"
+              aria-label={t('Escolher no calendário')}
               className="grid size-7 place-items-center rounded-md text-faint hover:bg-hover hover:text-foreground"
             >
               <Calendar className="size-4" />
@@ -124,19 +138,19 @@ export function DatePicker({
 
       <PopoverContent align="end" className="w-[268px] p-3">
         <div className="mb-2 flex items-center gap-1">
-          <Tip label="Mês anterior"><button type="button" aria-label="Mês anterior" onClick={() => shift(-1)} className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-hover">
+          <Tip label={t('Mês anterior')}><button type="button" aria-label={t('Mês anterior')} onClick={() => shift(-1)} className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-hover">
             <ChevronLeft className="size-4" />
           </button></Tip>
           <b className="flex-1 text-center text-sm font-semibold first-letter:uppercase">
-            {MONTHS[month.getMonth()]} de {month.getFullYear()}
+            {monthTitle(month)}
           </b>
-          <Tip label="Próximo mês"><button type="button" aria-label="Próximo mês" onClick={() => shift(1)} className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-hover">
+          <Tip label={t('Próximo mês')}><button type="button" aria-label={t('Próximo mês')} onClick={() => shift(1)} className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-hover">
             <ChevronRight className="size-4" />
           </button></Tip>
         </div>
 
         <div className="grid grid-cols-7 gap-0.5 text-center">
-          {DAYS.map((day, index) => (
+          {weekdays().map((day, index) => (
             <span key={index} className="py-1 text-[11px] text-faint">
               {day}
             </span>
@@ -175,11 +189,11 @@ export function DatePicker({
               setOpen(false)
             }}
           >
-            Hoje
+            {t('Hoje')}
           </button>
           {[
-            ['Em 3 meses', 3],
-            ['Em 1 ano', 12],
+            [t('Em 3 meses'), 3],
+            [t('Em 1 ano'), 12],
           ].map(([label, months]) => (
             <button
               key={label}

@@ -138,8 +138,12 @@ function lexJs(src: string): Piece[] {
 }
 
 
-/** Files that are not screens: the catalogs themselves, the API's types. */
-const SKIP = [/^i18n\//, /\.test\.tsx?$/, /^components\/ui\//]
+/**
+ * Files that are not screens: the catalogs themselves, the API's types. And the icon list, whose
+ * Portuguese is search keywords (with English synonyms beside them), never shown; its colour names
+ * do go through `t()`.
+ */
+const SKIP = [/^i18n\//, /\.test\.tsx?$/, /^components\/ui\//, /^workspace\/icons\.tsx$/]
 
 function files(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -154,7 +158,8 @@ const summary = args.includes('--summary')
 const only = args.find((a) => !a.startsWith('--'))
 const problems: Array<{ file: string; line: number; kind: string; text: string }> = []
 
-for (const file of files(only ? path.join(SRC, only) : SRC)) {
+const start = only ? path.join(SRC, only) : SRC
+for (const file of fs.statSync(start).isFile() ? [start] : files(start)) {
   const rel = path.relative(SRC, file).split(path.sep).join('/')
   if (SKIP.some((re) => re.test(rel))) continue
   for (const piece of lexJs(fs.readFileSync(file, 'utf8'))) {

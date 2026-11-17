@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Download, Loader2, Paperclip, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 import { api, ApiError, type AttachmentInfo } from '../api'
@@ -57,7 +58,7 @@ export function Attachments({ recordId }: { recordId: string }) {
       await refresh()
       setError('')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
+      setError(cause instanceof ApiError ? cause.message : t('O Keyhold não respondeu. Tente novamente.'))
     } finally {
       setBusy(false)
     }
@@ -66,7 +67,7 @@ export function Attachments({ recordId }: { recordId: string }) {
   return (
     <div className="space-y-2">
       <h3 className="pt-2 text-sm font-bold">
-        Arquivos
+        {t('Arquivos')}
       </h3>
 
       {files && files.length > 0 && (
@@ -81,7 +82,7 @@ export function Attachments({ recordId }: { recordId: string }) {
               <Button
                 variant="ghost"
                 size="icon-xs"
-                aria-label={`Baixar ${file.name}`}
+                aria-label={t('Baixar {name}', { name: file.name })}
                 onClick={() =>
                   void attempt(async () => {
                     const opened = await api.openAttachment(file.id)
@@ -104,7 +105,7 @@ export function Attachments({ recordId }: { recordId: string }) {
               <Button
                 variant="ghost"
                 size="icon-xs"
-                aria-label={`Excluir ${file.name}`}
+                aria-label={t('Excluir {name}', { name: file.name })}
                 onClick={() => void attempt(() => api.deleteAttachment(file.id).then(() => {}))}
               >
                 <Trash2 />
@@ -155,11 +156,10 @@ export function Attachments({ recordId }: { recordId: string }) {
         )}
       >
         {busy ? <Loader2 className="size-5 animate-spin" /> : <Paperclip className="size-5" />}
-        <span className="text-sm font-semibold text-foreground">Anexar arquivo</span>
+        <span className="text-sm font-semibold text-foreground">{t('Anexar arquivo')}</span>
         {maxBytes > 0 && (
           <span>
-            Até {Math.round(maxBytes / (1024 * 1024))} MB. O nome e o tipo são cifrados junto com o
-            conteúdo.
+            {t('Até {mb} MB. O nome e o tipo são cifrados junto com o conteúdo.', { mb: Math.round(maxBytes / (1024 * 1024)) })}
           </span>
         )}
       </button>

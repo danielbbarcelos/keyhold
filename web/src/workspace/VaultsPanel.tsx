@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 import { api, ApiError, type RecordIcon, type VaultSummary } from '../api'
+import { t } from '../i18n'
 import { AwsMark } from './AwsMark'
 import { IconPicker } from './IconPicker'
 import { VaultInitial } from './shell'
@@ -57,11 +58,12 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
       <CardHeader className="px-6">
         <CardTitle className="flex items-center gap-2">
           <Vault className="size-4" />
-          Cofres
+          {t('Cofres')}
         </CardTitle>
         <CardDescription>
-          Um cofre arquivado não é exibido na lista e pode ser restaurado. Excluir um cofre é
-          irreversível e remove todo o conteúdo, incluindo o histórico e a lixeira.
+          {t(
+            'Um cofre arquivado não é exibido na lista e pode ser restaurado. Excluir um cofre é irreversível e remove todo o conteúdo, incluindo o histórico e a lixeira.',
+          )}
         </CardDescription>
       </CardHeader>
 
@@ -72,15 +74,15 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
             <span className="flex min-w-0 items-center gap-2">
               <VaultInitial vault={vault} />
               <span className="truncate text-sm">{vault.name}</span>
-              {vault.kind === 'aws' && <AwsMark className="size-4" title="Cofre AWS" />}
-              {vault.archived && <Badge variant="secondary">arquivado</Badge>}
+              {vault.kind === 'aws' && <AwsMark className="size-4" title={t('Cofre AWS')} />}
+              {vault.archived && <Badge variant="secondary">{t('arquivado')}</Badge>}
             </span>
 
             <span className="flex shrink-0 items-center gap-1">
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Editar cofre"
+                aria-label={t('Editar cofre')}
                 onClick={() => setRenaming(vault)}
               >
                 <Pencil />
@@ -89,7 +91,7 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Copiar para outro cofre"
+                aria-label={t('Copiar para outro cofre')}
                 onClick={() => setCopying(vault)}
               >
                 <Copy />
@@ -98,7 +100,7 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={vault.archived ? 'Restaurar' : 'Arquivar'}
+                aria-label={vault.archived ? t('Restaurar') : t('Arquivar')}
                 onClick={() => void api.archiveVault(vault.id, !vault.archived).then(onChanged)}
               >
                 {vault.archived ? <ArchiveRestore /> : <Archive />}
@@ -107,7 +109,7 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Excluir cofre"
+                aria-label={t('Excluir cofre')}
                 onClick={() => setDeleting(vault)}
               >
                 <Trash2 />
@@ -131,7 +133,7 @@ export function VaultsPanel({ vaults, onChanged }: VaultsPanelProps) {
 
       {copying && (
         <CopyDialog
-          source={{ vaultId: copying.id, what: `o cofre ${copying.name}` }}
+          source={{ vaultId: copying.id, what: t('o cofre {name}', { name: copying.name }) }}
           vaults={vaults}
           onCancel={() => setCopying(null)}
           onDone={() => {
@@ -175,9 +177,9 @@ export function EditVaultDialog({
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Editar cofre</AlertDialogTitle>
+          <AlertDialogTitle>{t('Editar cofre')}</AlertDialogTitle>
           <AlertDialogDescription>
-            O nome e o ícone são cifrados como o restante do cofre e não ficam visíveis no arquivo.
+            {t('O nome e o ícone são cifrados como o restante do cofre e não ficam visíveis no arquivo.')}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -185,13 +187,13 @@ export function EditVaultDialog({
           <div className="flex items-center gap-3">
             <IconPicker
               icon={icon}
-              label="Escolher ícone do cofre"
+              label={t('Escolher ícone do cofre')}
               onChange={setIcon}
               onClear={() => setIcon(null)}
-              clearLabel="Voltar às iniciais"
+              clearLabel={t('Voltar às iniciais')}
               trigger={icon ? undefined : <VaultInitial vault={{ name: name || '?', colour }} size="lg" />}
             />
-            <Input value={name} autoFocus aria-label="Nome" onChange={(event) => setName(event.target.value)} />
+            <Input value={name} autoFocus aria-label={t('Nome')} onChange={(event) => setName(event.target.value)} />
           </div>
           <ColourPicker value={colour} onChange={setColour} />
           {vault.aws && (
@@ -202,10 +204,11 @@ export function EditVaultDialog({
                 onCheckedChange={(on) => setRenameWithTitle(on === true)}
               />
               <span className="grid gap-0.5">
-                <span className="font-medium">Renomear também na AWS por padrão</span>
+                <span className="font-medium">{t('Renomear também na AWS por padrão')}</span>
                 <span className="text-xs text-faint">
-                  Ao trocar o título de um registro ou o nome de uma pasta, a opção já vem marcada. Renomear
-                  na AWS exclui o parâmetro antigo e o histórico dele.
+                  {t(
+                    'Ao trocar o título de um registro ou o nome de uma pasta, a opção já vem marcada. Renomear na AWS exclui o parâmetro antigo e o histórico dele.',
+                  )}
                 </span>
               </span>
             </label>
@@ -214,7 +217,7 @@ export function EditVaultDialog({
         </div>
 
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogCancel>{t('Cancelar')}</AlertDialogCancel>
           <Button
             disabled={!name.trim()}
             onClick={() =>
@@ -230,7 +233,7 @@ export function EditVaultDialog({
                 .catch((cause) => setError(describe(cause)))
             }
           >
-            Salvar
+            {t('Salvar')}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -265,32 +268,28 @@ function DeleteDialog({
   }, [vault.id])
 
   const total = counts ? counts.records + counts.archived_records : null
+  // The name sits inside the sentence, wherever each language puts it.
+  const [typeBefore, typeAfter = ''] = t('Digite {name} para confirmar').split('{name}')
 
   return (
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Excluir cofre {vault.name}</AlertDialogTitle>
+          <AlertDialogTitle>{t('Excluir cofre {name}', { name: vault.name })}</AlertDialogTitle>
           <AlertDialogDescription>
             {total === null
-              ? 'Conferindo o conteúdo…'
+              ? t('Conferindo o conteúdo…')
               : total === 0
-                ? 'O cofre está vazio e será excluído. Esta ação não pode ser desfeita.'
-                : `${total === 1 ? 'Será excluído 1 registro' : `Serão excluídos ${total} registros`}${
-                    counts && counts.archived_records > 0
-                      ? ` (${counts.archived_records} na lixeira)`
-                      : ''
-                  }${
-                    counts && counts.folders > 0
-                      ? ` e ${counts.folders} ${counts.folders === 1 ? 'pasta' : 'pastas'}`
-                      : ''
-                  }, com todo o histórico. Nem a senha-mestra recupera o conteúdo. Esta ação não pode ser desfeita.`}
+                ? t('O cofre está vazio e será excluído. Esta ação não pode ser desfeita.')
+                : `${deletes(total, counts)} ${t('Nem a senha-mestra recupera o conteúdo. Esta ação não pode ser desfeita.')}`}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
         <div className="space-y-2">
           <Label htmlFor="confirm-name">
-            Digite <span className="text-foreground">{vault.name}</span> para confirmar
+            {typeBefore}
+            <span className="text-foreground">{vault.name}</span>
+            {typeAfter}
           </Label>
           <Input
             id="confirm-name"
@@ -303,7 +302,7 @@ function DeleteDialog({
         </div>
 
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogCancel>{t('Cancelar')}</AlertDialogCancel>
           <Button
             variant="destructive"
             disabled={typed.trim() !== vault.name.trim()}
@@ -314,7 +313,7 @@ function DeleteDialog({
                 .catch((cause) => setError(describe(cause)))
             }
           >
-            Excluir cofre
+            {t('Excluir cofre')}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -322,6 +321,21 @@ function DeleteDialog({
   )
 }
 
+/** "Serão excluídos 12 registros (2 na lixeira) e 3 pastas, com todo o histórico.", one sentence per shape. */
+function deletes(total: number, counts: { archived_records: number; folders: number } | null): string {
+  let records = total === 1 ? t('1 registro') : t('{n} registros', { n: total })
+  if (counts && counts.archived_records > 0) records = t('{records} ({n} na lixeira)', { records, n: counts.archived_records })
+
+  if (counts && counts.folders > 0) {
+    const folders = counts.folders === 1 ? t('1 pasta') : t('{n} pastas', { n: counts.folders })
+    return t('Serão excluídos {records} e {folders}, com todo o histórico.', { records, folders })
+  }
+
+  return total === 1
+    ? t('Será excluído {records}, com todo o histórico.', { records })
+    : t('Serão excluídos {records}, com todo o histórico.', { records })
+}
+
 function describe(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.'
+  return cause instanceof ApiError ? cause.message : t('O Keyhold não respondeu. Tente novamente.')
 }

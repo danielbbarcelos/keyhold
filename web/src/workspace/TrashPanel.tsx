@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { t } from '@/i18n'
 
 import { api, type RecordPreview } from '../api'
 import { RecordTile } from './icons'
@@ -41,12 +42,13 @@ export function TrashPanel({ title, records, retentionDays, onChanged, vaultId }
   )
 
   const left = (archivedAt: string) => {
-    if (retentionDays <= 0) return 'até ser excluído'
+    if (retentionDays <= 0) return t('até ser excluído')
     const gone = new Date(archivedAt.endsWith('Z') ? archivedAt : `${archivedAt}Z`)
     gone.setDate(gone.getDate() + retentionDays)
     const days = Math.max(0, Math.ceil((gone.getTime() - Date.now()) / 86_400_000))
 
-    return days === 0 ? 'removido no próximo destranque' : `removido em ${days} ${days === 1 ? 'dia' : 'dias'}`
+    if (days === 0) return t('removido no próximo destranque')
+    return days === 1 ? t('removido em {n} dia', { n: days }) : t('removido em {n} dias', { n: days })
   }
 
   return (
@@ -56,27 +58,27 @@ export function TrashPanel({ title, records, retentionDays, onChanged, vaultId }
           <h3 className="text-[15px] font-semibold">{title}</h3>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
             {retentionDays > 0
-              ? `Registros excluídos ficam aqui por ${retentionDays} dias e são removidos permanentemente no primeiro destranque após esse prazo.`
-              : 'A limpeza automática está desligada. Os registros excluídos ficam aqui até serem removidos manualmente.'}
+              ? t('Registros excluídos ficam aqui por {n} dias e são removidos permanentemente no primeiro destranque após esse prazo.', { n: retentionDays })
+              : t('A limpeza automática está desligada. Os registros excluídos ficam aqui até serem removidos manualmente.')}
           </p>
         </div>
         {records.length > 0 && vaultId && (
           <Button variant="outline" size="sm" onClick={() => setConfirming({ what: 'all' })}>
             <Trash2 />
-            Esvaziar
+            {t('Esvaziar')}
           </Button>
         )}
       </div>
 
       {records.length === 0 ? (
-        <p className="px-5 py-10 text-center text-sm text-faint">A lixeira está vazia.</p>
+        <p className="px-5 py-10 text-center text-sm text-faint">{t('A lixeira está vazia.')}</p>
       ) : (
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left text-xs text-faint">
-              <th className="px-5 py-2.5 font-normal">Registro</th>
-              <th className="px-3 py-2.5 font-normal">Excluído</th>
-              <th className="px-3 py-2.5 font-normal">Prazo</th>
+              <th className="px-5 py-2.5 font-normal">{t('Registro')}</th>
+              <th className="px-3 py-2.5 font-normal">{t('Excluído')}</th>
+              <th className="px-3 py-2.5 font-normal">{t('Prazo')}</th>
               <th className="px-5 py-2.5" />
             </tr>
           </thead>
@@ -104,15 +106,15 @@ export function TrashPanel({ title, records, retentionDays, onChanged, vaultId }
                         void api
                           .archiveRecord(record.id, false)
                           .then(onChanged)
-                          .catch((cause) => toastError(cause, 'Não foi possível restaurar'))
+                          .catch((cause) => toastError(cause, t('Não foi possível restaurar')))
                       }>
                       <RotateCcw />
-                      Restaurar
+                      {t('Restaurar')}
                     </Button>
                     <Button
                       variant="ghost"
                       size="icon"
-                      aria-label="Excluir permanentemente"
+                      aria-label={t('Excluir permanentemente')}
                       onClick={() => setConfirming({ what: 'one', id: record.id, title: record.title })}
                     >
                       <Trash2 />
@@ -130,24 +132,24 @@ export function TrashPanel({ title, records, retentionDays, onChanged, vaultId }
           <AlertDialogHeader>
             <AlertDialogTitle>
               {confirming?.what === 'all'
-                ? 'Esvaziar lixeira'
-                : 'Excluir permanentemente'}
+                ? t('Esvaziar lixeira')
+                : t('Excluir permanentemente')}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirming?.what === 'one' ? (
                 <>
-                  <strong>{confirming.title}</strong> será excluído permanentemente, com o conteúdo
-                  cifrado e todas as versões anteriores.
+                  <strong>{confirming.title}</strong>{' '}
+                  {t('será excluído permanentemente, com o conteúdo cifrado e todas as versões anteriores.')}
                 </>
               ) : (
-                'Todos os registros da lixeira serão excluídos permanentemente, com o conteúdo cifrado e todas as versões anteriores.'
+                t('Todos os registros da lixeira serão excluídos permanentemente, com o conteúdo cifrado e todas as versões anteriores.')
               )}{' '}
-              Esta ação não pode ser desfeita. Nem a senha-mestra recupera o conteúdo.
+              {t('Esta ação não pode ser desfeita. Nem a senha-mestra recupera o conteúdo.')}
             </AlertDialogDescription>
           </AlertDialogHeader>
 
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel>{t('Cancelar')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 const action =
@@ -161,7 +163,7 @@ export function TrashPanel({ title, records, retentionDays, onChanged, vaultId }
                 })
               }}
             >
-              {confirming?.what === 'all' ? 'Esvaziar lixeira' : 'Excluir permanentemente'}
+              {confirming?.what === 'all' ? t('Esvaziar lixeira') : t('Excluir permanentemente')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

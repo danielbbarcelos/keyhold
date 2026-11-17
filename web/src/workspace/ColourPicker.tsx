@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 
+import { t } from '../i18n'
 import { COLOURS } from './colours'
 
 /** Six swatches, named out loud so the choice is not a guess about what a colour means. */
@@ -14,7 +15,7 @@ export function ColourPicker({
 }) {
   return (
     <div className="space-y-2">
-      <Label>Cor</Label>
+      <Label>{t('Cor')}</Label>
       <div className="flex flex-wrap gap-1.5">
         {COLOURS.map((colour) => (
           <Button

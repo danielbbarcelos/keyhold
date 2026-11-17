@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 import { api, ApiError, type Field, type FieldKind } from '../../api'
@@ -114,7 +115,7 @@ export function FieldEditor({
               setDragging(null)
               setOver(null)
             }}
-            title="Arraste para reordenar"
+            title={t('Arraste para reordenar')}
             className="mt-2.5 cursor-grab text-faint active:cursor-grabbing"
           >
             <GripVertical className="size-4" />
@@ -127,7 +128,7 @@ export function FieldEditor({
 
           <div className="relative">
             <Input
-              aria-label="Nome do campo"
+              aria-label={t('Nome do campo')}
               className={cn((listed === field || primary === field) && 'pr-[74px]')}
               value={field.label}
               placeholder={fieldType(field.kind).label}
@@ -135,7 +136,7 @@ export function FieldEditor({
             />
             {(listed === field || primary === field) && (
               <span className="pointer-events-none absolute top-1/2 right-2 flex -translate-y-1/2 gap-1">
-                {primary === field ? <Mark primary>principal</Mark> : <Mark>na lista</Mark>}
+                {primary === field ? <Mark primary>{t('principal')}</Mark> : <Mark>{t('na lista')}</Mark>}
               </span>
             )}
           </div>
@@ -145,14 +146,14 @@ export function FieldEditor({
           <span className="mt-0.5">
             <MenuButton
               size="icon"
-              label={`Ações do campo ${field.label}`}
+              label={t('Ações do campo {label}', { label: field.label })}
               align="end"
               entries={[
                 ...(!isSecret(field)
                   ? [
                       {
                         kind: 'item' as const,
-                        label: 'Mostrar na lista',
+                        label: t('Mostrar na lista'),
                         icon: List,
                         checked: !!field.list,
                         onSelect: () => mark(index, 'list'),
@@ -163,7 +164,7 @@ export function FieldEditor({
                   ? [
                       {
                         kind: 'item' as const,
-                        label: 'Ação principal',
+                        label: t('Ação principal'),
                         icon: Star,
                         checked: !!field.primary,
                         onSelect: () => mark(index, 'primary'),
@@ -172,7 +173,7 @@ export function FieldEditor({
                   : []),
                 {
                   kind: 'sub',
-                  label: 'Trocar tipo',
+                  label: t('Trocar tipo'),
                   icon: Replace,
                   items: FIELD_TYPES.map((type) => ({
                     label: type.label,
@@ -181,7 +182,7 @@ export function FieldEditor({
                 },
                 {
                   kind: 'item',
-                  label: 'Duplicar',
+                  label: t('Duplicar'),
                   icon: CopyPlus,
                   onSelect: () =>
                     change(
@@ -192,7 +193,7 @@ export function FieldEditor({
                 { kind: 'separator' },
                 {
                   kind: 'item',
-                  label: 'Remover campo',
+                  label: t('Remover campo'),
                   icon: Trash2,
                   destructive: true,
                   onSelect: () =>
@@ -210,7 +211,7 @@ export function FieldEditor({
       {fields.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-4 py-6 text-center text-[13px] text-muted-foreground">
           <ListPlus className="size-5 text-faint" />
-          <span>Nenhum campo adicionado. Escolha um modelo acima ou adicione os campos necessários.</span>
+          <span>{t('Nenhum campo adicionado. Escolha um modelo acima ou adicione os campos necessários.')}</span>
           <AddField onAdd={(kind) => change([...fields, newField(kind)], [...keys.current, newKey()])} button />
         </div>
       ) : (
@@ -278,8 +279,8 @@ function ValueEditor({
       <div className="space-y-2">
         {field.kind === 'security_question' && (
           <Input
-            aria-label="Pergunta"
-            placeholder="Pergunta"
+            aria-label={t('Pergunta')}
+            placeholder={t('Pergunta')}
             value={extra.question ?? ''}
             onChange={(event) => setExtra('question', event.target.value)}
           />
@@ -318,12 +319,12 @@ function ValueEditor({
     return (
       <div className="space-y-2">
         <Input
-          aria-label="Pergunta"
-          placeholder="Pergunta"
+          aria-label={t('Pergunta')}
+          placeholder={t('Pergunta')}
           value={extra.question ?? ''}
           onChange={(event) => setExtra('question', event.target.value)}
         />
-        <SecretInput value={field.value} placeholder="Resposta" onChange={(value) => onChange({ value })} />
+        <SecretInput value={field.value} placeholder={t('Resposta')} onChange={(value) => onChange({ value })} />
       </div>
     )
   }
@@ -334,7 +335,7 @@ function ValueEditor({
         <div className="col-span-2">
           <SecretInput
             value={field.value}
-            placeholder="Número do cartão"
+            placeholder={t('Número do cartão')}
             mono
             onChange={(value) => onChange({ value })}
           />
@@ -371,10 +372,10 @@ function ValueEditor({
           onClick={() => setShowing(true)}
           className="flex min-h-20 w-full items-start justify-between rounded-[9px] border bg-field px-3 py-2 text-left text-sm text-muted-foreground"
         >
-          <span className="tracking-[0.2em]">{field.value ? '••••••••••••' : <span className="tracking-normal text-faint">Vazio</span>}</span>
+          <span className="tracking-[0.2em]">{field.value ? '••••••••••••' : <span className="tracking-normal text-faint">{t('Vazio')}</span>}</span>
           <span className="flex items-center gap-1 text-xs">
             <Eye className="size-3.5" />
-            Mostrar para editar
+            {t('Mostrar para editar')}
           </span>
         </button>
       )
@@ -383,7 +384,7 @@ function ValueEditor({
     return (
       <div className="relative">
         <Textarea
-          aria-label="Valor"
+          aria-label={t('Valor')}
           autoComplete="off"
           spellCheck={!type.secret}
           autoCorrect={type.secret ? 'off' : undefined}
@@ -398,7 +399,7 @@ function ValueEditor({
             variant="ghost"
             size="icon-sm"
             className="absolute top-1.5 right-1.5"
-            aria-label="Ocultar"
+            aria-label={t('Ocultar')}
             onClick={() => setShowing(false)}
           >
             <EyeOff />
@@ -421,12 +422,12 @@ function ValueEditor({
   }
 
   if (field.kind === 'date') {
-    return <DatePicker value={field.value} placeholder="dd/mm/aaaa" onChange={(value) => onChange({ value })} />
+    return <DatePicker value={field.value} placeholder={t('dd/mm/aaaa')} onChange={(value) => onChange({ value })} />
   }
 
   return (
     <Input
-      aria-label="Valor"
+      aria-label={t('Valor')}
       type={field.kind === 'email' ? 'email' : field.kind === 'phone' ? 'tel' : 'text'}
       inputMode={field.kind === 'phone' ? 'tel' : undefined}
       value={field.value}
@@ -461,18 +462,18 @@ function SealedValue({
               setBusy(true)
               onReveal()
                 .catch((cause) =>
-                  toast('Não foi possível revelar', cause instanceof ApiError ? cause.message : 'Tente de novo.', 'error'),
+                  toast(t('Não foi possível revelar'), cause instanceof ApiError ? cause.message : t('Tente de novo.'), 'error'),
                 )
                 .finally(() => setBusy(false))
             }}
           >
             <Eye />
-            Mostrar para editar
+            {t('Mostrar para editar')}
           </Button>
         )}
         <Button variant="ghost" size="sm" onClick={onReplace}>
           <Replace />
-          Substituir
+          {t('Substituir')}
         </Button>
       </span>
     </div>
@@ -499,7 +500,7 @@ function SecretInput({
   return (
     <div className="relative">
       <Input
-        aria-label={placeholder ?? 'Valor'}
+        aria-label={placeholder ?? t('Valor')}
         {...secretInputProps(showing, allow)}
         spellCheck={false}
         autoCorrect="off"
@@ -517,13 +518,13 @@ function SecretInput({
                 tooltip={false}
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Gerar senha"
+                aria-label={t('Gerar senha')}
                 onClick={() => setGenerating(true)}
               >
                 <WandSparkles />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Gerar senha</TooltipContent>
+            <TooltipContent>{t('Gerar senha')}</TooltipContent>
           </Tooltip>
         )}
         {generating && (
@@ -539,7 +540,7 @@ function SecretInput({
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={showing ? 'Ocultar' : 'Mostrar'}
+          aria-label={showing ? t('Ocultar') : t('Mostrar')}
           onClick={() => setShowing(!showing)}
         >
           {showing ? <EyeOff /> : <Eye />}
@@ -559,7 +560,7 @@ function TypeButton({ kind, onPick }: { kind: FieldKind; onPick: (kind: FieldKin
       <PopoverTrigger asChild>
         <button
           type="button"
-          title={`${fieldType(kind).label} (trocar o tipo)`}
+          title={t('{type} (trocar o tipo)', { type: fieldType(kind).label })}
           className="mt-0.5 grid size-8 place-items-center rounded-lg border bg-card text-muted-foreground hover:text-foreground"
         >
           <Icon className="size-[15px]" />
@@ -567,7 +568,7 @@ function TypeButton({ kind, onPick }: { kind: FieldKind; onPick: (kind: FieldKin
       </PopoverTrigger>
       <PopoverContent className="w-[560px] p-0">
         <TypeGrid
-          title="Trocar tipo"
+          title={t('Trocar tipo')}
           onPick={(picked) => {
             onPick(picked)
             setOpen(false)
@@ -587,7 +588,7 @@ function AddField({ onAdd, button }: { onAdd: (kind: FieldKind) => void; button?
         {button ? (
           <Button variant="outline" size="sm">
             <Plus />
-            Adicionar campo
+            {t('Adicionar campo')}
           </Button>
         ) : (
           <button
@@ -595,13 +596,13 @@ function AddField({ onAdd, button }: { onAdd: (kind: FieldKind) => void; button?
             className="flex h-11 w-full items-center gap-2 rounded-b-xl border-t px-5 text-sm font-medium text-muted-foreground hover:bg-hover hover:text-foreground"
           >
             <Plus className="size-4" />
-            Adicionar campo
+            {t('Adicionar campo')}
           </button>
         )}
       </PopoverTrigger>
       <PopoverContent className="w-[560px] p-0" align="start">
         <TypeGrid
-          title="Adicionar campo"
+          title={t('Adicionar campo')}
           onPick={(kind) => {
             onAdd(kind)
             setOpen(false)

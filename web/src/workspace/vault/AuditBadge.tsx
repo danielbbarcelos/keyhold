@@ -3,6 +3,7 @@ import { Loader2, RotateCw, ShieldOff } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { t } from '@/i18n'
 
 import { api, ApiError, type AuditSummary } from '../../api'
 
@@ -33,7 +34,7 @@ export function AuditBadge({
       const answer = await api.retryAudit(vaultId)
       onChange(answer.audit)
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível consultar a AWS.')
+      setError(cause instanceof ApiError ? cause.message : t('Não foi possível consultar a AWS.'))
     } finally {
       setBusy(false)
     }
@@ -47,11 +48,11 @@ export function AuditBadge({
           className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-amber-soft px-2.5 text-xs text-amber"
         >
           <ShieldOff className="size-3" />
-          sem trilha na AWS
+          {t('sem trilha na AWS')}
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[360px] space-y-3 text-sm">
-        <p className="font-medium">O que se faz neste cofre não fica registrado na AWS</p>
+        <p className="font-medium">{t('O que se faz neste cofre não fica registrado na AWS')}</p>
         <ul className="space-y-2 text-[13px] text-muted-foreground">
           {off.map((group) => (
             <li key={group.group}>
@@ -62,13 +63,13 @@ export function AuditBadge({
         </ul>
         <p className="text-[13px] text-muted-foreground">
           {audit.required
-            ? 'Este cofre exige a trilha: revelar, copiar, mover, excluir e compartilhar ficam bloqueados até ela existir.'
-            : 'O Keyhold funciona normalmente. Quem administra a conta resolve isso seguindo o docs/AWS.md do Keyhold.'}
+            ? t('Este cofre exige a trilha: revelar, copiar, mover, excluir e compartilhar ficam bloqueados até ela existir.')
+            : t('O Keyhold funciona normalmente. Quem administra a conta resolve isso seguindo o docs/AWS.md do Keyhold.')}
         </p>
         {error && <p className="text-[13px] text-rose">{error}</p>}
         <Button variant="outline" size="sm" disabled={busy} onClick={() => void retry()}>
           {busy ? <Loader2 className="animate-spin" /> : <RotateCw />}
-          Tentar de novo
+          {t('Tentar de novo')}
         </Button>
       </PopoverContent>
     </Popover>

@@ -1,3 +1,5 @@
+import { t } from '../i18n'
+
 /**
  * The colours a vault or folder can be marked with.
  *
@@ -19,12 +21,12 @@ export interface Colour {
 }
 
 export const COLOURS: Colour[] = [
-  { value: 'default', label: 'Padrão', dot: 'bg-stone', text: 'text-muted-foreground', tile: 'bg-stone-soft text-muted-foreground' },
-  { value: 'blue', label: 'Azul', dot: 'bg-sky', text: 'text-sky', tile: 'bg-sky-soft text-sky' },
-  { value: 'green', label: 'Verde', dot: 'bg-mint', text: 'text-mint', tile: 'bg-mint-soft text-mint' },
-  { value: 'amber', label: 'Âmbar', dot: 'bg-amber', text: 'text-amber', tile: 'bg-amber-soft text-amber' },
-  { value: 'red', label: 'Vermelho', dot: 'bg-rose', text: 'text-rose', tile: 'bg-rose-soft text-rose' },
-  { value: 'violet', label: 'Violeta', dot: 'bg-lilac', text: 'text-lilac', tile: 'bg-lilac-soft text-lilac' },
+  { value: 'default', get label() { return t('Padrão') }, dot: 'bg-stone', text: 'text-muted-foreground', tile: 'bg-stone-soft text-muted-foreground' },
+  { value: 'blue', get label() { return t('Azul') }, dot: 'bg-sky', text: 'text-sky', tile: 'bg-sky-soft text-sky' },
+  { value: 'green', get label() { return t('Verde') }, dot: 'bg-mint', text: 'text-mint', tile: 'bg-mint-soft text-mint' },
+  { value: 'amber', get label() { return t('Âmbar') }, dot: 'bg-amber', text: 'text-amber', tile: 'bg-amber-soft text-amber' },
+  { value: 'red', get label() { return t('Vermelho') }, dot: 'bg-rose', text: 'text-rose', tile: 'bg-rose-soft text-rose' },
+  { value: 'violet', get label() { return t('Violeta') }, dot: 'bg-lilac', text: 'text-lilac', tile: 'bg-lilac-soft text-lilac' },
 ]
 
 /** Anything unknown — including the `brand` written by earlier versions — reads as the default. */

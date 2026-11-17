@@ -2,7 +2,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { App } from './App'
-import { adoptSession } from './session'
+import { browserLang, fromTag, setLang } from './i18n'
+import { adoptSession, savedLanguage } from './session'
 import './index.css'
 
 
@@ -19,6 +20,10 @@ if (!root) {
 // Before anything renders: trade the code in the address for the session cookie, and learn whether
 // this tab has a session at all. Every screen depends on the answer.
 void adoptSession().then(() => {
+  // The language before the first word is drawn: this Keyhold's choice, or the browser's until
+  // somebody makes one (not saved here; the first screen does that).
+  setLang(fromTag(savedLanguage()) ?? browserLang())
+
   createRoot(root).render(
     <StrictMode>
       <App />

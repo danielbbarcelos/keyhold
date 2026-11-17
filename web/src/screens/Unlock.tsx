@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { PasswordInput } from '@/components/common/PasswordInput'
 
 import { api, ApiError, type Status } from '../api'
+import { t } from '../i18n'
 import { LogoLockup } from '../workspace/Logo'
 
 /**
@@ -41,7 +42,7 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
       )
       onUnlocked()
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
+      setError(cause instanceof ApiError ? cause.message : t('O Keyhold não respondeu. Tente novamente.'))
       setPassword('')
       setCode('')
     } finally {
@@ -57,21 +58,21 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
       >
         <LogoLockup className="h-[52px] w-auto self-start" />
 
-        <h1 className="mt-5 text-[22px] font-semibold tracking-tight">Destrancar o Keyhold</h1>
+        <h1 className="mt-5 text-[22px] font-semibold tracking-tight">{t('Destrancar o Keyhold')}</h1>
         <p className="mt-1 mb-6 text-sm text-muted-foreground">
           {usingRecovery
-            ? 'Digite a chave de recuperação anotada ao criar o cofre.'
+            ? t('Digite a chave de recuperação anotada ao criar o cofre.')
             : needsPassword
-              ? 'Digite a senha-mestra para abrir os cofres.'
-              : 'Este cofre não usa senha-mestra. Ele abre com a chave armazenada nesta máquina.'}
+              ? t('Digite a senha-mestra para abrir os cofres.')
+              : t('Este cofre não usa senha-mestra. Ele abre com a chave armazenada nesta máquina.')}
         </p>
 
         <div className="w-full space-y-3 text-left">
           {needsPassword && !usingRecovery && (
             <PasswordInput
               id="password"
-              aria-label="Senha-mestra"
-              placeholder="Senha-mestra"
+              aria-label={t('Senha-mestra')}
+              placeholder={t('Senha-mestra')}
               className="h-10"
               value={password}
               autoFocus
@@ -82,8 +83,8 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
           {usingRecovery && (
             <Input
               id="recovery"
-              aria-label="Chave de recuperação"
-              placeholder="Chave de recuperação"
+              aria-label={t('Chave de recuperação')}
+              placeholder={t('Chave de recuperação')}
               className="h-10"
               value={recovery}
               autoFocus
@@ -93,7 +94,7 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
 
           {needsCode && (
             <div className="space-y-2">
-              <Label htmlFor="code">Código do app autenticador</Label>
+              <Label htmlFor="code">{t('Código do app autenticador')}</Label>
               <Input
                 id="code"
                 value={code}
@@ -110,14 +111,16 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
           {status.attemptsLeft <= 2 && (
             <p className="text-sm text-muted-foreground">
               {status.attemptsLeft > 0
-                ? `Restam ${status.attemptsLeft} tentativas antes de o Keyhold parar de responder.`
-                : 'Feche e abra o Keyhold novamente para tentar outra vez.'}
+                ? status.attemptsLeft === 1
+                  ? t('Resta 1 tentativa antes de o Keyhold parar de responder.')
+                  : t('Restam {n} tentativas antes de o Keyhold parar de responder.', { n: status.attemptsLeft })
+                : t('Feche e abra o Keyhold novamente para tentar outra vez.')}
             </p>
           )}
 
           <Button type="submit" size="lg" className="h-10 w-full" disabled={busy}>
             {busy && <Loader2 className="animate-spin" />}
-            Destrancar
+            {t('Destrancar')}
           </Button>
         </div>
 
@@ -130,7 +133,7 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
               setError('')
             }}
           >
-            {usingRecovery ? 'Usar a senha-mestra' : 'Perdi a senha-mestra'}
+            {usingRecovery ? t('Usar a senha-mestra') : t('Perdi a senha-mestra')}
           </button>
         )}
       </form>

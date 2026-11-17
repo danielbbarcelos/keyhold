@@ -1,3 +1,5 @@
+import { locale, t } from '@/i18n'
+
 import type { FolderNode } from '../../api'
 
 /** The folders from the root down to `folderId`, inclusive. */
@@ -28,21 +30,21 @@ export function when(iso: string | null | undefined): string {
 
   const at = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : `${iso}Z`)
   const seconds = Math.round((Date.now() - at.getTime()) / 1000)
-  const time = at.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const time = at.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
 
-  if (seconds < 60) return 'agora'
-  if (seconds < 3600) return `há ${Math.floor(seconds / 60)} min`
+  if (seconds < 60) return t('agora')
+  if (seconds < 3600) return t('há {n} min', { n: Math.floor(seconds / 60) })
 
   const today = new Date()
   const sameDay = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 
-  if (sameDay(at, today)) return `hoje, ${time}`
+  if (sameDay(at, today)) return t('hoje, {time}', { time })
 
   const yesterday = new Date(today)
   yesterday.setDate(today.getDate() - 1)
 
-  if (sameDay(at, yesterday)) return `ontem, ${time}`
+  if (sameDay(at, yesterday)) return t('ontem, {time}', { time })
 
-  return at.toLocaleDateString('pt-BR')
+  return at.toLocaleDateString(locale())
 }

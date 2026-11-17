@@ -6,6 +6,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
+import { t } from '@/i18n'
 
 import type { RecordPreview, VaultSummary } from '../api'
 import { RecordTile } from './icons'
@@ -36,13 +37,13 @@ export function CommandPalette({ records, vaults, open, onOpenChange, onPick }: 
     <CommandDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Buscar em todos os registros"
-      description="Busca pelo título, pela linha de identificação e pelo endereço."
+      title={t('Buscar em todos os registros')}
+      description={t('Busca pelo título, pela linha de identificação e pelo endereço.')}
     >
       <Command>
-        <CommandInput placeholder="Buscar em todos os registros…" />
+        <CommandInput placeholder={t('Buscar em todos os registros…')} />
         <CommandList>
-          <CommandEmpty>Nenhum registro encontrado.</CommandEmpty>
+          <CommandEmpty>{t('Nenhum registro encontrado.')}</CommandEmpty>
 
           {records.map((record) => (
             <CommandItem

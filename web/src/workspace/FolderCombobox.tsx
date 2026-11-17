@@ -4,6 +4,7 @@ import { Check, ChevronsUpDown, Folder, FolderRoot } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 import type { FolderNode } from '../api'
@@ -19,8 +20,8 @@ export function FolderCombobox({
   folders,
   value,
   onChange,
-  rootLabel = 'Raiz do cofre',
-  label = 'Pasta',
+  rootLabel: rootLabelProp,
+  label: labelProp,
   className,
 }: {
   folders: FolderNode[]
@@ -32,6 +33,8 @@ export function FolderCombobox({
   className?: string
 }) {
   const [open, setOpen] = useState(false)
+  const rootLabel = rootLabelProp ?? t('Raiz do cofre')
+  const label = labelProp ?? t('Pasta')
   const paths = pathsOf(folders)
   const current = value === null ? rootLabel : (paths.get(value) ?? rootLabel)
 
@@ -58,9 +61,9 @@ export function FolderCombobox({
 
       <PopoverContent className="w-(--radix-popover-trigger-width) min-w-[260px] p-0" align="start">
         <Command>
-          <CommandInput placeholder="Buscar pasta" />
+          <CommandInput placeholder={t('Buscar pasta')} />
           <CommandList>
-            <CommandEmpty>Nenhuma pasta com esse nome.</CommandEmpty>
+            <CommandEmpty>{t('Nenhuma pasta com esse nome.')}</CommandEmpty>
             <CommandItem value={rootLabel} onSelect={() => pick(null)}>
               <FolderRoot className="size-4 text-muted-foreground" />
               <span className="flex-1 truncate">{rootLabel}</span>

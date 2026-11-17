@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { t } from '@/i18n'
 
 import { AwsNameField, nameProblem, suggestName, titleProblem } from './awsName'
 import { ColourPicker } from './ColourPicker'
@@ -39,7 +40,7 @@ export function NameDialog({
   title,
   hint,
   initial = '',
-  confirmLabel = 'Criar',
+  confirmLabel,
   withColour = false,
   awsParent,
   onConfirm,
@@ -50,7 +51,7 @@ export function NameDialog({
   const aws = awsParent !== undefined
   const [typed, setTyped] = useState<string | null>(null)
   const segment = typed ?? suggestName(name, 'pasta')
-  const wrong = aws ? titleProblem(name, 'O nome da pasta') ?? (name.trim() ? nameProblem(awsParent ?? null, segment) : null) : null
+  const wrong = aws ? titleProblem(name, 'folder') ?? (name.trim() ? nameProblem(awsParent ?? null, segment) : null) : null
 
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
@@ -76,7 +77,7 @@ export function NameDialog({
               aria-invalid={aws ? titleProblem(name) !== null : undefined}
               onChange={(event) => setName(event.target.value)}
             />
-            {aws && titleProblem(name) && <p className="-mt-2 text-xs text-destructive">{titleProblem(name, 'O nome da pasta')}</p>}
+            {aws && titleProblem(name) && <p className="-mt-2 text-xs text-destructive">{titleProblem(name, 'folder')}</p>}
             {aws && name.trim() && !titleProblem(name) && (
               <div className="-mt-2">
                 <AwsNameField parent={awsParent ?? null} from={name} value={typed} onChange={setTyped} fallback="pasta" />
@@ -87,10 +88,10 @@ export function NameDialog({
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onCancel}>
-              Cancelar
+              {t('Cancelar')}
             </Button>
             <Button type="submit" disabled={!name.trim() || wrong !== null}>
-              {confirmLabel}
+              {confirmLabel ?? t('Criar')}
             </Button>
           </DialogFooter>
         </form>

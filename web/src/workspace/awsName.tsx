@@ -2,6 +2,8 @@ import { useState } from 'react'
 
 import { Input } from '@/components/ui/input'
 
+import { t } from '../i18n'
+
 /**
  * Parameter Store names, said before anything is sent.
  *
@@ -35,13 +37,13 @@ export function suggestName(text: string, fallback = 'registro'): string {
 
 /** Why AWS would refuse this one segment, in words, or `null` when it would take it. */
 export function segmentProblem(segment: string): string | null {
-  if (!segment) return 'O nome não pode ficar vazio.'
+  if (!segment) return t('O nome não pode ficar vazio.')
 
   const bad = [...segment].find((c) => !/[A-Za-z0-9._-]/.test(c))
-  if (bad === ' ') return 'A AWS não aceita espaço. Use - ou _.'
-  if (bad === '/') return 'A barra separa pastas. Informe apenas um nome.'
-  if (bad) return `A AWS não aceita “${bad}”. Use apenas letras sem acento, números, ponto, hífen e sublinhado.`
-  if (segment === '.keep') return 'Esse nome é reservado para as pastas.'
+  if (bad === ' ') return t('A AWS não aceita espaço. Use - ou _.')
+  if (bad === '/') return t('A barra separa pastas. Informe apenas um nome.')
+  if (bad) return t('A AWS não aceita “{char}”. Use apenas letras sem acento, números, ponto, hífen e sublinhado.', { char: bad })
+  if (segment === '.keep') return t('Esse nome é reservado para as pastas.')
 
   return null
 }
@@ -53,16 +55,25 @@ export function nameProblem(parent: string | null, leaf: string): string | null 
 
   const full = join(parent, leaf)
   const first = full.split('/')[1]?.toLowerCase() ?? ''
-  if (first.startsWith('aws') || first.startsWith('ssm')) return 'A AWS reserva nomes que começam com aws ou ssm.'
-  if (full.split('/').length - 1 > 15) return 'A AWS aceita no máximo 15 níveis de pasta.'
-  if (full.length > 1011) return 'O nome ultrapassa 1011 caracteres.'
+  if (first.startsWith('aws') || first.startsWith('ssm')) return t('A AWS reserva nomes que começam com aws ou ssm.')
+  if (full.split('/').length - 1 > 15) return t('A AWS aceita no máximo 15 níveis de pasta.')
+  if (full.length > 1011) return t('O nome ultrapassa 1011 caracteres.')
 
   return null
 }
 
-/** A title or a folder name: anything at all, except the `/` that would read as one more folder. */
-export function titleProblem(title: string, what = 'O título'): string | null {
-  return title.includes('/') ? `${what} não pode conter “/”, pois na AWS a barra cria mais uma pasta.` : null
+/**
+ * A title or a folder name: anything at all, except the `/` that would read as one more folder.
+ * `what` says which: `'title'` (the default) for a title, anything else for a folder's name (callers
+ * that still pass a Portuguese phrase for the folder land there too). Each is its own sentence, so
+ * it translates.
+ */
+export function titleProblem(title: string, what: 'title' | 'folder' | string = 'title'): string | null {
+  if (!title.includes('/')) return null
+
+  return what === 'title'
+    ? t('O título não pode conter “/”, pois na AWS a barra cria mais uma pasta.')
+    : t('O nome da pasta não pode conter “/”, pois na AWS a barra cria mais uma pasta.')
 }
 
 export function join(parent: string | null, leaf: string): string {
@@ -119,7 +130,7 @@ export function AwsNameField({
       // five folders deep is still one readable line or two, never a field pushed off the dialog.
       <span className="flex min-w-0 items-start gap-3 text-xs text-faint">
         <span className="min-w-0 flex-1 break-all">
-          Na AWS: <code className="font-mono text-muted-foreground">{join(parent, leaf)}</code>
+          {t('Na AWS:')} <code className="font-mono text-muted-foreground">{join(parent, leaf)}</code>
         </span>
         <button
           type="button"
@@ -129,7 +140,7 @@ export function AwsNameField({
             onChange(leaf)
           }}
         >
-          Editar nome
+          {t('Editar nome')}
         </button>
       </span>
     )
@@ -143,13 +154,13 @@ export function AwsNameField({
           className="h-8 font-mono text-[13px]"
           value={leaf}
           aria-invalid={problem !== null}
-          aria-label="Nome na AWS"
+          aria-label={t('Nome na AWS')}
           spellCheck={false}
           onChange={(event) => onChange(event.target.value)}
         />
       </span>
       <span className="flex flex-wrap items-center gap-x-2 text-xs">
-        {problem ? <span className="text-destructive">{problem}</span> : <span className="text-faint">Letras sem acento, números, . - _</span>}
+        {problem ? <span className="text-destructive">{problem}</span> : <span className="text-faint">{t('Letras sem acento, números, . - _')}</span>}
         <button
           type="button"
           className="text-primary hover:underline"
@@ -158,7 +169,7 @@ export function AwsNameField({
             onChange(null)
           }}
         >
-          Usar o nome sugerido
+          {t('Usar o nome sugerido')}
         </button>
       </span>
     </span>

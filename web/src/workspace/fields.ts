@@ -19,6 +19,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 
 import type { Field, FieldKind, Payload } from '../api'
+import { t } from '../i18n'
 
 /**
  * The fifteen kinds of field a record can hold.
@@ -41,30 +42,30 @@ export interface FieldType {
 }
 
 export const FIELD_TYPES: FieldType[] = [
-  { kind: 'text', label: 'Texto', icon: Type, secret: false },
-  { kind: 'multiline', label: 'Texto de várias linhas', icon: AlignLeft, secret: false, multiline: true },
-  { kind: 'multiline_hidden', label: 'Várias linhas oculto', icon: FileLock, secret: true, multiline: true },
-  { kind: 'hidden', label: 'Campo oculto', icon: EyeOff, secret: true },
-  { kind: 'password', label: 'Senha', icon: KeyRound, secret: true, generated: true },
-  { kind: 'pin', label: 'Código PIN', icon: Grid3x3, secret: true, placeholder: '0000' },
+  { kind: 'text', get label() { return t('Texto') }, icon: Type, secret: false },
+  { kind: 'multiline', get label() { return t('Texto de várias linhas') }, icon: AlignLeft, secret: false, multiline: true },
+  { kind: 'multiline_hidden', get label() { return t('Várias linhas oculto') }, icon: FileLock, secret: true, multiline: true },
+  { kind: 'hidden', get label() { return t('Campo oculto') }, icon: EyeOff, secret: true },
+  { kind: 'password', get label() { return t('Senha') }, icon: KeyRound, secret: true, generated: true },
+  { kind: 'pin', get label() { return t('Código PIN') }, icon: Grid3x3, secret: true, placeholder: '0000' },
   {
     kind: 'totp',
-    label: 'Código 2FA',
+    get label() { return t('Código 2FA') },
     icon: ShieldCheck,
     secret: true,
-    placeholder: 'Segredo ou endereço otpauth://',
+    get placeholder() { return t('Segredo ou endereço otpauth://') },
   },
-  { kind: 'email', label: 'E-mail', icon: Mail, secret: false, placeholder: 'nome@exemplo.com' },
-  { kind: 'name', label: 'Nome', icon: User, secret: false },
-  { kind: 'phone', label: 'Telefone', icon: Phone, secret: false, placeholder: '+55 11 90000-0000' },
-  { kind: 'url', label: 'Endereço web', icon: Globe, secret: false, placeholder: 'exemplo.com' },
-  { kind: 'address', label: 'Endereço', icon: MapPin, secret: false, multiline: true },
-  { kind: 'date', label: 'Data', icon: Calendar, secret: false },
-  { kind: 'security_question', label: 'Pergunta e resposta', icon: ShieldQuestion, secret: true },
-  { kind: 'card', label: 'Cartão de pagamento', icon: CreditCard, secret: true },
+  { kind: 'email', get label() { return t('E-mail') }, icon: Mail, secret: false, get placeholder() { return t('nome@exemplo.com') } },
+  { kind: 'name', get label() { return t('Nome') }, icon: User, secret: false },
+  { kind: 'phone', get label() { return t('Telefone') }, icon: Phone, secret: false, placeholder: '+55 11 90000-0000' },
+  { kind: 'url', get label() { return t('Endereço web') }, icon: Globe, secret: false, get placeholder() { return t('exemplo.com') } },
+  { kind: 'address', get label() { return t('Endereço') }, icon: MapPin, secret: false, multiline: true },
+  { kind: 'date', get label() { return t('Data') }, icon: Calendar, secret: false },
+  { kind: 'security_question', get label() { return t('Pergunta e resposta') }, icon: ShieldQuestion, secret: true },
+  { kind: 'card', get label() { return t('Cartão de pagamento') }, icon: CreditCard, secret: true },
 ]
 
-const FALLBACK: FieldType = { kind: 'text', label: 'Texto', icon: AtSign, secret: false }
+const FALLBACK: FieldType = { kind: 'text', get label() { return t('Texto') }, icon: AtSign, secret: false }
 
 export function fieldType(kind: string): FieldType {
   return FIELD_TYPES.find((type) => type.kind === kind) ?? { ...FALLBACK, kind: kind as FieldKind }
@@ -79,11 +80,11 @@ export function newField(kind: FieldKind): Field {
   const type = fieldType(kind)
   const label =
     kind === 'security_question'
-      ? 'Pergunta de segurança'
+      ? t('Pergunta de segurança')
       : kind === 'card'
-        ? 'Cartão'
+        ? t('Cartão')
         : kind === 'multiline_hidden'
-          ? 'Texto oculto'
+          ? t('Texto oculto')
           : type.label
 
   return { label, kind, value: '', ...(hasParts(kind) ? { extra: {} } : {}) }
@@ -95,10 +96,10 @@ export function hasParts(kind: string): boolean {
 }
 
 export const CARD_PARTS: Array<{ key: string; label: string; secret: boolean; placeholder?: string }> = [
-  { key: 'holder', label: 'Nome no cartão', secret: false },
-  { key: 'expiry', label: 'Validade', secret: false, placeholder: 'MM/AA' },
-  { key: 'code', label: 'Código de segurança', secret: true, placeholder: 'CVV' },
-  { key: 'pin', label: 'PIN', secret: true },
+  { key: 'holder', get label() { return t('Nome no cartão') }, secret: false },
+  { key: 'expiry', get label() { return t('Validade') }, secret: false, get placeholder() { return t('MM/AA') } },
+  { key: 'code', get label() { return t('Código de segurança') }, secret: true, placeholder: 'CVV' },
+  { key: 'pin', get label() { return t('PIN') }, secret: true },
 ]
 
 /**

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
 import type { RecordIcon } from '../api'
+import { t } from '../i18n'
 import { addIcon, useCustom } from './custom'
 import { ICON_COLOURS, ICONS, iconOf, RecordTile } from './icons'
 import { toast, toastError } from './toast'
@@ -31,10 +32,10 @@ export function IconPicker({
   icon,
   kind,
   onChange,
-  label = 'Trocar ícone',
+  label = t('Trocar ícone'),
   trigger,
   onClear,
-  clearLabel = 'Voltar ao padrão',
+  clearLabel = t('Voltar ao padrão'),
 }: {
   icon: RecordIcon | null | undefined
   kind?: string
@@ -64,9 +65,9 @@ export function IconPicker({
   const hasPicture = Boolean(shown.image || fromLibrary)
   const kept = !shown.image || fromLibrary !== undefined
 
-  async function usePicture(blob: Blob | null | undefined, name = 'Imagem colada') {
+  async function usePicture(blob: Blob | null | undefined, name = t('Imagem colada')) {
     if (!blob || !blob.type.startsWith('image/')) {
-      toast('O arquivo não é uma imagem', 'Use PNG, JPEG, WebP ou SVG.', 'error')
+      toast(t('O arquivo não é uma imagem'), t('Use PNG, JPEG, WebP ou SVG.'), 'error')
 
       return
     }
@@ -76,13 +77,13 @@ export function IconPicker({
       setTab('custom')
       // Kept for the next record that needs it. A failure here costs the reuse, not the icon.
       const kept = await addIcon(name.replace(/\.[a-z0-9]+$/i, ''), image).catch((cause) => {
-        toastError(cause, 'O ícone foi aplicado, mas não foi guardado na biblioteca')
+        toastError(cause, t('O ícone foi aplicado, mas não foi guardado na biblioteca'))
 
         return null
       })
       onChange({ name: shown.name, colour: shown.colour, image, ...(kept ? { ref: kept.id } : {}) })
     } catch {
-      toast('Não foi possível usar a imagem', 'Tente outra imagem ou um arquivo menor.', 'error')
+      toast(t('Não foi possível usar a imagem'), t('Tente outra imagem ou um arquivo menor.'), 'error')
     }
   }
 
@@ -111,11 +112,11 @@ export function IconPicker({
           }
         }}
       >
-        <div role="tablist" aria-label="Origem do ícone" className="flex gap-1 border-b px-2.5 pt-2.5">
+        <div role="tablist" aria-label={t('Origem do ícone')} className="flex gap-1 border-b px-2.5 pt-2.5">
           {(
             [
-              ['system', 'Do sistema'],
-              ['custom', `Personalizados${library.length ? ` (${library.length})` : ''}`],
+              ['system', t('Do sistema')],
+              ['custom', library.length ? t('Personalizados ({n})', { n: library.length }) : t('Personalizados')],
             ] as const
           ).map(([id, text]) => (
             <button
@@ -142,7 +143,7 @@ export function IconPicker({
           <Input
             autoFocus
             className="h-[34px] pl-9"
-            placeholder={tab === 'system' ? 'Buscar ícone' : 'Buscar na sua biblioteca'}
+            placeholder={tab === 'system' ? t('Buscar ícone') : t('Buscar na sua biblioteca')}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -167,11 +168,11 @@ export function IconPicker({
                 </button>
               ))}
               {found.length === 0 && (
-                <p className="col-span-9 py-3 text-center text-xs text-faint">Nenhum ícone com esse nome.</p>
+                <p className="col-span-9 py-3 text-center text-xs text-faint">{t('Nenhum ícone com esse nome.')}</p>
               )}
             </div>
 
-            <div className="border-t px-4 pt-2.5 text-xs text-faint">Cor</div>
+            <div className="border-t px-4 pt-2.5 text-xs text-faint">{t('Cor')}</div>
             <div className="grid grid-cols-7 justify-items-center gap-y-2 px-3.5 pt-2 pb-3.5">
               {ICON_COLOURS.map((colour) => (
                 <button
@@ -210,8 +211,8 @@ export function IconPicker({
               {mine.length === 0 && (
                 <p className="col-span-6 py-4 text-center text-xs text-faint">
                   {library.length === 0
-                    ? 'Sua biblioteca está vazia. Adicione uma imagem para usar em vários registros.'
-                    : 'Nenhum ícone com esse nome.'}
+                    ? t('Sua biblioteca está vazia. Adicione uma imagem para usar em vários registros.')
+                    : t('Nenhum ícone com esse nome.')}
                 </p>
               )}
             </div>
@@ -237,8 +238,8 @@ export function IconPicker({
                 )}
               >
                 <ImageUp className="size-[18px] text-faint" />
-                <b className="text-[13px] font-semibold text-foreground">Adicionar imagem</b>
-                Arraste, cole ou escolha um arquivo. Ela fica na sua biblioteca.
+                <b className="text-[13px] font-semibold text-foreground">{t('Adicionar imagem')}</b>
+                {t('Arraste, cole ou escolha um arquivo. Ela fica na sua biblioteca.')}
               </button>
 
               <input
@@ -262,20 +263,20 @@ export function IconPicker({
               <Row
                 icon={BookmarkPlus}
                 onClick={() =>
-                  void addIcon('Sem nome', shown.image!)
+                  void addIcon(t('Sem nome'), shown.image!)
                     .then((kept) => {
                       onChange({ ...shown, ref: kept.id })
-                      toast('Ícone guardado na biblioteca')
+                      toast(t('Ícone guardado na biblioteca'))
                     })
-                    .catch((cause) => toastError(cause, 'Não foi possível guardar o ícone'))
+                    .catch((cause) => toastError(cause, t('Não foi possível guardar o ícone')))
                 }
               >
-                Guardar esta imagem na biblioteca
+                {t('Guardar esta imagem na biblioteca')}
               </Row>
             )}
             {hasPicture && (
               <Row icon={Trash2} onClick={() => onChange({ name: shown.name, colour: shown.colour })}>
-                Remover a imagem e voltar ao ícone
+                {t('Remover a imagem e voltar ao ícone')}
               </Row>
             )}
             {onClear && icon && (icon.image || icon.name) && (
@@ -296,7 +297,7 @@ export function IconPicker({
                   goCustomise('icones')
                 }}
               >
-                Gerenciar a biblioteca
+                {t('Gerenciar a biblioteca')}
               </Row>
             )}
           </div>

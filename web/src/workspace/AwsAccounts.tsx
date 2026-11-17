@@ -17,6 +17,7 @@ import { Combobox } from '@/components/common/Combobox'
 import { cn } from '@/lib/utils'
 
 import { api, type AwsConnection, type AwsLogin, type DeviceLogin, type VaultSummary } from '../api'
+import { locale, t } from '../i18n'
 import { AwsMark } from './AwsMark'
 import { toast, toastError } from './toast'
 
@@ -45,7 +46,7 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
       announceAwsChange()
     } catch (cause) {
       setLogins([])
-      setFailed(cause instanceof Error ? cause.message : 'Não foi possível carregar as contas AWS.')
+      setFailed(cause instanceof Error ? cause.message : t('Não foi possível carregar as contas AWS.'))
     }
   }, [])
 
@@ -57,27 +58,27 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
       if (answer.device) {
         setDevice({ login: answer.login, device: answer.device })
       } else {
-        toast('Sessão renovada', login.label || login.start_url)
+        toast(t('Sessão renovada'), login.label || login.start_url)
         void refresh()
       }
     } catch (cause) {
-      toastError(cause, 'Não foi possível renovar a sessão')
+      toastError(cause, t('Não foi possível renovar a sessão'))
     }
   }
 
-  const vaultName = (id: string) => vaults.find((vault) => vault.id === id)?.name ?? 'um cofre'
+  const vaultName = (id: string) => vaults.find((vault) => vault.id === id)?.name ?? t('um cofre')
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          Contas AWS
-          <span className="rounded-full bg-sky-soft px-2 py-px text-[11px] font-medium text-sky">novo</span>
+          {t('Contas AWS')}
+          <span className="rounded-full bg-sky-soft px-2 py-px text-[11px] font-medium text-sky">{t('novo')}</span>
         </CardTitle>
         <CardDescription>
-          Para cofres armazenados no AWS Parameter Store. O login é feito pelo SSO do IAM Identity Center,
-          no próprio Keyhold. A sessão fica apenas na memória e é encerrada quando o Keyhold é fechado ou
-          trancado. Apenas o conteúdo de um cofre AWS sai desta máquina, e somente para a conta dele.
+          {t(
+            'Para cofres armazenados no AWS Parameter Store. O login é feito pelo SSO do IAM Identity Center, no próprio Keyhold. A sessão fica apenas na memória e é encerrada quando o Keyhold é fechado ou trancado. Apenas o conteúdo de um cofre AWS sai desta máquina, e somente para a conta dele.',
+          )}
         </CardDescription>
       </CardHeader>
 
@@ -105,13 +106,15 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
                 >
                   {login.connected
                     ? login.expires_at
-                      ? `Conectado até ${new Date(login.expires_at * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
-                      : 'Conectado'
-                    : 'Desconectado'}
+                      ? t('Conectado até {time}', {
+                          time: new Date(login.expires_at * 1000).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }),
+                        })
+                      : t('Conectado')
+                    : t('Desconectado')}
                 </span>
                 <Button variant="outline" size="sm" onClick={() => void renew(login)}>
                   <RefreshCw />
-                  Renovar
+                  {t('Renovar')}
                 </Button>
                 {login.connected && (
                   <Button
@@ -121,26 +124,26 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
                       void api
                         .revokeAwsLogin(login.id)
                         .then(() => {
-                          toast('Sessão revogada', 'O SSO foi desconectado. As contas continuam listadas.')
+                          toast(t('Sessão revogada'), t('O SSO foi desconectado. As contas continuam listadas.'))
                           void refresh()
                         })
-                        .catch((cause) => toastError(cause, 'Não foi possível revogar a sessão'))
+                        .catch((cause) => toastError(cause, t('Não foi possível revogar a sessão')))
                     }
                   >
                     <LogOut />
-                    Revogar
+                    {t('Revogar')}
                   </Button>
                 )}
                 {mine.length === 0 && (
                   <Button
                     variant="ghost"
                     size="icon"
-                    aria-label="Remover login"
+                    aria-label={t('Remover login')}
                     onClick={() =>
                       void api
                         .removeAwsLogin(login.id)
                         .then(refresh)
-                        .catch((cause) => toastError(cause, 'Não foi possível remover o login'))
+                        .catch((cause) => toastError(cause, t('Não foi possível remover o login')))
                     }
                   >
                     <Trash2 />
@@ -153,27 +156,30 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
                   <span className="min-w-0 flex-1">
                     <b className="block truncate font-medium">{connection.title || `${connection.account_id} / ${connection.role}`}</b>
                     <span className="block truncate text-xs text-faint">
-                      {connection.account_name ? `${connection.account_name}, ` : ''}
-                      {connection.account_id}, papel {connection.role}
-                      {connection.used_by.length > 0 &&
-                        `, usado por ${connection.used_by.map(vaultName).join(', ')}`}
+                      {[
+                        connection.account_name,
+                        t('{account}, papel {role}', { account: connection.account_id, role: connection.role }),
+                        connection.used_by.length > 0 && t('usado por {vaults}', { vaults: connection.used_by.map(vaultName).join(', ') }),
+                      ]
+                        .filter(Boolean)
+                        .join(', ')}
                     </span>
                     {connection.note && <span className="block truncate text-xs text-muted-foreground">{connection.note}</span>}
                   </span>
-                  <Button variant="ghost" size="icon" aria-label="Editar conta" onClick={() => setEditing(connection)}>
+                  <Button variant="ghost" size="icon" aria-label={t('Editar conta')} onClick={() => setEditing(connection)}>
                     <Pencil />
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon"
-                    aria-label="Remover conta"
+                    aria-label={t('Remover conta')}
                     disabled={connection.used_by.length > 0}
-                    title={connection.used_by.length > 0 ? 'Conta em uso por um cofre' : 'Remover conta'}
+                    title={connection.used_by.length > 0 ? t('Conta em uso por um cofre') : t('Remover conta')}
                     onClick={() =>
                       void api
                         .removeAwsConnection(connection.id)
                         .then(refresh)
-                        .catch((cause) => toastError(cause, 'Não foi possível remover a conta'))
+                        .catch((cause) => toastError(cause, t('Não foi possível remover a conta')))
                     }
                   >
                     <Trash2 />
@@ -188,19 +194,19 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
                 className="flex h-10 w-full items-center gap-2 border-t px-4 text-sm font-medium text-muted-foreground hover:bg-hover hover:text-foreground disabled:opacity-50"
               >
                 <Plus className="size-4" />
-                {login.connected ? 'Adicionar conta deste login' : 'Renove a sessão para adicionar contas'}
+                {login.connected ? t('Adicionar conta deste login') : t('Renove a sessão para adicionar contas')}
               </button>
             </div>
           )
         })}
 
         {logins?.length === 0 && !failed && (
-          <p className="text-sm text-faint">Nenhum login SSO adicionado.</p>
+          <p className="text-sm text-faint">{t('Nenhum login SSO adicionado.')}</p>
         )}
 
         <Button variant="outline" onClick={() => setAdding(true)}>
           <Plus />
-          Adicionar login SSO
+          {t('Adicionar login SSO')}
         </Button>
       </CardContent>
 
@@ -220,7 +226,7 @@ export function AwsAccounts({ vaults }: { vaults: VaultSummary[] }) {
           device={device.device}
           onDone={() => {
             setDevice(null)
-            toast('Login SSO conectado', device.login.label || device.login.start_url)
+            toast(t('Login SSO conectado'), device.login.label || device.login.start_url)
             void refresh()
           }}
           onCancel={() => {
@@ -272,30 +278,30 @@ function NewLoginDialog({
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Adicionar login SSO</DialogTitle>
+          <DialogTitle>{t('Adicionar login SSO')}</DialogTitle>
           <DialogDescription>
-            O endereço de acesso do IAM Identity Center (o “AWS access portal”) e a região onde ele foi criado.
+            {t('O endereço de acesso do IAM Identity Center (o “AWS access portal”) e a região onde ele foi criado.')}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <label className="grid gap-1.5">
-            <span className="text-[13px] font-medium">Endereço do portal</span>
-            <Input autoFocus value={startUrl} placeholder="minha-empresa.awsapps.com/start" onChange={(event) => setStartUrl(event.target.value)} />
+            <span className="text-[13px] font-medium">{t('Endereço do portal')}</span>
+            <Input autoFocus value={startUrl} placeholder={t('minha-empresa.awsapps.com/start')} onChange={(event) => setStartUrl(event.target.value)} />
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="grid gap-1.5">
-              <span className="text-[13px] font-medium">Região do SSO</span>
+              <span className="text-[13px] font-medium">{t('Região do SSO')}</span>
               <Input value={region} onChange={(event) => setRegion(event.target.value.trim())} />
             </label>
             <label className="grid gap-1.5">
-              <span className="text-[13px] font-medium">Nome (opcional)</span>
-              <Input value={label} placeholder="Ex.: Empresa" onChange={(event) => setLabel(event.target.value)} />
+              <span className="text-[13px] font-medium">{t('Nome (opcional)')}</span>
+              <Input value={label} placeholder={t('Ex.: Empresa')} onChange={(event) => setLabel(event.target.value)} />
             </label>
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button
             disabled={busy || !startUrl.trim() || !region}
@@ -307,16 +313,16 @@ function NewLoginDialog({
                 .then((answer) => {
                   if (answer.device) onStarted({ login: answer.login, device: answer.device })
                   else {
-                    toast('Login SSO conectado', answer.login.label || answer.login.start_url)
+                    toast(t('Login SSO conectado'), answer.login.label || answer.login.start_url)
                     onCancel()
                   }
                 })
-                .catch((cause) => toastError(cause, 'O SSO não respondeu'))
+                .catch((cause) => toastError(cause, t('O SSO não respondeu')))
                 .finally(() => setBusy(false))
             }}
           >
             {busy && <Loader2 className="animate-spin" />}
-            Continuar
+            {t('Continuar')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -349,12 +355,12 @@ export function useAwsRenew(onRenewed: () => void) {
       if (answer.device) {
         setPending({ login: answer.login, device: answer.device })
       } else {
-        toast('Sessão renovada', login.label || login.start_url)
+        toast(t('Sessão renovada'), login.label || login.start_url)
         announceAwsChange()
         renewed.current()
       }
     } catch (cause) {
-      toastError(cause, 'Não foi possível renovar a sessão')
+      toastError(cause, t('Não foi possível renovar a sessão'))
     } finally {
       setBusy(false)
     }
@@ -365,7 +371,7 @@ export function useAwsRenew(onRenewed: () => void) {
       login={pending.login}
       device={pending.device}
       onDone={() => {
-        toast('Login SSO conectado', pending.login.label || pending.login.start_url)
+        toast(t('Login SSO conectado'), pending.login.label || pending.login.start_url)
         setPending(null)
         announceAwsChange()
         renewed.current()
@@ -425,10 +431,11 @@ export function DeviceDialog({
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Confirme na página da AWS</DialogTitle>
+          <DialogTitle>{t('Confirme na página da AWS')}</DialogTitle>
           <DialogDescription>
-            Abra a página, confira se o código abaixo é o mesmo e permita o acesso. Esta janela avança
-            automaticamente após a confirmação.
+            {t(
+              'Abra a página, confira se o código abaixo é o mesmo e permita o acesso. Esta janela avança automaticamente após a confirmação.',
+            )}
           </DialogDescription>
         </DialogHeader>
         <div className="grid place-items-center gap-3 rounded-xl border bg-raised py-5">
@@ -439,7 +446,7 @@ export function DeviceDialog({
               onClick={() => window.open(device.verification_uri_complete, '_blank', 'noopener,noreferrer')}
             >
               <ExternalLink />
-              Abrir a página da AWS
+              {t('Abrir a página da AWS')}
             </Button>
             {/* For confirming in another browser or profile, the one already signed in to AWS. The
                 address is not a secret: it only works together with a login on AWS's own page. */}
@@ -448,12 +455,12 @@ export function DeviceDialog({
               onClick={() =>
                 void navigator.clipboard
                   .writeText(device.verification_uri_complete)
-                  .then(() => toast('Link copiado', 'Cole no navegador em que você entra na AWS.'))
-                  .catch((cause) => toastError(cause, 'Não foi possível copiar o link'))
+                  .then(() => toast(t('Link copiado'), t('Cole no navegador em que você entra na AWS.')))
+                  .catch((cause) => toastError(cause, t('Não foi possível copiar o link')))
               }
             >
               <Copy />
-              Copiar link
+              {t('Copiar link')}
             </Button>
           </div>
         </div>
@@ -461,15 +468,15 @@ export function DeviceDialog({
           {state === 'waiting' && (
             <>
               <Loader2 className="size-4 animate-spin" />
-              Aguardando confirmação…
+              {t('Aguardando confirmação…')}
             </>
           )}
-          {state === 'denied' && <span className="text-rose">O acesso foi negado na página da AWS.</span>}
-          {state === 'expired' && <span className="text-rose">O código expirou. Feche e tente novamente.</span>}
+          {state === 'denied' && <span className="text-rose">{t('O acesso foi negado na página da AWS.')}</span>}
+          {state === 'expired' && <span className="text-rose">{t('O código expirou. Feche e tente novamente.')}</span>}
         </p>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            {state === 'waiting' ? 'Cancelar' : 'Fechar'}
+            {state === 'waiting' ? t('Cancelar') : t('Fechar')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -499,7 +506,7 @@ function ConnectionDialog({
       .awsAccounts(login.id)
       .then((answer) => setAccounts(answer.accounts))
       .catch((cause) => {
-        toastError(cause, 'Não foi possível carregar as contas deste login')
+        toastError(cause, t('Não foi possível carregar as contas deste login'))
         setAccounts([])
       })
   }, [login.id])
@@ -510,28 +517,28 @@ function ConnectionDialog({
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Adicionar conta</DialogTitle>
-          <DialogDescription>A conta da AWS e o papel que o Keyhold usa para acessá-la.</DialogDescription>
+          <DialogTitle>{t('Adicionar conta')}</DialogTitle>
+          <DialogDescription>{t('A conta da AWS e o papel que o Keyhold usa para acessá-la.')}</DialogDescription>
         </DialogHeader>
         {accounts === null ? (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
-            Carregando as contas…
+            {t('Carregando as contas…')}
           </p>
         ) : (
           <div className="space-y-3">
             <div className="grid gap-1.5">
-              <span className="text-[13px] font-medium">Conta</span>
+              <span className="text-[13px] font-medium">{t('Conta')}</span>
               <Combobox
-                label="Conta"
+                label={t('Conta')}
                 tall
                 value={account}
-                searchPlaceholder="Buscar pelo nome ou pelo número da conta"
-                empty="Nenhuma conta com esse nome ou número."
+                searchPlaceholder={t('Buscar pelo nome ou pelo número da conta')}
+                empty={t('Nenhuma conta com esse nome ou número.')}
                 options={accounts.map((one) => ({
                   value: one.account_id,
                   label: one.account_name || one.account_id,
-                  detail: taken.includes(one.account_id) ? `${one.account_id}, já adicionada` : one.account_id,
+                  detail: taken.includes(one.account_id) ? t('{account}, já adicionada', { account: one.account_id }) : one.account_id,
                   leading: <AwsMark size="sm" />,
                   disabled: taken.includes(one.account_id),
                 }))}
@@ -543,30 +550,30 @@ function ConnectionDialog({
             </div>
             {chosen && (
               <div className="grid gap-1.5">
-                <span className="text-[13px] font-medium">Papel</span>
+                <span className="text-[13px] font-medium">{t('Papel')}</span>
                 <Combobox
-                  label="Papel"
+                  label={t('Papel')}
                   value={role}
-                  searchPlaceholder="Buscar papel"
-                  empty="Nenhum papel com esse nome."
+                  searchPlaceholder={t('Buscar papel')}
+                  empty={t('Nenhum papel com esse nome.')}
                   options={chosen.roles.map((one) => ({ value: one, label: one }))}
                   onChange={setRole}
                 />
               </div>
             )}
             <label className="grid gap-1.5">
-              <span className="text-[13px] font-medium">Título (opcional)</span>
+              <span className="text-[13px] font-medium">{t('Título (opcional)')}</span>
               <Input value={title} placeholder={chosen ? `${chosen.account_id} / ${role}` : ''} onChange={(event) => setTitle(event.target.value)} />
             </label>
             <label className="grid gap-1.5">
-              <span className="text-[13px] font-medium">Observação interna</span>
+              <span className="text-[13px] font-medium">{t('Observação interna')}</span>
               <Textarea className="min-h-16" value={note} onChange={(event) => setNote(event.target.value)} />
             </label>
           </div>
         )}
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button
             disabled={!chosen || !role}
@@ -581,13 +588,13 @@ function ConnectionDialog({
                   note: note.trim(),
                 })
                 .then(() => {
-                  toast('Conta adicionada', title || `${account} / ${role}`)
+                  toast(t('Conta adicionada'), title || `${account} / ${role}`)
                   onDone()
                 })
-                .catch((cause) => toastError(cause, 'Não foi possível adicionar a conta'))
+                .catch((cause) => toastError(cause, t('Não foi possível adicionar a conta')))
             }
           >
-            Adicionar
+            {t('Adicionar')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -612,26 +619,26 @@ function EditConnectionDialog({
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Editar conta {connection.account_id}</DialogTitle>
-          <DialogDescription>O papel define o que o Keyhold pode ler e gravar nos cofres desta conta.</DialogDescription>
+          <DialogTitle>{t('Editar conta {account}', { account: connection.account_id })}</DialogTitle>
+          <DialogDescription>{t('O papel define o que o Keyhold pode ler e gravar nos cofres desta conta.')}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <label className="grid gap-1.5">
-            <span className="text-[13px] font-medium">Papel</span>
+            <span className="text-[13px] font-medium">{t('Papel')}</span>
             <Input value={role} onChange={(event) => setRole(event.target.value.trim())} />
           </label>
           <label className="grid gap-1.5">
-            <span className="text-[13px] font-medium">Título</span>
+            <span className="text-[13px] font-medium">{t('Título')}</span>
             <Input value={title} onChange={(event) => setTitle(event.target.value)} />
           </label>
           <label className="grid gap-1.5">
-            <span className="text-[13px] font-medium">Observação interna</span>
+            <span className="text-[13px] font-medium">{t('Observação interna')}</span>
             <Textarea className="min-h-16" value={note} onChange={(event) => setNote(event.target.value)} />
           </label>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button
             disabled={!role}
@@ -639,10 +646,10 @@ function EditConnectionDialog({
               void api
                 .updateAwsConnection(connection.id, { role, title: title.trim(), note: note.trim() })
                 .then(onDone)
-                .catch((cause) => toastError(cause, 'Não foi possível salvar a conta'))
+                .catch((cause) => toastError(cause, t('Não foi possível salvar a conta')))
             }
           >
-            Salvar
+            {t('Salvar')}
           </Button>
         </DialogFooter>
       </DialogContent>
