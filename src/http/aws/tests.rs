@@ -1165,7 +1165,8 @@ async fn attachments_go_to_the_bucket_under_the_parameter_name_with_its_key() {
     assert_eq!(requests[0].method, "PUT");
     assert_eq!(requests[0].uri, "/keyhold-producao/app/prod/db/chave.pem");
     assert_eq!(requests[0].header("x-amz-server-side-encryption"), Some("aws:kms"));
-    assert_eq!(requests[0].header("x-amz-server-side-encryption-aws-kms-key-id"), Some("alias/prod"));
+    assert_eq!(requests[0].header("x-amz-server-side-encryption-aws-kms-key-id"), Some("arn:aws:kms:sa-east-1:123456789012:alias/prod"),
+        "the key goes as an ARN: a bucket policy pinning it compares against ARNs");
     for request in &requests {
         assert_eq!(request.header("x-amz-expected-bucket-owner"), Some("123456789012"), "M5");
     }

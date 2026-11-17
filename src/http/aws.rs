@@ -1102,6 +1102,18 @@ async fn metadata_of(place: &Place, name: &str) -> Result<ParameterMetadata, Fai
     }
 }
 
+/// The key an object next to a parameter is encrypted with in S3: the parameter's own, as an ARN, or
+/// `None` (S3's default, `aws/s3`) for a parameter on the account's default `alias/aws/ssm`, which S3
+/// cannot use.
+fn s3_key(place: &Place, metadata: &ParameterMetadata, name: &str) -> Result<Option<String>, Failure> {
+    let key = key_of(metadata, name)?;
+    if key == mapping::DEFAULT_SSM_KEY || key.ends_with(":alias/aws/ssm") {
+        return Ok(None);
+    }
+
+    Ok(Some(mapping::kms_arn(&key, &place.vault.region, &place.connection.account_id)))
+}
+
 /// The KMS key a SecureString was written with. AWS always reports one; if it did not, the write
 /// is refused rather than sent without one.
 fn key_of(metadata: &ParameterMetadata, name: &str) -> Result<String, Failure> {
@@ -2358,7 +2370,7 @@ pub(crate) async fn share_record(state: &AppState, id: &str, body: ShareBody) ->
 
     let sender = caller(state, &place).await.unwrap_or_else(|_| place.connection.title.clone());
     let metadata = metadata_of(&place, &name).await?;
-    let key_id = Some(key_of(&metadata, &name)?).filter(|k| k != mapping::DEFAULT_SSM_KEY);
+    let key_id = s3_key(&place, &metadata, &name)?;
     let s3 = s3_of(state, &place)?;
     let s3_error = |e| s3_failure(e, &bucket, &place.vault.region);
 
@@ -3379,7 +3391,7 @@ pub(crate) async fn add_attachment(
     let bucket = bucket_of(&place)?;
 
     let metadata = metadata_of(&place, &name).await?;
-    let key_id = Some(key_of(&metadata, &name)?).filter(|k| k != mapping::DEFAULT_SSM_KEY);
+    let key_id = s3_key(&place, &metadata, &name)?;
 
     let s3 = s3_of(state, &place)?;
     let key = format!("{prefix}{file_name}");
