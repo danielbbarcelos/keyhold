@@ -8,11 +8,11 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-{{SCRIPT_HASH}}'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; form-action 'none'; base-uri 'none'">
 <title>Keyhold</title>
 <style>
-  :root { --bg: #f3f3f5; --fg: #1f2024; --card: #ffffff; --muted: #5e5f67; --faint: #8b8c94; --line: #e2e2e7; --field: #ffffff; --primary: #e8b04b; --primary-fg: #1f1606; --amber-soft: #fbf3e2; --amber: #8a5a07; --rose: #b4334a; color-scheme: light; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #1e1f23; --fg: #e6e6e9; --card: #24252a; --muted: #a6a7ae; --faint: #7d7e86; --line: #313238; --field: #202125; --amber-soft: rgb(232 176 75 / 12%); --amber: #e8b04b; --rose: #ec8a9b; color-scheme: dark; } }
+  :root { --bg: #f3f3f5; --fg: #1f2024; --card: #ffffff; --muted: #5e5f67; --faint: #8b8c94; --line: #e2e2e7; --field: #ffffff; --primary: #e8b04b; --primary-fg: #1f1606; --amber-soft: #fbf3e2; --amber: #8a5a07; --rose: #b4334a; --raised: #ececf0; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1e1f23; --fg: #e6e6e9; --card: #24252a; --muted: #a6a7ae; --faint: #7d7e86; --line: #313238; --field: #202125; --amber-soft: rgb(232 176 75 / 12%); --amber: #e8b04b; --rose: #ec8a9b; --raised: #1a1b1f; color-scheme: dark; } }
   * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 32px 16px; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-  main { width: 100%; max-width: 28rem; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 28px; }
+  body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 32px 16px; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  main { margin: auto 0; width: 100%; max-width: 28rem; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 28px; }
   .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
   .brand img { width: 40px; height: 40px; }
   .brand .light { display: none; }
@@ -40,7 +40,16 @@
   .icon { display: grid; place-items: center; }
   .icon svg { width: 16px; height: 16px; }
   .after { margin: 12px 0 0; color: var(--muted); font-size: 13px; }
-  footer { margin-top: 20px; color: var(--faint); font-size: 12px; text-align: center; }
+  main > footer { margin-top: 20px; color: var(--faint); font-size: 12px; text-align: center; }
+  .page-foot { margin-top: 24px; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--faint); font-size: 12px; }
+  .page-foot p { margin: 0; }
+  .page-foot a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .page-foot a:hover { color: var(--fg); }
+  .lang { display: flex; padding: 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); font-size: 13px; font-weight: 500; }
+  .lang button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+  .lang button:hover { color: var(--fg); }
+  .lang button[aria-pressed="true"] { background: var(--card); color: var(--fg); box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1); }
+  .lang svg { width: 18px; height: 13px; flex-shrink: 0; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -48,17 +57,17 @@
 <main>
   <div class="brand"><img class="dark" alt="" src="data:image/png;base64,{{ICON_DARK}}"><img class="light" alt="" src="data:image/png;base64,{{ICON_LIGHT}}">Keyhold</div>
 
-  <section id="loading"><p class="meta">Abrindo o compartilhamento…</p></section>
+  <section id="loading"><p class="meta" data-t="loading">Abrindo o compartilhamento…</p></section>
 
   <section id="closed" hidden>
     <h1 id="headline"></h1>
     <p class="meta" id="expiry"></p>
-    <p class="notice" id="first" hidden>O conteúdo é apagado depois de aberto por esta página. Abrir a página não apaga nada; só o botão Revelar.</p>
+    <p class="notice" id="first" data-t="first" hidden>O conteúdo é apagado depois de aberto por esta página. Abrir a página não apaga nada; só o botão Revelar.</p>
     <div id="password-box" hidden>
-      <label for="password">Senha de abertura</label>
+      <label for="password" data-t="password">Senha de abertura</label>
       <input id="password" type="password" autocomplete="off" spellcheck="false">
     </div>
-    <button class="primary" id="reveal" type="button">Revelar</button>
+    <button class="primary" id="reveal" type="button" data-t="reveal">Revelar</button>
     <p class="error" id="error" hidden></p>
   </section>
 
@@ -66,17 +75,24 @@
     <h1 id="headline-open"></h1>
     <p class="meta" id="expiry-open"></p>
     <div class="fields" id="fields"></div>
-    <div class="notes" id="notes" hidden><small>Observação</small><span id="notes-text"></span></div>
+    <div class="notes" id="notes" hidden><small data-t="notes">Observação</small><span id="notes-text"></span></div>
     <p class="after" id="after"></p>
   </section>
 
   <section id="gone" hidden>
-    <h1>Este link não está mais disponível</h1>
-    <p class="meta">O link expirou, foi revogado ou já foi aberto. Peça a quem compartilhou que envie de novo.</p>
+    <h1 data-t="gone">Este link não está mais disponível</h1>
+    <p class="meta" data-t="gone-why">O link expirou, foi revogado ou já foi aberto. Peça a quem compartilhou que envie de novo.</p>
   </section>
 
-  <footer>Compartilhado pelo Keyhold. Os campos são decifrados aqui, no seu navegador.</footer>
+  <footer data-t="local">Os campos são decifrados aqui, no seu navegador.</footer>
 </main>
+<div class="page-foot">
+  <div class="lang" id="lang" role="group" aria-label="Idioma">
+    <button type="button" data-lang="pt-BR" lang="pt-BR" title="Português (Brasil)">PT</button>
+    <button type="button" data-lang="en" lang="en" title="English (US)">EN</button>
+  </div>
+  <p><span data-t="with">Compartilhado com o</span> <a href="https://github.com/danielbbarcelos/keyhold" target="_blank" rel="noopener noreferrer">Keyhold</a></p>
+</div>
 <script>
 (function () {
   'use strict';
@@ -84,6 +100,95 @@
   var subtle = window.crypto && window.crypto.subtle;
   var enc = new TextEncoder();
   var dec = new TextDecoder();
+
+  // Both languages live here; the recipient's browser picks one and the toggle changes it.
+  var WORDS = {
+    'pt-BR': {
+      loading: 'Abrindo o compartilhamento…',
+      first: 'O conteúdo é apagado depois de aberto por esta página. Abrir a página não apaga nada; só o botão Revelar.',
+      password: 'Senha de abertura', reveal: 'Revelar', notes: 'Observação',
+      gone: 'Este link não está mais disponível',
+      'gone-why': 'O link expirou, foi revogado ou já foi aberto. Peça a quem compartilhou que envie de novo.',
+      local: 'Os campos são decifrados aqui, no seu navegador.', with: 'Compartilhado com o', language: 'Idioma',
+      headline: '{sender} compartilhou o registro {title} com você',
+      deleted: 'Apagado depois de aberto pela página', until: 'Disponível até {when}',
+      today: 'hoje, {time}',
+      afterFirst: 'O conteúdo foi apagado do servidor. Copie o que precisar antes de fechar esta página.',
+      afterUntil: 'Copie o que precisar. Depois de {when} este link deixa de abrir.',
+      wrong: 'A senha de abertura não confere.',
+      show: 'Mostrar', hide: 'Ocultar', copy: 'Copiar', showField: 'Mostrar {label}', copyField: 'Copiar {label}',
+      holder: 'Nome no cartão', expiry: 'Validade', code: 'Código de segurança', pin: 'PIN', question: 'Pergunta'
+    },
+    en: {
+      loading: 'Opening the share…',
+      first: 'The content is deleted once this page opens it. Opening the page deletes nothing; only the Reveal button does.',
+      password: 'Opening password', reveal: 'Reveal', notes: 'Notes',
+      gone: 'This link is no longer available',
+      'gone-why': 'The link expired, was revoked or was already opened. Ask whoever shared it to send it again.',
+      local: 'The fields are decrypted here, in your browser.', with: 'Shared with', language: 'Language',
+      headline: '{sender} shared the item {title} with you',
+      deleted: 'Deleted once opened by the page', until: 'Available until {when}',
+      today: 'today, {time}',
+      afterFirst: 'The content was deleted from the server. Copy what you need before closing this page.',
+      afterUntil: 'Copy what you need. After {when} this link stops opening.',
+      wrong: 'The opening password does not match.',
+      show: 'Show', hide: 'Hide', copy: 'Copy', showField: 'Show {label}', copyField: 'Copy {label}',
+      holder: 'Name on card', expiry: 'Expiration', code: 'Security code', pin: 'PIN', question: 'Question'
+    }
+  };
+  var langs = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || ''];
+  var lang = String(langs[0] || '').toLowerCase().indexOf('en') === 0 ? 'en' : 'pt-BR';
+  var redraws = [];
+
+  function say(key, values) {
+    var text = WORDS[lang][key];
+    Object.keys(values || {}).forEach(function (name) { text = text.split('{' + name + '}').join(values[name]); });
+    return text;
+  }
+
+  // Text that depends on the language registers here, so the toggle can write it again.
+  function words(draw) { redraws.push(draw); draw(); }
+
+  function setLang(next) {
+    lang = next;
+    document.documentElement.lang = lang;
+    document.querySelectorAll('[data-t]').forEach(function (el) { el.textContent = say(el.getAttribute('data-t')); });
+    $('lang').setAttribute('aria-label', say('language'));
+    document.querySelectorAll('#lang button').forEach(function (button) {
+      button.setAttribute('aria-pressed', String(button.getAttribute('data-lang') === lang));
+    });
+    redraws.forEach(function (draw) { draw(); });
+  }
+
+  // Flags drawn through the DOM like the icons, so the page carries no third-party artwork.
+  function flag(code) {
+    var ns = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 20 14');
+    svg.setAttribute('aria-hidden', 'true');
+    function add(tag, attrs) {
+      var node = document.createElementNS(ns, tag);
+      Object.keys(attrs).forEach(function (key) { node.setAttribute(key, String(attrs[key])); });
+      svg.appendChild(node);
+    }
+    if (code === 'pt-BR') {
+      add('rect', { width: 20, height: 14, rx: 2.2, fill: '#009C3B' });
+      add('path', { d: 'M10 1.7 18.2 7 10 12.3 1.8 7Z', fill: '#FFDF00' });
+      add('circle', { cx: 10, cy: 7, r: 3.3, fill: '#002776' });
+      add('path', { d: 'M6.8 6.3a7 7 0 0 1 6.4 1.3', stroke: '#fff', 'stroke-width': 0.7, fill: 'none' });
+    } else {
+      add('rect', { width: 20, height: 14, rx: 2.2, fill: '#fff' });
+      for (var i = 0; i < 13; i += 2) add('rect', { y: (i * 14) / 13, width: 20, height: 14 / 13, fill: '#B22234' });
+      add('rect', { width: 9, height: (7 * 14) / 13, fill: '#3C3B6E' });
+    }
+    return svg;
+  }
+
+  document.querySelectorAll('#lang button').forEach(function (button) {
+    button.insertBefore(flag(button.getAttribute('data-lang')), button.firstChild);
+    button.addEventListener('click', function () { setLang(button.getAttribute('data-lang')); });
+  });
+  setLang(lang);
 
   function show(id) {
     ['loading', 'closed', 'open', 'gone'].forEach(function (one) { $(one).hidden = one !== id; });
@@ -131,8 +236,9 @@
   function when(seconds) {
     var date = new Date(seconds * 1000);
     var today = new Date();
-    var time = date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    return date.toDateString() === today.toDateString() ? 'hoje, ' + time : date.toLocaleDateString('pt-BR') + ', ' + time;
+    var locale = lang === 'en' ? 'en-US' : 'pt-BR';
+    var time = date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+    return date.toDateString() === today.toDateString() ? say('today', { time: time }) : date.toLocaleDateString(locale) + ', ' + time;
   }
 
   var params = new URLSearchParams(location.hash.slice(1));
@@ -156,12 +262,14 @@
     })
     .then(function (plain) {
       envelope = JSON.parse(dec.decode(plain));
-      var headline = envelope.sender + ' compartilhou o registro ' + envelope.title + ' com você';
-      $('headline').textContent = headline;
-      $('headline-open').textContent = headline;
-      var line = envelope.first ? 'Apagado depois de aberto pela página' : 'Disponível até ' + when(envelope.expires_at);
-      $('expiry').textContent = line;
-      $('expiry-open').textContent = line;
+      words(function () {
+        var headline = say('headline', { sender: envelope.sender, title: envelope.title });
+        $('headline').textContent = headline;
+        $('headline-open').textContent = headline;
+        var line = envelope.first ? say('deleted') : say('until', { when: when(envelope.expires_at) });
+        $('expiry').textContent = line;
+        $('expiry-open').textContent = line;
+      });
       $('first').hidden = !envelope.first;
       $('password-box').hidden = !envelope.password;
       show('closed');
@@ -206,11 +314,16 @@
   }
 
   function row(label, value, secret) {
+    if (typeof label === 'function') return rowWith(label, value, secret);
+    return rowWith(function () { return label; }, value, secret);
+  }
+
+  function rowWith(label, value, secret) {
     var line = document.createElement('div');
     line.className = 'field';
     var text = document.createElement('div');
     var small = document.createElement('small');
-    small.textContent = label;
+    words(function () { small.textContent = label(); });
     var span = document.createElement('span');
     span.textContent = secret ? '••••••••••••' : value;
     if (secret) span.className = 'hidden';
@@ -222,14 +335,16 @@
       eye.type = 'button';
       eye.className = 'icon';
       setIcon(eye, 'eye');
-      eye.setAttribute('aria-label', 'Mostrar ' + label);
-      eye.title = 'Mostrar';
+      words(function () {
+        eye.setAttribute('aria-label', say('showField', { label: label() }));
+        eye.title = span.className === 'hidden' ? say('show') : say('hide');
+      });
       eye.addEventListener('click', function () {
         var showing = span.className !== 'hidden';
         span.textContent = showing ? '••••••••••••' : value;
         span.className = showing ? 'hidden' : '';
         setIcon(eye, showing ? 'eye' : 'eyeOff');
-        eye.title = showing ? 'Mostrar' : 'Ocultar';
+        eye.title = showing ? say('show') : say('hide');
       });
       line.appendChild(eye);
     }
@@ -237,8 +352,10 @@
     copy.type = 'button';
     copy.className = 'icon';
     setIcon(copy, 'copy');
-    copy.title = 'Copiar';
-    copy.setAttribute('aria-label', 'Copiar ' + label);
+    words(function () {
+      copy.title = say('copy');
+      copy.setAttribute('aria-label', say('copyField', { label: label() }));
+    });
     copy.addEventListener('click', function () {
       navigator.clipboard.writeText(value).then(function () { setIcon(copy, 'check'); setTimeout(function () { setIcon(copy, 'copy'); }, 1500); });
     });
@@ -247,7 +364,8 @@
   }
 
   var SECRET = { password: 1, pin: 1, hidden: 1, multiline_hidden: 1, security_question: 1, card: 1 };
-  var PARTS = { holder: 'Nome no cartão', expiry: 'Validade', code: 'Código de segurança', pin: 'PIN', question: 'Pergunta' };
+  var PARTS = { holder: 1, expiry: 1, code: 1, pin: 1, question: 1 };
+  function part(name) { return PARTS[name] ? say(name) : name; }
 
   $('reveal').addEventListener('click', function () {
     $('reveal').disabled = true;
@@ -267,17 +385,17 @@
         var list = $('fields');
         (content.fields || []).forEach(function (field) {
           var secret = !!SECRET[field.kind];
-          if (field.kind === 'security_question' && field.extra && field.extra.question) list.appendChild(row(PARTS.question, field.extra.question, false));
+          if (field.kind === 'security_question' && field.extra && field.extra.question) list.appendChild(row(function () { return part('question'); }, field.extra.question, false));
           list.appendChild(row(field.label, field.value, secret));
-          Object.keys(field.extra || {}).forEach(function (part) {
-            if (part === 'question') return;
-            list.appendChild(row(field.label + ', ' + (PARTS[part] || part), field.extra[part], part === 'code' || part === 'pin'));
+          Object.keys(field.extra || {}).forEach(function (name) {
+            if (name === 'question') return;
+            list.appendChild(row(function () { return field.label + ', ' + part(name); }, field.extra[name], name === 'code' || name === 'pin'));
           });
         });
         if (content.notes) { $('notes-text').textContent = content.notes; $('notes').hidden = false; }
-        $('after').textContent = envelope.first
-          ? 'O conteúdo foi apagado do servidor. Copie o que precisar antes de fechar esta página.'
-          : 'Copie o que precisar. Depois de ' + when(envelope.expires_at) + ' este link deixa de abrir.';
+        words(function () {
+          $('after').textContent = envelope.first ? say('afterFirst') : say('afterUntil', { when: when(envelope.expires_at) });
+        });
         show('open');
         marker(envelope.markers && envelope.markers.revealed);
         if (envelope.first && envelope.delete) {
@@ -287,7 +405,7 @@
       .catch(function (error) {
         $('reveal').disabled = false;
         if (error && error.message === 'password') {
-          $('error').textContent = 'A senha de abertura não confere.';
+          words(function () { $('error').textContent = say('wrong'); });
           $('error').hidden = false;
           marker(envelope.markers && envelope.markers.wrong);
         } else {
