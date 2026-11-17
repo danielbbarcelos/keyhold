@@ -189,6 +189,23 @@ impl S3Client {
     }
 
     /// Every object whose key starts with `prefix`, following continuation tokens to the end.
+    /// The bucket's tags, where an administrator leaves settings for every vault on it (see
+    /// `docs/AWS.md`). A bucket without tags answers `NoSuchTagSet`, which is no tags.
+    pub async fn get_bucket_tagging(&self, bucket: &str) -> AwsResult<Vec<(String, String)>> {
+        let response = self.request("GET", bucket, None, &[("tagging", "")], &[], Vec::new()).await?;
+        let body = std::str::from_utf8(&response.body).unwrap_or("");
+
+        if !response.is_success() && xml_tag(body, "Code") == Some("NoSuchTagSet") {
+            return Ok(Vec::new());
+        }
+        self.check(&response)?;
+
+        Ok(xml_blocks(body, "Tag")
+            .into_iter()
+            .filter_map(|tag| Some((xml_unescape(xml_tag(tag, "Key")?), xml_unescape(xml_tag(tag, "Value")?))))
+            .collect())
+    }
+
     pub async fn list_objects_v2(
         &self,
         bucket: &str,

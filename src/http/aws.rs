@@ -479,6 +479,13 @@ async fn poll_login(State(state): State<Arc<AppState>>, Path(id): Path<String>) 
 /// Renew a login: quietly with the refresh token when AWS still accepts it, otherwise a new
 /// device login, answered exactly like `POST /aws/logins`.
 async fn renew_login(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    // "Renovar" probes the trail again: a policy or a log group may have been added meanwhile.
+    state.aws.with(&state.lock, |inner| {
+        inner.audit.clear();
+        inner.callers.clear();
+        inner.bucket_settings.clear();
+    });
+
     let config = load(&state)?;
     let login = config.login(&id).cloned().ok_or_else(|| not_found("o login SSO não existe mais"))?;
     let generation = state.aws.generation(&state.lock).ok_or_else(locked)?;
@@ -1759,7 +1766,283 @@ pub(crate) async fn list_records(state: &AppState, vault_id: &str) -> Answer {
     let records: Vec<Value> =
         previews.into_iter().map(|(preview, kind)| with_plaintext(preview, kind)).collect();
 
-    Ok(Json(json!({ "records": records })))
+    let names: Vec<String> = snapshot.parameters.iter().map(|p| p.name.clone()).collect();
+    let audit = probe(state, &place, &names).await;
+
+    Ok(Json(json!({ "records": records, "audit": audit })))
+}
+
+// ── the audit trail (CloudWatch Logs) ───────────────────────────────────────────────────────────
+//
+// See `aws::audit` for the rules and `docs/AWS.md` for the account side. A sensitive action
+// (revealing, copying, moving, deleting, downloading, copying out) writes its event before it
+// happens and does not happen when the write fails for a reason other than "the account has no
+// trail here". Viewing and saving queue their events and never wait on CloudWatch.
+
+/// Whether an action waits for its event.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Weight {
+    Sensitive,
+    Background,
+}
+
+fn now_ms() -> i64 {
+    (crate::identity::now_seconds() as i64) * 1000
+}
+
+/// The administrator's settings on the vault's bucket, read once per unlock.
+async fn bucket_settings(state: &AppState, place: &Place) -> crate::aws::audit::BucketSettings {
+    use crate::aws::audit::BucketSettings;
+
+    let cached = state.aws.with(&state.lock, |inner| inner.bucket_settings.get(&place.vault_id).cloned()).flatten();
+    if let Some(settings) = cached {
+        return settings;
+    }
+
+    let settings = match (bucket_of(place), s3_of(state, place)) {
+        (Ok(bucket), Ok(s3)) => match s3.get_bucket_tagging(&bucket).await {
+            Ok(tags) => BucketSettings::from_tags(&tags),
+            Err(_) => BucketSettings::unreadable(),
+        },
+        _ => BucketSettings::unreadable(),
+    };
+
+    state.aws.with(&state.lock, |inner| inner.bucket_settings.insert(place.vault_id.clone(), settings.clone()));
+    settings
+}
+
+/// The person behind the connection's credentials: their audit stream's name.
+async fn caller(state: &AppState, place: &Place) -> Result<String, AwsError> {
+    let cached = state.aws.with(&state.lock, |inner| inner.callers.get(&place.connection.id).cloned()).flatten();
+    if let Some(name) = cached {
+        return Ok(name);
+    }
+
+    let sts = state.aws.sts(&place.vault.region, place.credentials.clone())?;
+    let caller = sts.get_caller_identity().await?;
+    let name = caller
+        .session_name()
+        .map(str::to_string)
+        .ok_or_else(|| AwsError::Invalid("estas credenciais não são de uma sessão do Identity Center".into()))?;
+
+    state.aws.with(&state.lock, |inner| inner.callers.insert(place.connection.id.clone(), name.clone()));
+    Ok(name)
+}
+
+fn trail_unavailable(reason: &str) -> Failure {
+    aws_refusal(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "audit_unavailable",
+        format!("a ação não foi feita porque a trilha da AWS não pôde ser gravada: {reason}. Tente de novo"),
+    )
+}
+
+fn trail_required(reason: &str) -> Failure {
+    aws_refusal(
+        StatusCode::FORBIDDEN,
+        "audit_required",
+        format!("este cofre exige a trilha da AWS, e ela não está disponível: {reason}"),
+    )
+}
+
+fn set_status(state: &AppState, key: &str, status: crate::aws::audit::Status) {
+    state.aws.with(&state.lock, |inner| inner.audit.insert(key.to_string(), status));
+}
+
+/// Write events to one group now. `Ok` when they landed or when the account has no trail here
+/// (and does not require one).
+async fn write_now(
+    state: &AppState,
+    place: &Place,
+    group: &str,
+    stream: &str,
+    events: &[(i64, String)],
+    required: bool,
+) -> Result<(), Failure> {
+    use crate::aws::audit::{classify, Failure as Why, Status};
+
+    let key = format!("{}|{group}", place.connection.id);
+    let logs = state.aws.logs(&place.vault.region, place.credentials.clone()).map_err(aws_failure)?;
+
+    match logs.append(group, stream, events).await {
+        Ok(()) => {
+            set_status(state, &key, Status::Audited);
+            Ok(())
+        }
+        Err(AwsError::SessionExpired(message)) => Err(aws_failure(AwsError::SessionExpired(message))),
+        Err(error) => match classify(&error, group) {
+            Why::Off(reason) => {
+                set_status(state, &key, Status::Off(reason.clone()));
+                if required { Err(trail_required(&reason)) } else { Ok(()) }
+            }
+            Why::Unavailable(reason) => Err(trail_unavailable(&reason)),
+        },
+    }
+}
+
+/// Send what is queued for this connection. Never fails the request it rides on: what cannot be
+/// sent now stays for the next time, up to `QUEUE_LIMIT`.
+async fn flush(state: &AppState, place: &Place) {
+    use crate::aws::audit::{classify, Failure as Why, Status, QUEUE_LIMIT};
+
+    let mine: Vec<crate::aws::audit::Queued> = state
+        .aws
+        .with(&state.lock, |inner| {
+            let (mine, rest) = std::mem::take(&mut inner.audit_queue)
+                .into_iter()
+                .partition(|queued| queued.connection_id == place.connection.id);
+            inner.audit_queue = rest;
+            mine
+        })
+        .unwrap_or_default();
+
+    if mine.is_empty() {
+        return;
+    }
+
+    let Ok(logs) = state.aws.logs(&place.vault.region, place.credentials.clone()) else { return };
+    let mut keep = Vec::new();
+    let mut batches: Vec<((String, String), Vec<crate::aws::audit::Queued>)> = Vec::new();
+
+    for queued in mine {
+        let target = (queued.group.clone(), queued.stream.clone());
+        match batches.iter_mut().find(|(at, _)| *at == target) {
+            Some((_, list)) => list.push(queued),
+            None => batches.push((target, vec![queued])),
+        }
+    }
+
+    for ((group, stream), list) in batches {
+        let events: Vec<(i64, String)> = list.iter().map(|q| (q.at_ms, q.message.clone())).collect();
+        let key = format!("{}|{group}", place.connection.id);
+
+        match logs.append(&group, &stream, &events).await {
+            Ok(()) => set_status(state, &key, Status::Audited),
+            Err(error) => match classify(&error, &group) {
+                Why::Off(reason) => set_status(state, &key, Status::Off(reason)),
+                Why::Unavailable(_) => keep.extend(list),
+            },
+        }
+    }
+
+    if !keep.is_empty() {
+        state.aws.with(&state.lock, |inner| {
+            inner.audit_queue.extend(keep);
+            let excess = inner.audit_queue.len().saturating_sub(QUEUE_LIMIT);
+            inner.audit_queue.drain(..excess);
+        });
+    }
+}
+
+/// Record `action` on a parameter of `place`. See the section's comment for what `weight` decides.
+pub(crate) async fn trail(
+    state: &AppState,
+    place: &Place,
+    parameter: &str,
+    record_id: &str,
+    action: &str,
+    detail: Value,
+    weight: Weight,
+) -> Result<(), Failure> {
+    use crate::aws::audit::{log_group, message, Queued, Status};
+
+    let settings = bucket_settings(state, place).await;
+    let absolute = mapping::absolute(parameter);
+    let group = log_group(settings.prefix(), &absolute);
+    let key = format!("{}|{group}", place.connection.id);
+
+    let status = state.aws.with(&state.lock, |inner| inner.audit.get(&key).cloned()).ok_or_else(locked)?;
+    if let Some(Status::Off(reason)) = status {
+        return if settings.required && weight == Weight::Sensitive { Err(trail_required(&reason)) } else { Ok(()) };
+    }
+
+    let stream = match caller(state, place).await {
+        Ok(stream) => stream,
+        Err(error) if weight == Weight::Sensitive => {
+            if let AwsError::SessionExpired(message) = error {
+                return Err(aws_failure(AwsError::SessionExpired(message)));
+            }
+            return Err(trail_unavailable(&error.to_string()));
+        }
+        Err(_) => return Ok(()),
+    };
+
+    let event = (now_ms(), message(action, record_id, &absolute, detail));
+
+    match weight {
+        Weight::Sensitive => {
+            write_now(state, place, &group, &stream, &[event], settings.required).await?;
+            // CloudWatch answered: whatever waited in the queue goes too.
+            flush(state, place).await;
+            Ok(())
+        }
+        Weight::Background => {
+            state.aws.with(&state.lock, |inner| {
+                inner.audit_queue.push(Queued {
+                    connection_id: place.connection.id.clone(),
+                    region: place.vault.region.clone(),
+                    group,
+                    stream,
+                    at_ms: event.0,
+                    message: event.1,
+                })
+            });
+            flush(state, place).await;
+            Ok(())
+        }
+    }
+}
+
+/// [`trail`] for a record id, resolving its vault.
+pub(crate) async fn trail_record(state: &AppState, id: &str, action: &str, detail: Value, weight: Weight) -> Result<(), Failure> {
+    let (vault_id, name) = target_record(id)?;
+    let place = place(state, &vault_id).await?;
+    trail(state, &place, &name, id, action, detail, weight).await
+}
+
+/// Write "session opened" to every log group the listing reaches that has not been tried in this
+/// unlock, and say what each came to, for the screen.
+async fn probe(state: &AppState, place: &Place, names: &[String]) -> Value {
+    use crate::aws::audit::{log_group, message, Status};
+
+    let settings = bucket_settings(state, place).await;
+    let mut groups: Vec<String> = names.iter().map(|name| log_group(settings.prefix(), &mapping::absolute(name))).collect();
+    if let Some(root) = place.vault.root() {
+        groups.push(log_group(settings.prefix(), &format!("{}/x", mapping::absolute(root))));
+    }
+    groups.sort();
+    groups.dedup();
+
+    let stream = caller(state, place).await;
+    let mut answer = Vec::new();
+
+    for group in groups {
+        let key = format!("{}|{group}", place.connection.id);
+        let mut status = state.aws.with(&state.lock, |inner| inner.audit.get(&key).cloned()).flatten();
+
+        if status.is_none() {
+            if let Ok(stream) = &stream {
+                let event = (now_ms(), message("session.opened", "", &group, json!({})));
+                let _ = write_now(state, place, &group, stream, &[event], false).await;
+                status = state.aws.with(&state.lock, |inner| inner.audit.get(&key).cloned()).flatten();
+            }
+        }
+
+        answer.push(match status {
+            Some(Status::Audited) => json!({ "group": group, "state": "on" }),
+            Some(Status::Off(reason)) => json!({ "group": group, "state": "off", "reason": reason }),
+            None => json!({
+                "group": group,
+                "state": "unknown",
+                "reason": match &stream {
+                    Err(error) => format!("não foi possível saber quem é o usuário desta sessão ({error})"),
+                    Ok(_) => "o CloudWatch Logs não respondeu".to_string(),
+                },
+            }),
+        });
+    }
+
+    json!({ "groups": answer, "required": settings.required, "settings_unreadable": settings.unreadable })
 }
 
 /// The record a body describes, checked against what AWS can hold: the description (the title
@@ -1845,11 +2128,15 @@ pub(crate) async fn create_record(
     let header = header_for(&place, &config, &name, version, None, Some(&tags));
     note(state, audit::action::RECORD_CREATED, &header.id, Detail::new().with("kind", "item"));
 
+    let fields: Vec<&str> = payload.fields.iter().map(|field| field.label.as_str()).collect();
+    trail(state, &place, &name, &header.id, "record.created", json!({ "fields": fields }), Weight::Background).await?;
+
     Ok(Json(json!({ "record": header })))
 }
 
 pub(crate) async fn open_record(state: &AppState, id: &str) -> Answer {
     let mut record = record_json(state, id).await?;
+    trail_record(state, id, "record.viewed", json!({}), Weight::Background).await?;
 
     // What goes to the page: secrets sealed (see `records::sealed_json`).
     let payload: Payload = serde_json::from_value(record["payload"].clone()).map_err(|e| Failure(StatusCode::BAD_GATEWAY, e.to_string(), None))?;
@@ -2019,12 +2306,13 @@ pub(crate) async fn update_record(
     // fresh, like any open: what the page saw may be older than what is in AWS now, and the
     // version check in `write_over` is what refuses that case.
     let mut payload = payload.clone();
-    if payload.fields.iter().any(|field| field.sealed.is_some()) {
-        let (stored, _) = open_parameter(state, &place, &name).await?;
-        crate::records::unseal(&mut payload, &stored.payload).map_err(|error| Failure(StatusCode::BAD_REQUEST, error.to_string(), None))?;
-    }
+    let (stored, _) = open_parameter(state, &place, &name).await?;
+    crate::records::unseal(&mut payload, &stored.payload).map_err(|error| Failure(StatusCode::BAD_REQUEST, error.to_string(), None))?;
 
     let written = write_over(state, &place, &name, &payload, expected).await?;
+
+    let changed = crate::aws::audit::changed_fields(&stored.payload, &payload);
+    trail(state, &place, &name, id, "record.updated", json!({ "fields": changed }), Weight::Background).await?;
 
     note(
         state,
@@ -2107,6 +2395,16 @@ pub(crate) async fn move_record(
     }
 
     let place = place(state, &vault_id).await?;
+    trail(
+        state,
+        &place,
+        &name,
+        id,
+        "record.moved",
+        json!({ "from": mapping::absolute(&name), "to": mapping::absolute(&new_name) }),
+        Weight::Sensitive,
+    )
+    .await?;
     let outcome = move_parameter(state, &place, id, &name, &new_name).await;
     state.aws.invalidate(&vault_id);
 
@@ -2210,6 +2508,7 @@ pub(crate) async fn delete_record(state: &AppState, id: &str, on: bool) -> Answe
 
     let (vault_id, name) = target_record(id)?;
     let place = place(state, &vault_id).await?;
+    trail(state, &place, &name, id, "record.deleted", json!({}), Weight::Sensitive).await?;
     let outcome = delete_parameter_and_files(state, &place, id, &name).await;
     state.aws.invalidate(&vault_id);
 
@@ -2386,6 +2685,18 @@ pub(crate) async fn reveal_secret(
     };
 
     let secret = crate::records::secret_of(&payload, index).map_err(|error| Failure(StatusCode::BAD_REQUEST, error.to_string(), None))?;
+
+    // The event lands before the value leaves the binary, or the value does not leave.
+    trail(
+        state,
+        &place,
+        &name,
+        id,
+        if copying { "field.copied" } else { "field.revealed" },
+        json!({ "field": secret["label"], "version": version }),
+        Weight::Sensitive,
+    )
+    .await?;
 
     // The local trail follows the same switch as a local vault's reads. The AWS trail (CloudWatch)
     // does not ask: there, the account decides.
@@ -2578,6 +2889,12 @@ pub(crate) async fn open_attachment(state: &AppState, id: &str) -> Answer {
         .map_err(|e| s3_failure(e, &bucket, &place.vault.region))?;
 
     let name = mapping::leaf(&key).to_string();
+
+    if let Some(parameter) = mapping::attachment_record(&key) {
+        let record_id = mapping::record_id(&vault_id, &mapping::absolute(&parameter));
+        trail(state, &place, &parameter, &record_id, "attachment.downloaded", json!({ "attachment": name }), Weight::Sensitive)
+            .await?;
+    }
 
     let log_reads = {
         let store = state.store.lock().unwrap();

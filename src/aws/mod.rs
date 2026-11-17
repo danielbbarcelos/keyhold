@@ -42,17 +42,22 @@
 
 pub mod config;
 pub mod error;
+pub mod logs;
 pub mod mapping;
 pub mod s3;
 pub mod sigv4;
 pub mod ssm;
 pub mod sso;
 pub mod state;
+pub mod sts;
+pub mod audit;
 
 pub use error::{AwsError, AwsResult};
 pub use s3::{ObjectSummary, PutObjectOutput, S3Client, S3Object};
 pub use sigv4::Credentials;
 pub use ssm::{Parameter, ParameterHistoryEntry, ParameterMetadata, PutParameter, SsmClient, Tag};
+pub use logs::{LogEvent, LogsClient};
+pub use sts::{Caller, StsClient};
 pub use sso::{Account, ClientRegistration, DeviceLogin, Poll, Role, SsoClient, SsoToken};
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
