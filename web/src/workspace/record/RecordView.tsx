@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
-import { api, type FolderNode, type OpenRecord, type VersionEntry } from '../../api'
+import { api, ApiError, type FolderNode, type OpenRecord, type VersionEntry } from '../../api'
 import { copyForSeconds } from '../../clipboard'
 import { Attachments } from '../Attachments'
 import { primaryField, subtitleField } from '../fields'
@@ -146,12 +146,19 @@ export function RecordView({
               // A sealed secret is fetched inside the click (the binary notes the copy as it hands
               // it over); one the page already has is reported as before.
               const sealedAt = primary.sealed
+              // A refusal from the binary (a trail that could not be written, a session that
+              // ended) is kept apart: the clipboard only reports that its write failed.
+              let refused: unknown = null
               const value =
                 sealedAt === undefined
                   ? primary.value
-                  : api.secret(record.id, sealedAt, 'copy').then((secret) =>
-                      primary.kind === 'card' ? secret.value.replace(/\s+/g, '') : secret.value,
-                    )
+                  : api
+                      .secret(record.id, sealedAt, 'copy')
+                      .then((secret) => (primary.kind === 'card' ? secret.value.replace(/\s+/g, '') : secret.value))
+                      .catch((cause) => {
+                        refused = cause
+                        throw cause
+                      })
 
               void copyForSeconds(value, CLIPBOARD_SECONDS, () => setCopied(0))
                 .then(() => {
@@ -159,7 +166,15 @@ export function RecordView({
                   setCopied(CLIPBOARD_SECONDS)
                   toast(`${primary.label} copiado`, 'A área de transferência é limpa em 30 segundos.')
                 })
-                .catch(() => toast('Não foi possível copiar', 'O navegador bloqueou o acesso à área de transferência nesta página.', 'error'))
+                .catch(() =>
+                  toast(
+                    'Não foi possível copiar',
+                    refused instanceof ApiError
+                      ? refused.message
+                      : 'O navegador bloqueou o acesso à área de transferência nesta página.',
+                    'error',
+                  ),
+                )
             }}
           >
             <Copy />
