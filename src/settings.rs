@@ -144,6 +144,20 @@ pub fn dismiss_set_host_hint(vault: &Store) -> Result<()> {
     write(vault, SET_HOST_HINT, "true")
 }
 
+const LANGUAGE: &str = "language";
+
+/// The language this Keyhold speaks, if somebody chose one. `None` until then: the first screen
+/// preselects the browser's and saves it.
+pub fn language(vault: &Store) -> Option<crate::i18n::Lang> {
+    read(vault, LANGUAGE).ok().flatten().map(|tag| crate::i18n::Lang::from_tag(&tag))
+}
+
+pub fn set_language(vault: &Store, lang: crate::i18n::Lang) -> Result<()> {
+    write(vault, LANGUAGE, lang.tag())?;
+    crate::i18n::set(lang);
+    Ok(())
+}
+
 const APPEARANCE: &str = "appearance";
 
 /// How the interface looks: which theme and which accent colour.

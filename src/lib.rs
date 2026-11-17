@@ -27,6 +27,7 @@ pub mod grants;
 pub mod health;
 pub mod hosts;
 pub mod http;
+pub mod i18n;
 pub mod identity;
 pub mod instance;
 pub mod lock;
