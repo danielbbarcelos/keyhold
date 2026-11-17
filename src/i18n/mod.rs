@@ -152,7 +152,7 @@ mod tests {
                     rest = &after[end..];
                     continue;
                 }
-                let template = after[..end].replace("\\\"", "\"").replace("\\\\", "\\");
+                let template = unescape(&after[..end]);
                 match english(&template) {
                     None => missing.push(format!("{}: {template}", file.display())),
                     Some(line) => {
@@ -166,6 +166,37 @@ mod tests {
         }
 
         assert!(missing.is_empty(), "messages without English:\n{}", missing.join("\n"));
+    }
+
+    /// A string literal's source as the compiler reads it: escapes resolved, and a line ending in
+    /// `\` joined to the next one without its leading whitespace.
+    fn unescape(source: &str) -> String {
+        let mut out = String::with_capacity(source.len());
+        let mut chars = source.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c != '\\' {
+                out.push(c);
+                continue;
+            }
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('r') => out.push('\r'),
+                Some('0') => out.push('\0'),
+                Some('\n') => {
+                    while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                        chars.next();
+                    }
+                }
+                Some('u') => {
+                    let code: String = chars.by_ref().skip(1).take_while(|c| *c != '}').collect();
+                    out.extend(u32::from_str_radix(&code, 16).ok().and_then(char::from_u32));
+                }
+                Some(other) => out.push(other),
+                None => {}
+            }
+        }
+        out
     }
 
     fn closing_quote(text: &str) -> Option<usize> {

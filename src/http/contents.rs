@@ -25,6 +25,7 @@ use crate::audit::{self, Detail};
 use crate::attachments;
 use crate::health;
 use crate::records::{self, Payload};
+use crate::tr;
 use crate::transfer;
 use crate::vaults::{self, FolderMeta, VaultMeta};
 
@@ -252,7 +253,7 @@ async fn export_vault(
 ) -> Answer {
     if aws::is_aws_vault(&state, &id) {
         return Err(bad_request(
-            "ainda não é possível exportar um cofre AWS, pois o conteúdo dele fica na AWS",
+            tr!("ainda não é possível exportar um cofre AWS, pois o conteúdo dele fica na AWS"),
         ));
     }
 
@@ -287,7 +288,7 @@ async fn import_into_vault(
     Json(body): Json<ImportRequest>,
 ) -> Answer {
     if aws::is_aws_vault(&state, &id) {
-        return Err(bad_request("ainda não é possível importar para um cofre AWS"));
+        return Err(bad_request(tr!("ainda não é possível importar para um cofre AWS")));
     }
 
     let store = state.store.lock().unwrap();
@@ -351,7 +352,7 @@ async fn add_attachment(
     Json(body): Json<NewAttachment>,
 ) -> Answer {
     let bytes = crate::encoding::from_base64url(&body.data)
-        .ok_or_else(|| bad_request("o conteúdo do arquivo não foi recebido por completo"))?;
+        .ok_or_else(|| bad_request(tr!("o conteúdo do arquivo não foi recebido por completo")))?;
 
     let mime = if body.mime.is_empty() { "application/octet-stream" } else { &body.mime };
 
@@ -620,7 +621,7 @@ async fn record_activity(
             };
             let person = match &event.actor {
                 audit::Actor::You => serde_json::Value::Null,
-                audit::Actor::Agent { process, .. } => json!(format!("agente {process}")),
+                audit::Actor::Agent { process, .. } => json!(tr!("agente {process}", process = process)),
             };
             json!({ "at": event.at, "person": person, "action": action, "detail": event.detail })
         })
@@ -636,7 +637,7 @@ async fn share_record(
     Json(body): Json<aws::ShareBody>,
 ) -> Answer {
     if !is_aws_id(&id) {
-        return Err(bad_request(anyhow::anyhow!("um cofre local compartilha por arquivo, não por link")));
+        return Err(bad_request(tr!("um cofre local compartilha por arquivo, não por link")));
     }
 
     aws::share_record(&state, &id, body).await
@@ -681,7 +682,7 @@ async fn share_file(
     Json(body): Json<ShareFileBody>,
 ) -> Answer {
     if is_aws_id(&id) {
-        return Err(bad_request(anyhow::anyhow!("um cofre AWS compartilha por link")));
+        return Err(bad_request(tr!("um cofre AWS compartilha por link")));
     }
 
     let store = state.store.lock().unwrap();
@@ -702,7 +703,7 @@ async fn share_file(
     audit::note(&store, &state.lock, audit::action::RECORD_SHARED, Some(&id), detail);
 
     Ok(Json(json!({
-        "name": "compartilhamento.zip",
+        "name": format!("{}.zip", tr!("compartilhamento")),
         "inner": name,
         "data": crate::encoding::base64url(&archive),
         "password": password,
@@ -960,11 +961,11 @@ async fn totp_code(
         .fields
         .get(index)
         .filter(|f| f.kind == "totp")
-        .ok_or_else(|| bad_request(anyhow::anyhow!("o campo não é um código 2FA")))?;
+        .ok_or_else(|| bad_request(tr!("o campo não é um código 2FA")))?;
 
     let (code, remaining) =
         crate::totp::code_for_field(&field.value, crate::identity::now_seconds())
-            .ok_or_else(|| bad_request(anyhow::anyhow!("o segredo do campo não é um 2FA válido")))?;
+            .ok_or_else(|| bad_request(tr!("o segredo do campo não é um 2FA válido")))?;
 
     Ok(Json(json!({ "code": code, "remaining": remaining })))
 }
@@ -1052,10 +1053,10 @@ async fn move_record(
 
     // A17 is not done: a local record does not go into an AWS vault by being dragged there.
     if body.vault_id.as_deref().is_some_and(|to| aws::is_aws_vault(&state, to)) {
-        return Err(bad_request(
+        return Err(bad_request(tr!(
             "um registro local não vai para um cofre AWS ao ser arrastado. Use “Copiar para outro \
-             local”: ele copia para o outro cofre e, ao final, oferece excluir o original",
-        ));
+             local”: ele copia para o outro cofre e, ao final, oferece excluir o original"
+        )));
     }
 
     let mut store = state.store.lock().unwrap();

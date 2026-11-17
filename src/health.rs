@@ -21,6 +21,7 @@ use serde::Serialize;
 use crate::crypto::SecretKey;
 use crate::db::Store;
 use crate::records::{self, Payload};
+use crate::tr;
 
 /// Below this, length has stopped carrying the password.
 const SHORT_LENGTH: usize = 12;
@@ -32,23 +33,23 @@ pub const STALE_DAYS: i64 = 365;
 ///
 /// Not a dictionary — a dictionary in the binary would be a large file that still misses the
 /// password in front of it. These are the *patterns* that describe most human passwords.
-fn predictable(value: &str) -> Option<&'static str> {
+fn predictable(value: &str) -> Option<String> {
     let lower = value.to_lowercase();
 
     // Ordered from the most specific description to the least. A run of letters contains "abcd",
     // so checking the common-sequence list first would report every all-letter password as a
     // keyboard run — true, and less useful than saying it has no digits or symbols at all.
     if value.chars().all(|c| c.is_ascii_digit()) {
-        return Some("apenas números");
+        return Some(tr!("apenas números"));
     }
 
     if value.chars().all(|c| c.is_alphabetic()) {
-        return Some("apenas letras");
+        return Some(tr!("apenas letras"));
     }
 
     for common in ["senha", "password", "qwerty", "asdf", "zxcv", "1234", "admin", "abcd"] {
         if lower.contains(common) {
-            return Some("uma sequência comum");
+            return Some(tr!("uma sequência comum"));
         }
     }
 
@@ -61,7 +62,7 @@ fn predictable(value: &str) -> Option<&'static str> {
         let head = &trimmed[..trimmed.len() - digits_at_end];
 
         if !head.is_empty() && head.chars().all(char::is_alphabetic) {
-            return Some("uma palavra com números no fim");
+            return Some(tr!("uma palavra com números no fim"));
         }
     }
 
@@ -157,34 +158,34 @@ pub fn examine(store: &Store, master: &SecretKey, vault_id: &str) -> Result<Vaul
 
         if record.header.compromised_at.is_some() {
             issues.push(Issue::Compromised);
-            reasons.push("Este segredo foi marcado como comprometido.".to_string());
+            reasons.push(tr!("Este segredo foi marcado como comprometido."));
         }
 
         if let Some(due) = &record.header.rotation_due_at {
             if parse_date(due).map(|when| when <= now).unwrap_or(false) {
                 issues.push(Issue::Rotation);
-                reasons.push("A data de troca já passou.".to_string());
+                reasons.push(tr!("A data de troca já passou."));
             }
         }
 
         for secret in secrets_of(&record.payload) {
             if counts.get(secret).copied().unwrap_or(0) > 1 {
                 push_once(&mut issues, &mut reasons, Issue::Reused,
-                    "Esta senha está repetida em outro registro deste cofre.".to_string());
+                    tr!("Esta senha está repetida em outro registro deste cofre."));
             }
 
             if secret.chars().count() < SHORT_LENGTH {
                 push_once(&mut issues, &mut reasons, Issue::Weak,
-                    format!("A senha tem menos de {SHORT_LENGTH} caracteres."));
+                    tr!("A senha tem menos de {length} caracteres.", length = SHORT_LENGTH));
             }
 
             if classes(secret) == 1 {
                 push_once(&mut issues, &mut reasons, Issue::Weak,
-                    "A senha usa apenas um tipo de caractere.".to_string());
+                    tr!("A senha usa apenas um tipo de caractere."));
             }
 
             if let Some(shape) = predictable(secret) {
-                push_once(&mut issues, &mut reasons, Issue::Weak, format!("A senha segue um padrão previsível: {shape}."));
+                push_once(&mut issues, &mut reasons, Issue::Weak, tr!("A senha segue um padrão previsível: {shape}.", shape = shape));
             }
 
             let title = record.payload.title.to_lowercase();
@@ -195,7 +196,7 @@ pub fn examine(store: &Store, master: &SecretKey, vault_id: &str) -> Result<Vaul
                 || (!username.is_empty() && lower.contains(&username))
             {
                 push_once(&mut issues, &mut reasons, Issue::Weak,
-                    "Repete o título ou o usuário do próprio registro.".to_string());
+                    tr!("Repete o título ou o usuário do próprio registro."));
             }
         }
 
@@ -205,7 +206,7 @@ pub fn examine(store: &Store, master: &SecretKey, vault_id: &str) -> Result<Vaul
 
                 if days >= STALE_DAYS {
                     issues.push(Issue::Stale);
-                    reasons.push(format!("A senha não é trocada há {days} dias."));
+                    reasons.push(tr!("A senha não é trocada há {days} dias.", days = days));
                 }
             }
         }

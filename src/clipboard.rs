@@ -16,6 +16,8 @@ use std::process::{Command, Stdio};
 
 use anyhow::{bail, Result};
 
+use crate::tr;
+
 /// How long a copied secret stays on the clipboard.
 pub const CLEAR_AFTER_SECONDS: u64 = 45;
 
@@ -75,7 +77,7 @@ fn writer() -> Option<(&'static str, Vec<&'static str>)> {
 
 fn write(value: &str) -> Result<()> {
     let Some((program, args)) = writer() else {
-        bail!("nenhuma ferramenta de área de transferência encontrada (instale wl-clipboard ou xclip)");
+        bail!(tr!("nenhuma ferramenta de área de transferência encontrada (instale wl-clipboard ou xclip)"));
     };
 
     let mut child = Command::new(program)
@@ -90,7 +92,7 @@ fn write(value: &str) -> Result<()> {
     child
         .stdin
         .as_mut()
-        .ok_or_else(|| anyhow::anyhow!("não foi possível escrever na área de transferência"))?
+        .ok_or_else(|| anyhow::anyhow!(tr!("não foi possível escrever na área de transferência")))?
         .write_all(value.as_bytes())?;
 
     // xclip holds the selection by staying alive; waiting for it would block until the clipboard is

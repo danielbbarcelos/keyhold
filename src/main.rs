@@ -7,7 +7,7 @@
 //! What this binary does when run with no arguments: opens the vault file, picks a free loopback
 //! port, serves the interface, and points a browser at it with a one-time code.
 
-use keyhold::{db, hosts, http, instance, paths, session};
+use keyhold::{db, hosts, http, instance, paths, session, tr};
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -141,7 +141,13 @@ async fn main() -> Result<()> {
             // The command's own exit code, so this composes in a shell like anything else.
             std::process::exit(code);
         }
-        Some(Cmd::SetHost { name, remove, install_ca }) => set_host(name, remove, install_ca),
+        Some(Cmd::SetHost { name, remove, install_ca }) => {
+            // Run as root, away from the vault and its language setting: the terminal's says it.
+            if let Ok(tag) = std::env::var("LANG") {
+                keyhold::i18n::set(keyhold::i18n::Lang::from_tag(&tag));
+            }
+            set_host(name, remove, install_ca)
+        }
         None => serve(cli).await,
     }
 }
@@ -311,7 +317,7 @@ async fn serve(cli: Cli) -> Result<()> {
         // the dialog they were looking at. On a plain start they clicked the icon and are watching
         // for exactly this, so saying it would be noise.
         if took_over {
-            instance::announce("Comecei de novo. O cofre está trancado, na aba nova do navegador.");
+            instance::announce(&tr!("Comecei de novo. O cofre está trancado, na aba nova do navegador."));
         }
     }
 
@@ -325,7 +331,7 @@ async fn serve(cli: Cli) -> Result<()> {
         tokio::spawn(async move {
             while signals.recv().await.is_some() {
                 http::present(&state);
-                instance::announce("O cofre já estava aberto. A janela está no seu navegador.");
+                instance::announce(&tr!("O cofre já estava aberto. A janela está no seu navegador."));
             }
         });
     }
@@ -448,11 +454,11 @@ fn ask_to_install_authority() -> bool {
     }
 
     println!();
-    println!("  Para HTTPS, o mkcert precisa instalar uma autoridade local. Ela passa a ser aceita");
-    println!("  pelos navegadores desta máquina para qualquer site, e a chave dela fica na sua home");
-    println!("  (~/.local/share/mkcert). Quem copiar esse arquivo consegue se passar por qualquer site");
-    println!("  aqui. Se você já usa mkcert, nada muda.");
-    print!("  Instalar? [s/N] ");
+    println!(
+        "{}",
+        tr!("  Para HTTPS, o mkcert precisa instalar uma autoridade local. Ela passa a ser aceita\n  pelos navegadores desta máquina para qualquer site, e a chave dela fica na sua home\n  (~/.local/share/mkcert). Quem copiar esse arquivo consegue se passar por qualquer site\n  aqui. Se você já usa mkcert, nada muda.")
+    );
+    print!("{}", tr!("  Instalar? [s/N] "));
     let _ = std::io::stdout().flush();
 
     let mut answer = String::new();
@@ -463,10 +469,10 @@ fn ask_to_install_authority() -> bool {
 
 #[cfg(windows)]
 fn set_host(_name: Option<String>, _remove: bool, _install_ca: bool) -> Result<()> {
-    anyhow::bail!(
+    anyhow::bail!(tr!(
         "set-host ainda não existe no Windows. O Keyhold funciona em http://127.0.0.1, que é o \
          endereço que ele abre sozinho"
-    )
+    ))
 }
 
 #[cfg(unix)]
@@ -487,22 +493,24 @@ fn set_host(name: Option<String>, remove: bool, install_ca: bool) -> Result<()> 
             .map(|path| path.display().to_string())
             .unwrap_or_else(|_| "keyhold".to_string());
 
-        anyhow::bail!(
-            "mexer no /etc/hosts precisa de sudo. Rode de novo assim:\n\n    sudo {me} set-host {again}\n"
-        );
+        anyhow::bail!(tr!(
+            "mexer no /etc/hosts precisa de sudo. Rode de novo assim:\n\n    sudo {me} set-host {again}\n",
+            me = me,
+            again = again
+        ));
     }
 
     let path = std::path::Path::new(hosts::HOSTS_FILE);
-    let current = std::fs::read_to_string(path).context("não consegui ler o /etc/hosts")?;
+    let current = std::fs::read_to_string(path).context(tr!("não consegui ler o /etc/hosts"))?;
 
     if remove {
         hosts::replace_file(path, &hosts::without(&current))?;
         let removed = hosts::remove_certificate()?;
         println!();
         if removed {
-            println!("  Pronto: o nome e o certificado do Keyhold saíram. Reinicie o Keyhold para valer.");
+            println!("{}", tr!("  Pronto: o nome e o certificado do Keyhold saíram. Reinicie o Keyhold para valer."));
         } else {
-            println!("  O nome saiu do /etc/hosts. O certificado fica: rode com sudo (não como root) para apagá-lo.");
+            println!("{}", tr!("  O nome saiu do /etc/hosts. O certificado fica: rode com sudo (não como root) para apagá-lo."));
         }
         println!();
 
@@ -512,7 +520,7 @@ fn set_host(name: Option<String>, remove: bool, install_ca: bool) -> Result<()> 
     hosts::replace_file(path, &hosts::with_name(&current, &name))?;
 
     println!();
-    println!("  {name} aponta para 127.0.0.1 no /etc/hosts.");
+    println!("{}", tr!("  {name} aponta para 127.0.0.1 no /etc/hosts.", name = name));
 
     let mut made = hosts::make_certificate(&name, install_ca)?;
 
@@ -529,31 +537,35 @@ fn set_host(name: Option<String>, remove: bool, install_ca: bool) -> Result<()> 
     let scheme = match made {
         hosts::Certificate::NeedsAuthority => {
             println!();
-            println!("  Sem a autoridade local do mkcert, o Keyhold fica em HTTP por esse nome. Para ter");
-            println!("  HTTPS, rode de novo e responda que sim, ou passe --install-ca.");
+            println!(
+                "{}",
+                tr!("  Sem a autoridade local do mkcert, o Keyhold fica em HTTP por esse nome. Para ter\n  HTTPS, rode de novo e responda que sim, ou passe --install-ca.")
+            );
             "http"
         }
         hosts::Certificate::Made { cert } => {
-            println!("  Certificado do mkcert em {}.", cert.display());
+            println!("{}", tr!("  Certificado do mkcert em {path}.", path = cert.display()));
             "https"
         }
         hosts::Certificate::NoMkcert => {
             println!();
-            println!("  Sem mkcert, o Keyhold fica em HTTP por esse nome, e o navegador não deixa");
-            println!("  copiar senhas nem mostrar notificações fora de 127.0.0.1. Para ter HTTPS:");
+            println!(
+                "{}",
+                tr!("  Sem mkcert, o Keyhold fica em HTTP por esse nome, e o navegador não deixa\n  copiar senhas nem mostrar notificações fora de 127.0.0.1. Para ter HTTPS:")
+            );
             println!();
             println!("      sudo apt install mkcert libnss3-tools");
             println!("      sudo {} set-host {name}", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "keyhold".into()));
             "http"
         }
         hosts::Certificate::NoInvoker => {
-            println!("  Sem saber quem chamou o sudo, não gerei certificado: rode com sudo, não como root.");
+            println!("{}", tr!("  Sem saber quem chamou o sudo, não gerei certificado: rode com sudo, não como root."));
             "http"
         }
     };
 
     println!();
-    println!("  Reinicie o Keyhold para ele passar a atender por esse nome:");
+    println!("{}", tr!("  Reinicie o Keyhold para ele passar a atender por esse nome:"));
     println!();
     println!("      {scheme}://{name}:{DEFAULT_PORT}");
     println!();

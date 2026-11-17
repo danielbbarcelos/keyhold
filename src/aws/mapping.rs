@@ -35,6 +35,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::encoding::{base64url, from_base64url};
 use crate::records::{Alert, Field, Icon, Payload};
+use crate::tr;
 use crate::vaults::FolderNode;
 
 /// What every AWS id starts with. A local id is base32, which never contains `~`.
@@ -231,7 +232,7 @@ pub fn normalize_root(root: &str) -> Result<Option<String>, String> {
     validate_name(&root)?;
 
     if root.split('/').any(|segment| segment == KEEP) {
-        return Err(format!("o caminho {root} não pode conter {KEEP}"));
+        return Err(tr!("o caminho {root} não pode conter {keep}", root = root, keep = KEEP));
     }
 
     Ok(Some(root))
@@ -278,20 +279,21 @@ pub fn is_keep(name: &str) -> bool {
 /// A segment as Parameter Store allows it: letters, digits, `.`, `-` and `_`.
 pub fn validate_segment(segment: &str) -> Result<(), String> {
     if segment.is_empty() {
-        return Err("o nome não pode ficar vazio".into());
+        return Err(tr!("o nome não pode ficar vazio"));
     }
 
     if let Some(bad) = segment
         .chars()
         .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')))
     {
-        return Err(format!(
-            "o nome não pode conter '{bad}'. Na AWS, use apenas letras sem acento, números, ponto, hífen e sublinhado"
+        return Err(tr!(
+            "o nome não pode conter '{bad}'. Na AWS, use apenas letras sem acento, números, ponto, hífen e sublinhado",
+            bad = bad
         ));
     }
 
     if segment == KEEP {
-        return Err("esse nome é reservado para as pastas".into());
+        return Err(tr!("esse nome é reservado para as pastas"));
     }
 
     Ok(())
@@ -302,19 +304,19 @@ pub fn validate_name(name: &str) -> Result<(), String> {
     let absolute = absolute(name);
 
     if absolute.len() > NAME_LIMIT {
-        return Err(format!("o nome ultrapassa {NAME_LIMIT} caracteres"));
+        return Err(tr!("o nome ultrapassa {limit} caracteres", limit = NAME_LIMIT));
     }
 
     let segments: Vec<&str> = absolute.split('/').skip(1).collect();
 
     if segments.len() > MAX_LEVELS {
-        return Err(format!("a AWS aceita no máximo {MAX_LEVELS} níveis de pasta"));
+        return Err(tr!("a AWS aceita no máximo {levels} níveis de pasta", levels = MAX_LEVELS));
     }
 
     if let Some(first) = segments.first() {
         let lower = first.to_ascii_lowercase();
         if lower.starts_with("aws") || lower.starts_with("ssm") {
-            return Err("a AWS reserva nomes que começam com aws ou ssm".into());
+            return Err(tr!("a AWS reserva nomes que começam com aws ou ssm"));
         }
     }
 
@@ -328,11 +330,11 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 /// A title or folder name may not contain `/`: it would read as one more folder.
 pub fn validate_title(title: &str) -> Result<(), String> {
     if title.trim().is_empty() {
-        return Err("o registro precisa de um título".into());
+        return Err(tr!("o registro precisa de um título"));
     }
 
     if title.contains('/') {
-        return Err("o título não pode conter '/', pois na AWS a barra cria uma pasta".into());
+        return Err(tr!("o título não pode conter '/', pois na AWS a barra cria uma pasta"));
     }
 
     Ok(())
@@ -422,9 +424,11 @@ pub fn description_for(title: &str) -> Result<String, String> {
     let length = title.chars().count();
 
     if length > DESCRIPTION_LIMIT {
-        return Err(format!(
-            "na AWS, o título aceita até {DESCRIPTION_LIMIT} caracteres, e este tem {length}. \
-             Encurte o título"
+        return Err(tr!(
+            "na AWS, o título aceita até {limit} caracteres, e este tem {length}. \
+             Encurte o título",
+            limit = DESCRIPTION_LIMIT,
+            length = length
         ));
     }
 
@@ -495,11 +499,11 @@ pub fn encode_value(payload: &Payload) -> Result<(String, bool), String> {
     };
 
     if value.len() > ADVANCED_LIMIT {
-        return Err(format!(
-            "na AWS, um parâmetro armazena até {} KB, e este registro (campos e notas) tem {:.1} KB. \
+        return Err(tr!(
+            "na AWS, um parâmetro armazena até {limit} KB, e este registro (campos e notas) tem {size} KB. \
              Mova o conteúdo maior para um anexo",
-            ADVANCED_LIMIT / 1024,
-            value.len() as f64 / 1024.0
+            limit = ADVANCED_LIMIT / 1024,
+            size = format!("{:.1}", value.len() as f64 / 1024.0)
         ));
     }
 
@@ -728,7 +732,7 @@ pub fn rotation_date(due: &str) -> Result<String, String> {
     if ok {
         Ok(day.to_string())
     } else {
-        Err("a data de troca precisa estar no formato AAAA-MM-DD".into())
+        Err(tr!("a data de troca precisa estar no formato AAAA-MM-DD"))
     }
 }
 

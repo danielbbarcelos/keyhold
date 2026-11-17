@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use crate::crypto::{self, KdfParams, SecretKey, SALT_LEN};
 use crate::db::Store;
 use crate::records::{self, Field, Payload};
+use crate::tr;
 use crate::vaults;
 
 /// What the archive says about itself, and what the ciphertext is bound to.
@@ -80,7 +81,7 @@ pub fn export(
     passphrase: &str,
 ) -> Result<Envelope> {
     if passphrase.chars().count() < MIN_PASSPHRASE {
-        bail!("a senha do arquivo precisa de pelo menos {MIN_PASSPHRASE} caracteres");
+        bail!(tr!("a senha do arquivo precisa de pelo menos {min} caracteres", min = MIN_PASSPHRASE));
     }
 
     let vault = vaults::read_vault(store, master, vault_id)?;
@@ -130,29 +131,29 @@ pub fn export(
 /// Open an archive produced by [`export`].
 pub fn open_archive(envelope: &Envelope, passphrase: &str) -> Result<Archive> {
     if envelope.format != FORMAT {
-        bail!("o arquivo não foi exportado pelo Keyhold");
+        bail!(tr!("o arquivo não foi exportado pelo Keyhold"));
     }
 
     if envelope.version > VERSION {
-        bail!(
-            "o arquivo foi gerado por uma versão mais nova do Keyhold (formato {}). Atualize o Keyhold para importá-lo",
-            envelope.version
-        );
+        bail!(tr!(
+            "o arquivo foi gerado por uma versão mais nova do Keyhold (formato {version}). Atualize o Keyhold para importá-lo",
+            version = envelope.version
+        ));
     }
 
     envelope.kdf_params.validate()?;
 
     let salt = crate::encoding::from_base64url(&envelope.salt)
-        .ok_or_else(|| anyhow!("o cabeçalho do arquivo está corrompido"))?;
+        .ok_or_else(|| anyhow!(tr!("o cabeçalho do arquivo está corrompido")))?;
     let sealed = crate::encoding::from_base64url(&envelope.sealed)
-        .ok_or_else(|| anyhow!("o conteúdo do arquivo está corrompido"))?;
+        .ok_or_else(|| anyhow!(tr!("o conteúdo do arquivo está corrompido")))?;
 
     let key = crypto::derive_key(passphrase, &salt, envelope.kdf_params)?;
 
     let bytes = crypto::open(&key, &sealed, &archive_aad())
-        .map_err(|_| anyhow!("a senha não corresponde a este arquivo"))?;
+        .map_err(|_| anyhow!(tr!("a senha não corresponde a este arquivo")))?;
 
-    serde_json::from_slice(&bytes).context("o arquivo foi aberto, mas o conteúdo não é legível")
+    serde_json::from_slice(&bytes).context(tr!("o arquivo foi aberto, mas o conteúdo não é legível"))
 }
 
 #[derive(Debug, Serialize)]
@@ -221,7 +222,7 @@ pub fn from_csv(text: &str) -> Result<Vec<ExportedRecord>> {
     let mut rows = parse_csv(text);
 
     if rows.is_empty() {
-        bail!("o arquivo está vazio");
+        bail!(tr!("o arquivo está vazio"));
     }
 
     let header: Vec<String> = rows.remove(0).into_iter().map(|cell| cell.to_lowercase()).collect();
@@ -231,7 +232,7 @@ pub fn from_csv(text: &str) -> Result<Vec<ExportedRecord>> {
     };
 
     let title = column(&["name", "title", "nome", "título", "titulo", "account"])
-        .ok_or_else(|| anyhow!("o CSV não possui uma coluna de nome (name, title, nome)"))?;
+        .ok_or_else(|| anyhow!(tr!("o CSV não possui uma coluna de nome (name, title, nome)")))?;
     // Bitwarden prefixes its login columns with `login_`.
     let username = column(&["username", "user", "login", "login_username", "usuário", "usuario", "email"]);
     let password = column(&["password", "senha", "pass", "login_password"]);
@@ -297,7 +298,7 @@ pub fn from_csv(text: &str) -> Result<Vec<ExportedRecord>> {
     }
 
     if found.is_empty() {
-        bail!("nenhuma linha do CSV possui um nome");
+        bail!(tr!("nenhuma linha do CSV possui um nome"));
     }
 
     Ok(found)

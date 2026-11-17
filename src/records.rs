@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::{self, unwrap_key, wrap_key, SecretKey};
 use crate::db::Store;
+use crate::tr;
 use crate::vaults::{self, new_id};
 
 /// What older versions of keyhold called a record's kind.
@@ -415,7 +416,7 @@ pub fn list_with_previews(
             },
             None => RecordPreview {
                 header,
-                title: "(não foi possível abrir)".into(),
+                title: tr!("(não foi possível abrir)"),
                 subtitle: String::new(),
                 url: String::new(),
                 icon: None,
@@ -437,7 +438,7 @@ pub fn header(store: &Store, id: &str) -> Result<RecordHeader> {
             row_to_header,
         )
         .optional()?
-        .ok_or_else(|| anyhow!("o registro não foi encontrado"))
+        .ok_or_else(|| anyhow!(tr!("o registro não foi encontrado")))
 }
 
 /// Open one record.
@@ -822,7 +823,7 @@ fn check_folder(store: &Store, vault_id: &str, folder_id: Option<&str>) -> Resul
 
 fn changed(rows: usize) -> Result<()> {
     if rows == 0 {
-        bail!("o registro não foi encontrado");
+        bail!(tr!("o registro não foi encontrado"));
     }
 
     Ok(())
@@ -907,10 +908,10 @@ pub fn unseal(incoming: &mut Payload, stored: &Payload) -> Result<()> {
             .fields
             .get(index)
             .filter(|source| is_secret_kind(&source.kind))
-            .ok_or_else(|| anyhow!("um campo protegido não corresponde mais ao registro salvo; abra o registro de novo"))?;
+            .ok_or_else(|| anyhow!(tr!("um campo protegido não corresponde mais ao registro salvo; abra o registro de novo")))?;
 
         if !is_secret_kind(&field.kind) {
-            bail!("um campo protegido só pode continuar como campo protegido; revele o valor antes de mudar o tipo");
+            bail!(tr!("um campo protegido só pode continuar como campo protegido; revele o valor antes de mudar o tipo"));
         }
 
         field.value = source.value.clone();
@@ -929,7 +930,7 @@ pub fn unseal(incoming: &mut Payload, stored: &Payload) -> Result<()> {
 /// Refuse a payload that claims to keep a secret it has nothing to keep it from (a new record).
 pub fn refuse_seals(payload: &Payload) -> Result<()> {
     if payload.fields.iter().any(|field| field.sealed.is_some()) {
-        bail!("um registro novo não pode ter campos protegidos sem valor");
+        bail!(tr!("um registro novo não pode ter campos protegidos sem valor"));
     }
 
     Ok(())
@@ -941,7 +942,7 @@ pub fn secret_of(payload: &Payload, index: usize) -> Result<serde_json::Value> {
         .fields
         .get(index)
         .filter(|field| is_secret_kind(&field.kind))
-        .ok_or_else(|| anyhow!("o campo não é protegido"))?;
+        .ok_or_else(|| anyhow!(tr!("o campo não é protegido")))?;
 
     let extra: BTreeMap<&str, &String> = SECRET_PARTS
         .iter()

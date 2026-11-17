@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::crypto::{self, SecretKey};
 use crate::db::Store;
 use crate::encoding::{base64url, from_base64url};
+use crate::tr;
 
 const SETTING: &str = "aws_config";
 const AAD: &[u8] = b"keyhold:aws-config:v1";
@@ -131,10 +132,10 @@ pub fn load(store: &Store, master: &SecretKey) -> Result<AwsConfig> {
         return Ok(AwsConfig::default());
     };
 
-    let sealed = from_base64url(&raw).context("a configuração da AWS está danificada")?;
-    let bytes = crypto::open(master, &sealed, AAD).context("não foi possível abrir a configuração da AWS")?;
+    let sealed = from_base64url(&raw).context(tr!("a configuração da AWS está danificada"))?;
+    let bytes = crypto::open(master, &sealed, AAD).context(tr!("não foi possível abrir a configuração da AWS"))?;
 
-    serde_json::from_slice(&bytes).context("a configuração da AWS não é legível")
+    serde_json::from_slice(&bytes).context(tr!("a configuração da AWS não é legível"))
 }
 
 pub fn save(store: &Store, master: &SecretKey, config: &AwsConfig) -> Result<()> {

@@ -17,6 +17,7 @@ use crate::crypto::{self, SecretKey};
 use crate::db::Store;
 use crate::encoding::{base64url, from_base64url};
 use crate::records::{Icon, ICON_IMAGE_LIMIT};
+use crate::tr;
 
 const ICONS_SETTING: &str = "custom_icons";
 const ICONS_AAD: &[u8] = b"keyhold:custom-icons:v1";
@@ -132,10 +133,10 @@ fn read<T: DeserializeOwned>(store: &Store, master: &SecretKey, setting: &str, a
         return Ok(None);
     };
 
-    let sealed = from_base64url(&raw).context("a personalização está danificada")?;
-    let bytes = crypto::open(master, &sealed, aad).context("não foi possível abrir a personalização")?;
+    let sealed = from_base64url(&raw).context(tr!("a personalização está danificada"))?;
+    let bytes = crypto::open(master, &sealed, aad).context(tr!("não foi possível abrir a personalização"))?;
 
-    Ok(Some(serde_json::from_slice(&bytes).context("a personalização não é legível")?))
+    Ok(Some(serde_json::from_slice(&bytes).context(tr!("a personalização não é legível"))?))
 }
 
 fn write<T: Serialize>(store: &Store, master: &SecretKey, setting: &str, aad: &[u8], value: &T) -> Result<()> {
@@ -152,10 +153,10 @@ fn write<T: Serialize>(store: &Store, master: &SecretKey, setting: &str, aad: &[
 
 fn check_image(image: &str) -> Result<()> {
     if !image.starts_with("data:image/") {
-        bail!("o ícone precisa ser uma imagem");
+        bail!(tr!("o ícone precisa ser uma imagem"));
     }
     if image.len() > ICON_IMAGE_LIMIT {
-        bail!("a imagem do ícone é grande demais");
+        bail!(tr!("a imagem do ícone é grande demais"));
     }
 
     Ok(())
@@ -167,7 +168,7 @@ pub fn load_icons(store: &Store, master: &SecretKey) -> Result<Vec<CustomIcon>> 
 
 pub fn save_icons(store: &Store, master: &SecretKey, icons: Vec<CustomIcon>) -> Result<Vec<CustomIcon>> {
     if icons.len() > MAX_ICONS {
-        bail!("a biblioteca guarda até {MAX_ICONS} ícones");
+        bail!(tr!("a biblioteca guarda até {max} ícones", max = MAX_ICONS));
     }
 
     let mut kept = Vec::with_capacity(icons.len());
@@ -197,7 +198,7 @@ pub fn load_types(store: &Store, master: &SecretKey) -> Result<Vec<RecordType>> 
 
 pub fn save_types(store: &Store, master: &SecretKey, types: Vec<RecordType>) -> Result<Vec<RecordType>> {
     if types.len() > MAX_TYPES {
-        bail!("o Keyhold guarda até {MAX_TYPES} tipos de registro");
+        bail!(tr!("o Keyhold guarda até {max} tipos de registro", max = MAX_TYPES));
     }
 
     let mut kept = Vec::with_capacity(types.len());
@@ -207,7 +208,7 @@ pub fn save_types(store: &Store, master: &SecretKey, types: Vec<RecordType>) -> 
             continue;
         }
         if one.fields.len() > MAX_FIELDS {
-            bail!("um tipo de registro tem até {MAX_FIELDS} campos");
+            bail!(tr!("um tipo de registro tem até {max} campos", max = MAX_FIELDS));
         }
         if let Some(image) = one.icon.image.as_deref() {
             check_image(image)?;
@@ -216,7 +217,7 @@ pub fn save_types(store: &Store, master: &SecretKey, types: Vec<RecordType>) -> 
         let mut fields = Vec::with_capacity(one.fields.len());
         for f in one.fields {
             if !FIELD_KINDS.contains(&f.kind.as_str()) {
-                bail!("o tipo de campo \"{}\" não existe", clipped(&f.kind, 32));
+                bail!(tr!("o tipo de campo \"{kind}\" não existe", kind = clipped(&f.kind, 32)));
             }
             fields.push(TypeField { kind: f.kind, label: clipped(&f.label, MAX_NAME) });
         }

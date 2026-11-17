@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::crypto::{self, SecretKey};
 use crate::db::Store;
 use crate::encoding::{base64url, from_base64url};
+use crate::tr;
 
 const SETTING: &str = "alert_presets";
 const AAD: &[u8] = b"keyhold:alert-presets:v1";
@@ -88,10 +89,10 @@ pub fn load(store: &Store, master: &SecretKey) -> Result<Vec<Preset>> {
         return Ok(starters());
     };
 
-    let sealed = from_base64url(&raw).context("os alertas padrão estão danificados")?;
-    let bytes = crypto::open(master, &sealed, AAD).context("não foi possível abrir os alertas padrão")?;
+    let sealed = from_base64url(&raw).context(tr!("os alertas padrão estão danificados"))?;
+    let bytes = crypto::open(master, &sealed, AAD).context(tr!("não foi possível abrir os alertas padrão"))?;
 
-    serde_json::from_slice(&bytes).context("os alertas padrão não são legíveis")
+    serde_json::from_slice(&bytes).context(tr!("os alertas padrão não são legíveis"))
 }
 
 pub fn save(store: &Store, master: &SecretKey, presets: Vec<Preset>) -> Result<Vec<Preset>> {

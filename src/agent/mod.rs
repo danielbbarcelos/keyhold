@@ -46,6 +46,7 @@ use crate::audit::{self, Detail};
 use crate::http::AppState;
 use crate::identity::now_seconds;
 use crate::records;
+use crate::tr;
 use crate::vaults;
 use protocol::{FieldSummary, Peer, RecordSummary, Request, Response};
 
@@ -842,15 +843,18 @@ impl Drop for Release<'_> {
 fn knock_text(request: &PendingRequest) -> String {
     let who = request.peer.parent.as_deref().unwrap_or(&request.peer.process);
     let what = if request.intent == "run" {
-        format!("usar {} de “{}” em um comando", request.field, request.record_title)
+        tr!("usar {field} de “{record}” em um comando", field = request.field, record = request.record_title)
     } else {
-        format!("ler {} de “{}”", request.field, request.record_title)
+        tr!("ler {field} de “{record}”", field = request.field, record = request.record_title)
     };
 
-    format!(
-        "{who} (PID {}) pede para {what}.\n\nO pedido expira em {APPROVAL_TIMEOUT_SECONDS} segundos. \
+    tr!(
+        "{who} (PID {pid}) pede para {what}.\n\nO pedido expira em {seconds} segundos. \
          Abra o Keyhold para permitir ou negar.",
-        request.peer.parent_pid.unwrap_or(request.peer.pid)
+        who = who,
+        pid = request.peer.parent_pid.unwrap_or(request.peer.pid),
+        what = what,
+        seconds = APPROVAL_TIMEOUT_SECONDS
     )
 }
 

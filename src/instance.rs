@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::{paths, procinfo};
+use crate::{paths, procinfo, tr};
 
 /// How long a replaced instance gets to close the vault properly before it is taken down.
 const GRACE: Duration = Duration::from_secs(5);
@@ -195,29 +195,31 @@ fn ask_in_terminal(other: &Marker, can_present: bool) -> Choice {
 }
 
 fn ask_on_desktop(other: &Marker, can_present: bool) -> Choice {
-    const START_OVER: &str = "Encerrar e começar de novo";
+    let start_over = tr!("Encerrar e começar de novo");
+    let open = tr!("Abrir e continuar");
+    let cancel = tr!("Cancelar");
 
     let text = if can_present {
-        format!(
-            "O Keyhold já está aberto (PID {}).\n\nAbrir e continuar traz para a frente o cofre \
+        tr!(
+            "O Keyhold já está aberto (PID {pid}).\n\nAbrir e continuar traz para a frente o cofre \
              que já está destrancado, sem perder nada.\n\nComeçar de novo encerra a instância \
              atual: o cofre é trancado e a chave mantida por ela é descartada.",
-            other.pid
+            pid = other.pid
         )
     } else {
-        format!(
-            "O Keyhold já está aberto (PID {}), em uma versão diferente do programa, que não pode \
+        tr!(
+            "O Keyhold já está aberto (PID {pid}), em uma versão diferente do programa, que não pode \
              ser trazida para a frente.\n\nComeçar de novo encerra a instância atual: o cofre é \
              trancado e a chave mantida por ela é descartada.",
-            other.pid
+            pid = other.pid
         )
     };
 
     if cfg!(windows) {
         let question = if can_present {
-            format!("{text}\n\nSim: abrir e continuar.\nNão: encerrar e começar de novo.\nCancelar: não fazer nada.")
+            tr!("{text}\n\nSim: abrir e continuar.\nNão: encerrar e começar de novo.\nCancelar: não fazer nada.", text = text)
         } else {
-            format!("{text}\n\nOK: encerrar e começar de novo.\nCancelar: não fazer nada.")
+            tr!("{text}\n\nOK: encerrar e começar de novo.\nCancelar: não fazer nada.", text = text)
         };
 
         return match (windows_dialog(&question, if can_present { "YesNoCancel" } else { "OKCancel" }).as_deref(), can_present) {
@@ -228,13 +230,13 @@ fn ask_on_desktop(other: &Marker, can_present: bool) -> Choice {
     }
 
     if cfg!(target_os = "macos") {
-        let open = "Abrir e continuar";
-        let buttons: &[&str] = if can_present { &["Cancelar", START_OVER, open] } else { &["Cancelar", START_OVER] };
-        let default = if can_present { open } else { "Cancelar" };
+        let buttons: &[&str] =
+            if can_present { &[cancel.as_str(), start_over.as_str(), open.as_str()] } else { &[cancel.as_str(), start_over.as_str()] };
+        let default = if can_present { open.as_str() } else { cancel.as_str() };
 
-        return match mac_dialog(&text, buttons, default).as_deref() {
+        return match mac_dialog(&text, buttons, default) {
             Some(answer) if answer == open => Choice::Present,
-            Some(START_OVER) => Choice::Replace,
+            Some(answer) if answer == start_over => Choice::Replace,
             _ => Choice::Nothing,
         };
     }
@@ -249,11 +251,11 @@ fn ask_on_desktop(other: &Marker, can_present: bool) -> Choice {
 
     if can_present {
         zenity
-            .args(["--ok-label", "Abrir e continuar", "--cancel-label", "Cancelar"])
+            .args(["--ok-label", open.as_str(), "--cancel-label", cancel.as_str()])
             .arg("--extra-button")
-            .arg(START_OVER);
+            .arg(&start_over);
     } else {
-        zenity.args(["--ok-label", START_OVER, "--cancel-label", "Cancelar"]);
+        zenity.args(["--ok-label", start_over.as_str(), "--cancel-label", cancel.as_str()]);
     }
 
     if let Ok(output) = zenity.output() {
@@ -261,7 +263,7 @@ fn ask_on_desktop(other: &Marker, can_present: bool) -> Choice {
             return if can_present { Choice::Present } else { Choice::Replace };
         }
 
-        return if String::from_utf8_lossy(&output.stdout).trim() == START_OVER {
+        return if String::from_utf8_lossy(&output.stdout).trim() == start_over {
             Choice::Replace
         } else {
             Choice::Nothing
@@ -273,13 +275,13 @@ fn ask_on_desktop(other: &Marker, can_present: bool) -> Choice {
         Command::new("kdialog")
             .args(["--title", "Keyhold", "--yesnocancel"])
             .arg(&text)
-            .args(["--yes-label", "Abrir e continuar", "--no-label", START_OVER])
+            .args(["--yes-label", open.as_str(), "--no-label", start_over.as_str()])
             .status()
     } else {
         Command::new("kdialog")
             .args(["--title", "Keyhold", "--yesno"])
             .arg(&text)
-            .args(["--yes-label", START_OVER, "--no-label", "Cancelar"])
+            .args(["--yes-label", start_over.as_str(), "--no-label", cancel.as_str()])
             .status()
     };
 
@@ -295,18 +297,18 @@ fn ask_on_desktop(other: &Marker, can_present: bool) -> Choice {
     // No way to ask means no way to consent to the destructive half. Bringing the open vault
     // forward is not destructive, so that is what happens — and it is said out loud.
     if can_present {
-        announce(&format!(
-            "O Keyhold já estava aberto (PID {}). A janela foi trazida para o seu navegador.",
-            other.pid
+        announce(&tr!(
+            "O Keyhold já estava aberto (PID {pid}). A janela foi trazida para o seu navegador.",
+            pid = other.pid
         ));
 
         return Choice::Present;
     }
 
-    announce(&format!(
-        "O Keyhold já está aberto (PID {}), numa versão diferente, e não há como perguntar o que \
+    announce(&tr!(
+        "O Keyhold já está aberto (PID {pid}), numa versão diferente, e não há como perguntar o que \
          fazer. Nada foi alterado.",
-        other.pid
+        pid = other.pid
     ));
 
     Choice::Nothing
@@ -324,15 +326,15 @@ fn ask_on_desktop(other: &Marker, can_present: bool) -> Choice {
 /// cannot be asked is one to say so about.
 pub fn present(other: &Marker) -> Result<()> {
     if !same_build(other.pid) {
-        bail!(
-            "o Keyhold aberto no PID {} é de outra versão do programa e não pode ser trazido para \
+        bail!(tr!(
+            "o Keyhold aberto no PID {pid} é de outra versão do programa e não pode ser trazido para \
              a frente. Encerre e comece de novo.",
-            other.pid
-        );
+            pid = other.pid
+        ));
     }
 
     if !ask_to_show(other) {
-        bail!("não foi possível falar com o Keyhold no PID {}", other.pid);
+        bail!(tr!("não foi possível falar com o Keyhold no PID {pid}", pid = other.pid));
     }
 
     Ok(())
@@ -408,11 +410,12 @@ fn same_build(pid: i32) -> bool {
 /// Without zenity or kdialog it falls back to a notification, which cannot answer — and so the
 /// answer is no, and the interface stays where it is.
 pub async fn ask_to_open(text: &str) -> bool {
-    const OPEN: &str = "Abrir o Keyhold";
+    let open = tr!("Abrir o Keyhold");
+    let not_now = tr!("Agora não");
 
     if cfg!(windows) {
-        let text = text.to_string();
-        let answer = tokio::task::spawn_blocking(move || windows_dialog(&format!("{text}\n\nSim: abrir o Keyhold."), "YesNo"))
+        let question = tr!("{text}\n\nSim: abrir o Keyhold.", text = text);
+        let answer = tokio::task::spawn_blocking(move || windows_dialog(&question, "YesNo"))
             .await
             .ok()
             .flatten();
@@ -422,20 +425,20 @@ pub async fn ask_to_open(text: &str) -> bool {
 
     if cfg!(target_os = "macos") {
         let output = tokio::process::Command::new("osascript")
-            .args(mac_dialog_args(text, &["Agora não", OPEN], OPEN))
+            .args(mac_dialog_args(text, &[not_now.as_str(), open.as_str()], &open))
             .stderr(Stdio::null())
             .kill_on_drop(true)
             .output()
             .await;
 
-        return output.is_ok_and(|o| answered(&o.stdout).as_deref() == Some(OPEN));
+        return output.is_ok_and(|o| answered(&o.stdout).as_deref() == Some(open.as_str()));
     }
 
     let zenity = tokio::process::Command::new("zenity")
         .args(["--question", "--title", "Keyhold", "--no-markup"])
         .arg("--text")
         .arg(text)
-        .args(["--ok-label", OPEN, "--cancel-label", "Agora não"])
+        .args(["--ok-label", open.as_str(), "--cancel-label", not_now.as_str()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true)
@@ -449,7 +452,7 @@ pub async fn ask_to_open(text: &str) -> bool {
     let kdialog = tokio::process::Command::new("kdialog")
         .args(["--title", "Keyhold", "--yesno"])
         .arg(text)
-        .args(["--yes-label", OPEN, "--no-label", "Agora não"])
+        .args(["--yes-label", open.as_str(), "--no-label", not_now.as_str()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true)
@@ -542,7 +545,8 @@ pub fn write_opener(address: &str) -> std::io::Result<std::path::PathBuf> {
     let html = format!(
         "<!doctype html><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">\
          <meta http-equiv=\"refresh\" content=\"0;url={escaped}\"><title>Keyhold</title>\
-         <a href=\"{escaped}\">Abrir o Keyhold</a>\n"
+         <a href=\"{escaped}\">{label}</a>\n",
+        label = tr!("Abrir o Keyhold")
     );
 
     crate::paths::write_private_file(&page, html.as_bytes())?;
@@ -780,14 +784,14 @@ pub fn close(pid: i32) -> Result<()> {
     let target = processes()
         .into_iter()
         .find(|one| one.pid == pid)
-        .ok_or_else(|| anyhow::anyhow!("nenhum Keyhold com o PID {pid} nesta máquina"))?;
+        .ok_or_else(|| anyhow::anyhow!(tr!("nenhum Keyhold com o PID {pid} nesta máquina", pid = pid)))?;
 
     if target.is_this_one {
-        bail!("esta é a instância desta janela. Use Trancar agora ou feche a janela");
+        bail!(tr!("esta é a instância desta janela. Use Trancar agora ou feche a janela"));
     }
 
     if !terminate(pid) {
-        bail!("não foi possível pedir o encerramento do PID {pid}");
+        bail!(tr!("não foi possível pedir o encerramento do PID {pid}", pid = pid));
     }
 
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -800,7 +804,7 @@ pub fn close(pid: i32) -> Result<()> {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    bail!("o PID {pid} não respondeu ao pedido de encerramento")
+    bail!(tr!("o PID {pid} não respondeu ao pedido de encerramento", pid = pid))
 }
 
 fn is_keyhold(pid: i32) -> bool {
