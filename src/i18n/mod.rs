@@ -66,7 +66,12 @@ pub fn english(template: &str) -> Option<&'static str> {
 
 /// `template` in the current language, with `{name}` replaced by each value.
 pub fn tr(template: &'static str, values: &[(&str, &dyn Display)]) -> String {
-    let chosen = match current() {
+    tr_in(current(), template, values)
+}
+
+/// [`tr`] in a given language, without touching the current one (tests run in parallel).
+pub fn tr_in(lang: Lang, template: &'static str, values: &[(&str, &dyn Display)]) -> String {
+    let chosen = match lang {
         Lang::Pt => template,
         Lang::En => english(template).unwrap_or(template),
     };
@@ -187,10 +192,8 @@ mod tests {
 
     #[test]
     fn values_fill_either_language() {
-        set(Lang::Pt);
-        assert_eq!(tr!("o cofre não existe mais"), "o cofre não existe mais");
-        set(Lang::En);
-        assert_eq!(tr!("o cofre não existe mais"), "the vault no longer exists");
-        set(Lang::Pt);
+        assert_eq!(tr_in(Lang::Pt, "o cofre não existe mais", &[]), "o cofre não existe mais");
+        assert_eq!(tr_in(Lang::En, "o cofre não existe mais", &[]), "the vault no longer exists");
+        assert_eq!(tr_in(Lang::En, "nada {x}", &[("x", &3)]), "nada 3", "a template without English stays Portuguese");
     }
 }
