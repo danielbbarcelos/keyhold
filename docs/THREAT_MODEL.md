@@ -266,6 +266,22 @@ What that exception rests on, and what it does not claim:
   `keyhold:audit=required`. What the trail cannot see is anybody who uses the console or the CLI:
   for that, CloudTrail. The two new destinations, `logs.<region>` and `sts.<region>`, are AWS's own
   endpoints for the vault's region, signed like the rest.
+- **A shared link gives one record to whoever holds it, and nothing else.** "Compartilhar…" on an
+  AWS record writes three objects under `<segment>/.keyhold/shares/<id>/` in the vault's bucket,
+  all ciphertext but the page: the envelope (title, sender, expiry and the signed URLs) opens with
+  a 32-byte key that exists only in the link's fragment; the fields open with that key and, when
+  there is one, PBKDF2-HMAC-SHA256 (600 000 iterations) of a generated opening password, so whoever
+  reads the bucket cannot even start guessing it. Both are AES-256-GCM bound to the share id and
+  expiry. The page is the same bytes for every share, carries no data of the record, inserts what
+  it decrypts as text, allows only its own script by hash and refuses to run inside a frame. Every
+  URL in it is presigned for one method on one object, so the recipient reaches that share and no
+  other object; the markers it posts are signed policies for an exact key and zero bytes. A link
+  lives at most as long as the AWS session that signed it. What stays possible: whoever holds the
+  link (and the password, if any) opens it, including a mail gateway that rewrites links; "first
+  access" is enforced by the page deleting the content, not by S3, so it always needs a password.
+  A local vault never sends anything: it hands the person a ZIP with AES-256 (WinZip AE-2), whose
+  format fixes a weak key derivation (PBKDF2-HMAC-SHA1, 1000 iterations), which is why its password
+  is 24 random characters and never typed.
 - **The agent surface reaches an AWS vault only when it is switched on for agents**, with the same
   approval and trail as a local one. Titles and names in a shared account are written by whoever
   can write parameters there: an assistant is told to treat them as data, and a person should read
