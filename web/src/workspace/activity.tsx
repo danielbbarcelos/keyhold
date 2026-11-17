@@ -13,6 +13,8 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import { locale, t } from '@/i18n'
+
 import type { ActivityEvent } from '../api'
 
 /**
@@ -29,98 +31,99 @@ interface Kind {
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
 
-const KINDS: Record<string, Kind> = {
+/** Built at render, so the words follow the language in use. */
+const kinds = (): Record<string, Kind> => ({
   'field.revealed': {
-    label: 'Revelou',
+    label: t('Revelou'),
     icon: Eye,
     sentence: (d) => (
       <>
-        revelou o campo <span className="font-medium text-foreground">{text(d.field)}</span>
+        {t('revelou o campo')} <span className="font-medium text-foreground">{text(d.field)}</span>
       </>
     ),
   },
   'field.copied': {
-    label: 'Copiou',
+    label: t('Copiou'),
     icon: Copy,
     sentence: (d) => (
       <>
-        copiou o campo <span className="font-medium text-foreground">{text(d.field)}</span>
+        {t('copiou o campo')} <span className="font-medium text-foreground">{text(d.field)}</span>
       </>
     ),
   },
-  'record.viewed': { label: 'Visualizou', icon: ScanEye, sentence: () => 'visualizou o registro' },
-  'record.created': { label: 'Criou', icon: Plus, sentence: () => 'criou o registro' },
+  'record.viewed': { label: t('Visualizou'), icon: ScanEye, sentence: () => t('visualizou o registro') },
+  'record.created': { label: t('Criou'), icon: Plus, sentence: () => t('criou o registro') },
   'record.updated': {
-    label: 'Alterou',
+    label: t('Alterou'),
     icon: Pencil,
     sentence: (d) => {
       const fields = Array.isArray(d.fields) ? d.fields.filter((f): f is string => typeof f === 'string') : []
 
       return fields.length ? (
         <>
-          alterou {fields.length > 1 ? 'os campos' : 'o campo'}{' '}
+          {fields.length > 1 ? t('alterou os campos') : t('alterou o campo')}{' '}
           <span className="font-medium text-foreground">{fields.join(', ')}</span>
         </>
       ) : (
-        'alterou o registro'
+        t('alterou o registro')
       )
     },
   },
   'record.moved': {
-    label: 'Moveu',
+    label: t('Moveu'),
     icon: ArrowRightLeft,
     sentence: (d) =>
       d.from && d.to ? (
         <>
-          moveu de <span className="font-mono text-[13px] text-foreground">{text(d.from)}</span> para{' '}
+          {t('moveu de')} <span className="font-mono text-[13px] text-foreground">{text(d.from)}</span> {t('para')}{' '}
           <span className="font-mono text-[13px] text-foreground">{text(d.to)}</span>
         </>
       ) : (
-        'moveu o registro'
+        t('moveu o registro')
       ),
   },
-  'record.deleted': { label: 'Excluiu', icon: Trash2, sentence: () => 'excluiu o registro' },
-  'record.copied': { label: 'Copiou registro', icon: CopyPlus, sentence: () => 'copiou o registro para outro cofre' },
+  'record.deleted': { label: t('Excluiu'), icon: Trash2, sentence: () => t('excluiu o registro') },
+  'record.copied': { label: t('Copiou registro'), icon: CopyPlus, sentence: () => t('copiou o registro para outro cofre') },
   'attachment.downloaded': {
-    label: 'Baixou anexo',
+    label: t('Baixou anexo'),
     icon: FileDown,
     sentence: (d) => (
       <>
-        baixou o anexo <span className="font-medium text-foreground">{text(d.attachment)}</span>
+        {t('baixou o anexo')} <span className="font-medium text-foreground">{text(d.attachment)}</span>
       </>
     ),
   },
   'record.shared': {
-    label: 'Compartilhou',
+    label: t('Compartilhou'),
     icon: Share2,
     sentence: (d) =>
       d.recipient ? (
         <>
-          compartilhou com <span className="font-medium text-foreground">{text(d.recipient)}</span>
+          {t('compartilhou com')} <span className="font-medium text-foreground">{text(d.recipient)}</span>
         </>
       ) : (
-        'compartilhou o registro'
+        t('compartilhou o registro')
       ),
   },
-  'share.opened': { label: 'Link aberto', icon: Share2, sentence: () => 'abriu o link compartilhado' },
-  'share.revealed': { label: 'Link revelado', icon: Share2, sentence: () => 'revelou o conteúdo do link compartilhado' },
-  'session.opened': { label: 'Abriu sessão', icon: LogIn, sentence: () => 'abriu sessão' },
-}
+  'share.opened': { label: t('Link aberto'), icon: Share2, sentence: () => t('abriu o link compartilhado') },
+  'share.revealed': { label: t('Link revelado'), icon: Share2, sentence: () => t('revelou o conteúdo do link compartilhado') },
+  'session.opened': { label: t('Abriu sessão'), icon: LogIn, sentence: () => t('abriu sessão') },
+})
 
 export function kindOf(action: string): Kind {
-  return KINDS[action] ?? { label: action, icon: Pencil, sentence: () => action }
+  return kinds()[action] ?? { label: action, icon: Pencil, sentence: () => action }
 }
 
 /** The actions a person can filter the vault's Trilha by, in the order the menu shows them. */
-export const FILTERABLE: Array<[string, string]> = [
-  ['field.revealed', 'Revelou'],
-  ['field.copied', 'Copiou'],
-  ['record.viewed', 'Visualizou'],
-  ['record.updated', 'Alterou'],
-  ['record.moved', 'Moveu'],
-  ['record.deleted', 'Excluiu'],
-  ['attachment.downloaded', 'Baixou anexo'],
-  ['record.shared', 'Compartilhou'],
+export const filterable = (): Array<[string, string]> => [
+  ['field.revealed', t('Revelou')],
+  ['field.copied', t('Copiou')],
+  ['record.viewed', t('Visualizou')],
+  ['record.updated', t('Alterou')],
+  ['record.moved', t('Moveu')],
+  ['record.deleted', t('Excluiu')],
+  ['attachment.downloaded', t('Baixou anexo')],
+  ['record.shared', t('Compartilhou')],
 ]
 
 /** When it happened: CloudWatch's time for AWS, the trail's for a local vault. */
@@ -135,13 +138,13 @@ export function momentOf(event: ActivityEvent): Date | null {
 export function whenShort(date: Date | null): string {
   if (!date || Number.isNaN(date.getTime())) return ''
 
-  const time = date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const time = date.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
   const today = new Date()
   const yesterday = new Date(today)
   yesterday.setDate(today.getDate() - 1)
 
-  if (date.toDateString() === today.toDateString()) return `hoje, ${time}`
-  if (date.toDateString() === yesterday.toDateString()) return `ontem, ${time}`
+  if (date.toDateString() === today.toDateString()) return t('hoje, {time}', { time })
+  if (date.toDateString() === yesterday.toDateString()) return t('ontem, {time}', { time })
 
-  return `${date.toLocaleDateString('pt-BR')}, ${time}`
+  return `${date.toLocaleDateString(locale())}, ${time}`
 }

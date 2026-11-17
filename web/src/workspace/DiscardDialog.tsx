@@ -8,6 +8,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { t } from '@/i18n'
 
 /**
  * "Descartar as alterações?" before leaving something half written.
@@ -17,7 +18,7 @@ import {
  */
 export function DiscardDialog({
   open,
-  what = 'as alterações',
+  what,
   onKeep,
   onDiscard,
 }: {
@@ -30,15 +31,15 @@ export function DiscardDialog({
     <AlertDialog open={open} onOpenChange={(isOpen) => !isOpen && onKeep()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Descartar {what}</AlertDialogTitle>
+          <AlertDialogTitle>{what ? t('Descartar {what}', { what }) : t('Descartar as alterações')}</AlertDialogTitle>
           <AlertDialogDescription>
-            O que não foi salvo será perdido, inclusive uma senha recém-gerada. Esta ação não pode ser desfeita.
+            {t('O que não foi salvo será perdido, inclusive uma senha recém-gerada. Esta ação não pode ser desfeita.')}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Continuar editando</AlertDialogCancel>
+          <AlertDialogCancel>{t('Continuar editando')}</AlertDialogCancel>
           <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" onClick={onDiscard}>
-            Descartar
+            {t('Descartar')}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 import { api, ApiError, type InstanceProcess } from '../api'
+import { t } from '../i18n'
 
 /**
  * Every Keyhold running on this machine.
@@ -29,35 +30,35 @@ import { api, ApiError, type InstanceProcess } from '../api'
  * Ending one is never one click. Closing the interface locks a vault somebody left open; closing
  * the bridge cuts an assistant off mid-sentence. The dialog says which of those is about to happen.
  */
-const ROLES: Record<
+const roles = (): Record<
   InstanceProcess['role'],
   { label: string; what: string; icon: typeof Bot; cost: string }
-> = {
+> => ({
   interface: {
-    label: 'Interface do cofre',
-    what: 'Serve uma janela e mantém a chave enquanto o cofre está aberto.',
+    label: t('Interface do cofre'),
+    what: t('Serve uma janela e mantém a chave enquanto o cofre está aberto.'),
     icon: MonitorSmartphone,
-    cost: 'O cofre mantido aberto por ela é trancado, a chave é descartada e as janelas conectadas a ela deixam de responder.',
+    cost: t('O cofre mantido aberto por ela é trancado, a chave é descartada e as janelas conectadas a ela deixam de responder.'),
   },
   agent: {
-    label: 'Ponte do assistente',
-    what: 'Traduz os pedidos de um assistente local. Não armazena nenhuma chave.',
+    label: t('Ponte do assistente'),
+    what: t('Traduz os pedidos de um assistente local. Não armazena nenhuma chave.'),
     icon: Bot,
-    cost: 'O assistente perde a ponte até abrir outra. O conteúdo do cofre é preservado.',
+    cost: t('O assistente perde a ponte até abrir outra. O conteúdo do cofre é preservado.'),
   },
   command: {
-    label: 'Comando com um segredo',
-    what: 'Um comando em execução com um segredo no ambiente.',
+    label: t('Comando com um segredo'),
+    what: t('Um comando em execução com um segredo no ambiente.'),
     icon: Terminal,
-    cost: 'O comando em execução é interrompido imediatamente.',
+    cost: t('O comando em execução é interrompido imediatamente.'),
   },
   other: {
-    label: 'Processo do Keyhold',
-    what: 'Um processo que esta versão não reconhece, provavelmente de uma versão anterior.',
+    label: t('Processo do Keyhold'),
+    what: t('Um processo que esta versão não reconhece, provavelmente de uma versão anterior.'),
     icon: Square,
-    cost: 'O processo é encerrado e o que estiver em andamento é interrompido.',
+    cost: t('O processo é encerrado e o que estiver em andamento é interrompido.'),
   },
-}
+})
 
 export function InstancesPanel() {
   const [processes, setProcesses] = useState<InstanceProcess[] | null>(null)
@@ -74,7 +75,7 @@ export function InstancesPanel() {
       setProcesses(answer.processes)
       setVersion(answer.version)
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
+      setError(cause instanceof ApiError ? cause.message : t('O Keyhold não respondeu. Tente novamente.'))
     }
   }, [])
 
@@ -88,6 +89,7 @@ export function InstancesPanel() {
   }, [refresh])
 
   const others = (processes ?? []).filter((one) => !one.is_this_one)
+  const ROLES = roles()
 
   const close = async (targets: InstanceProcess[]) => {
     setBusy(true)
@@ -98,7 +100,7 @@ export function InstancesPanel() {
         await api.closeInstance(target.pid)
       }
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
+      setError(cause instanceof ApiError ? cause.message : t('O Keyhold não respondeu. Tente novamente.'))
     } finally {
       setBusy(false)
       setConfirming(null)
@@ -110,11 +112,11 @@ export function InstancesPanel() {
     <div className="overflow-hidden rounded-[14px] border bg-card">
       <div className="flex flex-wrap items-center gap-3 border-b px-5 py-4">
         <div className="min-w-0 flex-1">
-          <h3 className="text-[15px] font-semibold">Processos do Keyhold nesta máquina</h3>
+          <h3 className="text-[15px] font-semibold">{t('Processos do Keyhold nesta máquina')}</h3>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
-            Cada cofre usa um processo. Ao abrir o Keyhold com outro processo em execução, o Keyhold pergunta
-            antes de encerrá-lo. Esta lista exibe os demais casos, como um processo deixado por uma versão
-            anterior.
+            {t(
+              'Cada cofre usa um processo. Ao abrir o Keyhold com outro processo em execução, o Keyhold pergunta antes de encerrá-lo. Esta lista exibe os demais casos, como um processo deixado por uma versão anterior.',
+            )}
           </p>
         </div>
 
@@ -125,7 +127,7 @@ export function InstancesPanel() {
             disabled={busy}
             onClick={() => setConfirming({ others })}
           >
-            Encerrar os outros
+            {t('Encerrar os outros')}
           </Button>
         )}
       </div>
@@ -133,7 +135,7 @@ export function InstancesPanel() {
       {error && <p className="px-5 pt-3 text-sm text-destructive">{error}</p>}
 
       {processes === null ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">Carregando…</p>
+        <p className="py-8 text-center text-sm text-muted-foreground">{t('Carregando…')}</p>
       ) : (
         <ul className="divide-y">
           {processes.map((one) => {
@@ -154,22 +156,23 @@ export function InstancesPanel() {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium">{role.label}</span>
 
-                    {one.is_this_one && <Badge>esta janela</Badge>}
+                    {one.is_this_one && <Badge>{t('esta janela')}</Badge>}
                     {one.holds_the_vault && !one.is_this_one && (
-                      <Badge variant="secondary">dona do arquivo do cofre</Badge>
+                      <Badge variant="secondary">{t('dona do arquivo do cofre')}</Badge>
                     )}
                   </div>
 
                   <p className="text-sm text-muted-foreground">{role.what}</p>
 
                   <p className="text-xs text-muted-foreground tabular-nums">
-                    PID {one.pid}, há {howLong(one.running_for)}
-                    {one.is_this_one && `, versão ${version}`}
+                    {one.is_this_one
+                      ? t('PID {pid}, há {time}, versão {version}', { pid: one.pid, time: howLong(one.running_for), version })
+                      : t('PID {pid}, há {time}', { pid: one.pid, time: howLong(one.running_for) })}
                   </p>
                 </div>
 
                 {one.is_this_one ? (
-                  <span className="text-xs text-muted-foreground">Use Trancar, no menu lateral</span>
+                  <span className="text-xs text-muted-foreground">{t('Use Trancar, no menu lateral')}</span>
                 ) : (
                   <Button
                     variant="outline"
@@ -177,7 +180,7 @@ export function InstancesPanel() {
                     disabled={busy}
                     onClick={() => setConfirming(one)}
                   >
-                    Encerrar
+                    {t('Encerrar')}
                   </Button>
                 )}
               </li>
@@ -191,15 +194,15 @@ export function InstancesPanel() {
           <AlertDialogHeader>
             <AlertDialogTitle>
               {confirming && 'others' in confirming
-                ? `Encerrar ${confirming.others.length} processos`
-                : `Encerrar o PID ${confirming?.pid}`}
+                ? t('Encerrar {n} processos', { n: confirming.others.length })
+                : t('Encerrar o PID {pid}', { pid: confirming?.pid ?? '' })}
             </AlertDialogTitle>
 
             <AlertDialogDescription asChild>
               <div className="space-y-2">
                 {confirming && 'others' in confirming ? (
                   <>
-                    <p>Todos os processos, exceto a instância desta janela:</p>
+                    <p>{t('Todos os processos, exceto a instância desta janela:')}</p>
                     <ul className="space-y-1">
                       {confirming.others.map((one) => (
                         <li key={one.pid}>
@@ -213,13 +216,13 @@ export function InstancesPanel() {
                   confirming && <p>{ROLES[confirming.role].cost}</p>
                 )}
 
-                <p>Cada processo recebe um pedido de encerramento e finaliza por conta própria.</p>
+                <p>{t('Cada processo recebe um pedido de encerramento e finaliza por conta própria.')}</p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
 
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel>{t('Cancelar')}</AlertDialogCancel>
             <AlertDialogAction
               disabled={busy}
               onClick={(event) => {
@@ -228,7 +231,7 @@ export function InstancesPanel() {
               }}
             >
               {busy && <Loader2 className="animate-spin" />}
-              Encerrar
+              {t('Encerrar')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

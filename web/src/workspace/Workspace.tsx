@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api, type RecordPreview, type Status, type VaultSummary } from '../api'
 import { clearNow } from '../clipboard'
+import { locale, t } from '../i18n'
 import { AgentApproval } from './AgentApproval'
 import { AuditPanel } from './AuditPanel'
 import { AwsTrail, TrailSource } from './AwsTrail'
@@ -22,7 +23,7 @@ import { VaultSkeleton } from './Skeletons'
 
 /** Names the way a person reads them: accents and case aside, "Cofre 2" before "Cofre 10". */
 const byName = (a: { name: string }, b: { name: string }) =>
-  a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base', numeric: true })
+  a.name.localeCompare(b.name, locale(), { sensitivity: 'base', numeric: true })
 
 /**
  * The workspace: one shell for every screen.
@@ -120,7 +121,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       setUnreadable(new Set(open.filter((_, index) => lists[index] === null).map((vault) => vault.id)))
     } catch (cause) {
       setVaultsLoaded(true)
-      toastError(cause, 'Não foi possível carregar os cofres')
+      toastError(cause, t('Não foi possível carregar os cofres'))
     }
   }, [])
 
@@ -207,7 +208,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   const goCustomRef = useRef<(id: string) => void>(() => undefined)
   goCustomRef.current = (id) => guard(() => goCustom(id))
   useEffect(() => {
-    const go = (event: Event) => goCustomRef.current((event as CustomEvent<string>).detail)
+    const go = (event: Event) => goCustomRef.current(String((event as CustomEvent).detail))
     window.addEventListener('keyhold:customise', go)
 
     return () => window.removeEventListener('keyhold:customise', go)
@@ -221,7 +222,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
     void api
       .lock()
       .then(onChanged)
-      .catch((cause) => toastError(cause, 'Não foi possível trancar o cofre'))
+      .catch((cause) => toastError(cause, t('Não foi possível trancar o cofre')))
 
   const onSeen = useCallback((record: RecordPreview) => {
     setSeen((current) => [{ record, at: Date.now() }, ...current.filter((one) => one.record.id !== record.id)].slice(0, 12))
@@ -262,7 +263,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       return (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <TopBar onSearch={search}>
-            <Title>Trilha</Title>
+            <Title>{t('Trilha')}</Title>
             <TrailSource vaults={vaults} source={trailSource} onPick={setTrailSource} />
           </TopBar>
           <Body className="flex flex-col">
@@ -287,7 +288,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       return (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <TopBar onSearch={search}>
-            <Title>Instâncias</Title>
+            <Title>{t('Instâncias')}</Title>
           </TopBar>
           <Body>
             <InstancesPanel />
@@ -300,7 +301,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       return (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <TopBar onSearch={search}>
-            <span>Personalização</span>
+            <span>{t('Personalização')}</span>
             {section && <Crumb last>{section}</Crumb>}
           </TopBar>
           <Customise
@@ -318,7 +319,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       return (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <TopBar onSearch={search}>
-            <span>Ajustes</span>
+            <span>{t('Ajustes')}</span>
             {section && <Crumb last>{section}</Crumb>}
           </TopBar>
           <Settings
@@ -380,11 +381,11 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                 // Straight to the new vault: its page loads itself, and the rest of the
                 // workspace catches up behind it.
                 setVaults((current) => [...current.filter((one) => one.id !== made.vault.id), made.vault])
-                toast('Cofre criado', aws ? `${name}, no AWS Parameter Store` : name)
+                toast(t('Cofre criado'), aws ? t('{name}, no AWS Parameter Store', { name }) : name)
                 openVault(made.vault.id)
                 void refresh()
               })
-              .catch((cause) => toastError(cause, 'Não foi possível criar o cofre'))
+              .catch((cause) => toastError(cause, t('Não foi possível criar o cofre')))
               .finally(() => setPendingVault(false))
           }}
           onCancel={() => setAskingVault(false)}

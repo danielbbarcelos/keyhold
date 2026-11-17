@@ -3,6 +3,7 @@ import { AlertTriangle, Pencil, ShieldCheck } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { t } from '@/i18n'
 
 import type { HealthIssue } from '../../api'
 
@@ -15,14 +16,14 @@ export interface Concern {
 export type Attention = Map<string, Concern>
 
 /** What to do about each kind of issue, in the order the person would do it. */
-const ACTION: Record<HealthIssue, string> = {
+const actions = (): Record<HealthIssue, string> => ({
   compromised:
-    'Troque a senha no próprio serviço e salve a nova em Editar. Depois, remova a marca de comprometido.',
-  rotation: 'Troque a senha no serviço, salve a nova em Editar e escolha a próxima data em “Trocar até”.',
-  reused: 'Use uma senha diferente neste serviço. Em Editar, o gerador do campo de senha cria uma nova.',
-  weak: 'Troque por uma senha mais forte. Em Editar, o gerador do campo de senha cria uma.',
-  stale: 'Recomenda-se trocar a senha. Se ela não precisa mudar, defina uma data em “Trocar até” como lembrete.',
-}
+    t('Troque a senha no próprio serviço e salve a nova em Editar. Depois, remova a marca de comprometido.'),
+  rotation: t('Troque a senha no serviço, salve a nova em Editar e escolha a próxima data em “Trocar até”.'),
+  reused: t('Use uma senha diferente neste serviço. Em Editar, o gerador do campo de senha cria uma nova.'),
+  weak: t('Troque por uma senha mais forte. Em Editar, o gerador do campo de senha cria uma.'),
+  stale: t('Recomenda-se trocar a senha. Se ela não precisa mudar, defina uma data em “Trocar até” como lembrete.'),
+})
 
 /**
  * The red dot beside a record that needs attention, which opens what was found and what to do.
@@ -45,8 +46,8 @@ export function AttentionDot({
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label="Pede atenção: visualizar o motivo"
-          title="Pede atenção"
+          aria-label={t('Pede atenção: visualizar o motivo')}
+          title={t('Pede atenção')}
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
           className="grid size-5 shrink-0 place-items-center rounded-full hover:bg-rose-soft"
@@ -62,7 +63,7 @@ export function AttentionDot({
       >
         <div className="flex items-center gap-2 border-b px-4 py-3">
           <AlertTriangle className="size-4 text-rose" />
-          <b className="text-sm font-semibold">Pede atenção</b>
+          <b className="text-sm font-semibold">{t('Pede atenção')}</b>
         </div>
         <div className="space-y-3 px-4 py-3">
           {concern.reasons.length > 0 && (
@@ -73,10 +74,10 @@ export function AttentionDot({
             </ul>
           )}
           <div className="space-y-1.5">
-            <span className="text-xs font-medium text-faint">O que fazer</span>
+            <span className="text-xs font-medium text-faint">{t('O que fazer')}</span>
             {issues.map((issue) => (
               <p key={issue} className="text-[13px] text-muted-foreground">
-                {ACTION[issue]}
+                {actions()[issue]}
               </p>
             ))}
           </div>
@@ -90,7 +91,7 @@ export function AttentionDot({
             }}
           >
             <Pencil />
-            Editar
+            {t('Editar')}
           </Button>
           {issues.includes('compromised') && (
             <Button
@@ -102,7 +103,7 @@ export function AttentionDot({
               }}
             >
               <ShieldCheck />
-              Remover marca de comprometido
+              {t('Remover marca de comprometido')}
             </Button>
           )}
         </div>

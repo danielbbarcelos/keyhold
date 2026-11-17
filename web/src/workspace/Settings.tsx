@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowLeftRight,
   Bell,
@@ -69,6 +69,7 @@ import {
   type Recipe,
   DEFAULT_RECIPE,
 } from '../api'
+import { locale, t } from '../i18n'
 import { askToNotify, notifyState, type NotifyState } from '../notify'
 import { AwsAccounts } from './AwsAccounts'
 import { toastError } from './toast'
@@ -105,18 +106,18 @@ function AwsNavMark({ className }: { className?: string }) {
 }
 
 const SECTIONS: Array<{ id: string; label: string; icon: LucideIcon | typeof AwsNavMark }> = [
-  { id: 'tranca', label: 'Tranca automática', icon: Timer },
-  { id: 'segundo-fator', label: 'Segundo fator', icon: ShieldCheck },
-  { id: 'senha', label: 'Senha-mestra', icon: KeyRound },
-  { id: 'cofres', label: 'Cofres', icon: Vault },
-  { id: 'gerador', label: 'Gerador de senhas', icon: WandSparkles },
-  { id: 'campos', label: 'Campos de senha', icon: TextCursorInput },
-  { id: 'aws', label: 'Contas AWS', icon: AwsNavMark },
-  { id: 'chaves', label: 'Troca de chave', icon: RefreshCw },
-  { id: 'lixeira', label: 'Lixeira', icon: Trash2 },
-  { id: 'trilha', label: 'Trilha', icon: ScrollText },
-  { id: 'exportar', label: 'Exportar e importar', icon: ArrowLeftRight },
-  { id: 'agentes', label: 'Agentes', icon: Bot },
+  { id: 'tranca', get label() { return t('Tranca automática') }, icon: Timer },
+  { id: 'segundo-fator', get label() { return t('Segundo fator') }, icon: ShieldCheck },
+  { id: 'senha', get label() { return t('Senha-mestra') }, icon: KeyRound },
+  { id: 'cofres', get label() { return t('Cofres') }, icon: Vault },
+  { id: 'gerador', get label() { return t('Gerador de senhas') }, icon: WandSparkles },
+  { id: 'campos', get label() { return t('Campos de senha') }, icon: TextCursorInput },
+  { id: 'aws', get label() { return t('Contas AWS') }, icon: AwsNavMark },
+  { id: 'chaves', get label() { return t('Troca de chave') }, icon: RefreshCw },
+  { id: 'lixeira', get label() { return t('Lixeira') }, icon: Trash2 },
+  { id: 'trilha', get label() { return t('Trilha') }, icon: ScrollText },
+  { id: 'exportar', get label() { return t('Exportar e importar') }, icon: ArrowLeftRight },
+  { id: 'agentes', get label() { return t('Agentes') }, icon: Bot },
 ]
 
 /**
@@ -130,7 +131,7 @@ export const FLAT =
 
 export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection, initial, request }: SettingsProps) {
   const known = (id?: string) => SECTIONS.some((one) => one.id === id)
-  const [active, setActive] = useState(known(initial) ? (initial as string) : SECTIONS[0].id)
+  const [active, setActive] = useState(initial && known(initial) ? initial : SECTIONS[0].id)
   // Sections stay mounted once opened, only hidden: half-typed text in one (a new master password)
   // survives a look at another.
   const [opened, setOpened] = useState<Set<string>>(() => new Set([active]))
@@ -142,9 +143,11 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
     page.current?.scrollTo({ top: 0 })
   }
 
+  // The label, not the id: a change of language reaches the top bar too.
+  const label = SECTIONS.find((one) => one.id === active)?.label ?? ''
   useEffect(() => {
-    onSection?.(SECTIONS.find((one) => one.id === active)?.label ?? '')
-  }, [active, onSection])
+    onSection?.(label)
+  }, [label, onSection])
 
   // A shortcut from elsewhere ("Abrir Contas AWS") lands on its own card, without remounting the rest.
   useEffect(() => {
@@ -169,7 +172,7 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
 
   return (
     <div className="kh-wide grid min-h-0 flex-1 grid-cols-[232px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6 max-xl:grid-cols-[200px_minmax(0,1fr)]">
-      <nav aria-label="Seções dos ajustes" className="h-fit space-y-0.5 rounded-[14px] border bg-card p-2.5">
+      <nav aria-label={t('Seções dos ajustes')} className="h-fit space-y-0.5 rounded-[14px] border bg-card p-2.5">
         {SECTIONS.map(({ id, label, icon: Icon }) => (
           <TabMenu key={id} to={{ place: 'settings', section: id }}>
           <button
@@ -203,20 +206,20 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
 }
 
 const THEMES: Array<{ value: Theme; label: string; rail: string; side: string; page: string; ink: string }> = [
-  { value: 'grafite', label: 'Grafite', rail: '#18191c', side: '#1e1f23', page: '#24252a', ink: '#e6e6e9' },
-  { value: 'claro', label: 'Claro', rail: '#ebebee', side: '#f3f3f5', page: '#ffffff', ink: '#1f2024' },
+  { value: 'grafite', get label() { return t('Grafite') }, rail: '#18191c', side: '#1e1f23', page: '#24252a', ink: '#e6e6e9' },
+  { value: 'claro', get label() { return t('Claro') }, rail: '#ebebee', side: '#f3f3f5', page: '#ffffff', ink: '#1f2024' },
 ]
 
 const WIDTHS: Array<{ value: Width; label: string; hint: string }> = [
-  { value: 'inteira', label: 'Tela inteira', hint: 'O conteúdo ocupa toda a janela.' },
-  { value: 'contida', label: 'Contida', hint: 'Centralizado, com até 1280 px, em telas largas.' },
+  { value: 'inteira', get label() { return t('Tela inteira') }, get hint() { return t('O conteúdo ocupa toda a janela.') } },
+  { value: 'contida', get label() { return t('Contida') }, get hint() { return t('Centralizado, com até 1280 px, em telas largas.') } },
 ]
 
 const ACCENTS: Array<{ value: Accent; label: string; colour: string }> = [
-  { value: 'ambar', label: 'Âmbar', colour: '#e8b04b' },
-  { value: 'oceano', label: 'Oceano', colour: '#86aee0' },
-  { value: 'floresta', label: 'Floresta', colour: '#62be97' },
-  { value: 'coral', label: 'Coral', colour: '#e2788b' },
+  { value: 'ambar', get label() { return t('Âmbar') }, colour: '#e8b04b' },
+  { value: 'oceano', get label() { return t('Oceano') }, colour: '#86aee0' },
+  { value: 'floresta', get label() { return t('Floresta') }, colour: '#62be97' },
+  { value: 'coral', get label() { return t('Coral') }, colour: '#e2788b' },
 ]
 
 /**
@@ -238,13 +241,13 @@ export function AppearanceSettings({
   return (
     <Card className="py-6">
       <CardHeader className="px-6">
-        <CardTitle>Aparência</CardTitle>
-        <CardDescription>Aplica-se a este Keyhold e não é gravada no conteúdo dos cofres.</CardDescription>
+        <CardTitle>{t('Aparência')}</CardTitle>
+        <CardDescription>{t('Aplica-se a este Keyhold e não é gravada no conteúdo dos cofres.')}</CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-7 px-6">
         <div className="space-y-2.5">
-          <h3 className="text-sm font-bold">Tema</h3>
+          <h3 className="text-sm font-bold">{t('Tema')}</h3>
           <div className="flex flex-wrap gap-3">
             {THEMES.map((theme) => (
               <ThemeCard
@@ -257,7 +260,7 @@ export function AppearanceSettings({
               </ThemeCard>
             ))}
             <ThemeCard
-              label="Igual ao sistema"
+              label={t('Igual ao sistema')}
               chosen={appearance.theme === 'sistema'}
               onPick={() => void save({ theme: 'sistema' })}
             >
@@ -270,7 +273,7 @@ export function AppearanceSettings({
         </div>
 
         <div className="space-y-2.5">
-          <h3 className="text-sm font-bold">Largura do conteúdo</h3>
+          <h3 className="text-sm font-bold">{t('Largura do conteúdo')}</h3>
           <div className="flex flex-wrap gap-3">
             {WIDTHS.map((width) => (
               <ThemeCard
@@ -289,9 +292,9 @@ export function AppearanceSettings({
         </div>
 
         <div className="space-y-2.5">
-          <h3 className="text-sm font-bold">Cor de destaque</h3>
+          <h3 className="text-sm font-bold">{t('Cor de destaque')}</h3>
           <p className="text-sm text-muted-foreground">
-            A cor do botão principal, do item selecionado e do foco.
+            {t('A cor do botão principal, do item selecionado e do foco.')}
           </p>
           <div className="flex flex-wrap gap-3">
             {ACCENTS.map((accent) => {
@@ -395,12 +398,12 @@ function Preview({ rail, side, page, ink }: { rail: string; side: string; page: 
  * another tab is the ordinary way to use a vault, and a fuse that short turns the ordinary case
  * into a re-unlock. The two clocks answer the same question, so they offer the same answers.
  */
-const CHOICES: Array<[string, number | null]> = [
-  ['1 minuto', 60],
-  ['5 minutos', 300],
-  ['15 minutos', 900],
-  ['1 hora', 3600],
-  ['Nunca', null],
+const choices = (): Array<[string, number | null]> => [
+  [t('1 minuto'), 60],
+  [t('5 minutos'), 300],
+  [t('15 minutos'), 900],
+  [t('1 hora'), 3600],
+  [t('Nunca'), null],
 ]
 
 function AutoLock({ policy, onChanged }: { policy: LockPolicy; onChanged: () => void }) {
@@ -414,25 +417,26 @@ function AutoLock({ policy, onChanged }: { policy: LockPolicy; onChanged: () => 
       <CardHeader className="px-6">
         <CardTitle className="flex items-center gap-2">
           <Lock className="size-4" />
-          Tranca automática
-          <Badge>recomendado</Badge>
+          {t('Tranca automática')}
+          <Badge>{t('recomendado')}</Badge>
         </CardTitle>
         <CardDescription>
-          O prazo é contado pelo Keyhold, não por esta janela. Uma aba fechada ou congelada não prolonga
-          o prazo. Sem as duas trancas, o cofre só é trancado manualmente.
+          {t(
+            'O prazo é contado pelo Keyhold, não por esta janela. Uma aba fechada ou congelada não prolonga o prazo. Sem as duas trancas, o cofre só é trancado manualmente.',
+          )}
         </CardDescription>
       </CardHeader>
 
       <CardContent className="px-6">
         <Choices
-          label="Trancar após inatividade de"
-          hint="Sem nenhum clique ou tecla no Keyhold"
+          label={t('Trancar após inatividade de')}
+          hint={t('Sem nenhum clique ou tecla no Keyhold')}
           current={policy.idle_seconds}
           onPick={(value) => void save({ idle_seconds: value })}
         />
         <Choices
-          label="Trancar com a janela oculta por"
-          hint="Aba em segundo plano ou janela minimizada"
+          label={t('Trancar com a janela oculta por')}
+          hint={t('Aba em segundo plano ou janela minimizada')}
           current={policy.hidden_seconds}
           onPick={(value) => void save({ hidden_seconds: value })}
         />
@@ -458,6 +462,7 @@ function Choices({
   current: number | null
   onPick: (value: number | null) => void
 }) {
+  const CHOICES = choices()
   const options: Array<[string, number | null]> = (() => {
     if (current === null || CHOICES.some(([, value]) => value === current)) {
       return CHOICES
@@ -470,7 +475,7 @@ function Choices({
 
     timed.sort((a, b) => a[1] - b[1])
 
-    return [...timed, ['Nunca', null] as [string, null]]
+    return [...timed, [t('Nunca'), null] as [string, null]]
   })()
 
   return (
@@ -504,12 +509,12 @@ function minutes(seconds: number): string {
   }
 
   if (seconds % 3600 === 0) {
-    return seconds === 3600 ? '1 hora' : `${seconds / 3600} horas`
+    return seconds === 3600 ? t('1 hora') : t('{n} horas', { n: seconds / 3600 })
   }
 
   const whole = Math.round(seconds / 60)
 
-  return whole === 1 ? '1 minuto' : `${whole} minutos`
+  return whole === 1 ? t('1 minuto') : t('{n} minutos', { n: whole })
 }
 
 function SecondFactor({ status, onChanged }: { status: Status; onChanged: () => void }) {
@@ -528,7 +533,7 @@ function SecondFactor({ status, onChanged }: { status: Status; onChanged: () => 
       await action()
       setError('')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
+      setError(cause instanceof ApiError ? cause.message : t('O Keyhold não respondeu. Tente novamente.'))
     } finally {
       setBusy(false)
     }
@@ -539,20 +544,20 @@ function SecondFactor({ status, onChanged }: { status: Status; onChanged: () => 
       <CardHeader className="px-6">
         <CardTitle className="flex items-center gap-2">
           <ShieldCheck className="size-4" />
-          Segundo fator
-          <Badge variant="secondary">opcional</Badge>
+          {t('Segundo fator')}
+          <Badge variant="secondary">{t('opcional')}</Badge>
         </CardTitle>
         <CardDescription>
-          Um código do app autenticador, solicitado junto com a senha. Protege contra quem descobriu a
-          sua senha, mas não possui o seu telefone. Não protege o arquivo do cofre: quem obtiver o
-          arquivo e quebrar a senha obtém também o segredo do código.
+          {t(
+            'Um código do app autenticador, solicitado junto com a senha. Protege contra quem descobriu a sua senha, mas não possui o seu telefone. Não protege o arquivo do cofre: quem obtiver o arquivo e quebrar a senha obtém também o segredo do código.',
+          )}
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-4 px-6">
         {on ? (
           <div className="space-y-2">
-            <Label htmlFor="off-code">Informe um código atual para desligar</Label>
+            <Label htmlFor="off-code">{t('Informe um código atual para desligar')}</Label>
             <div className="flex items-center gap-2">
               <Input
                 id="off-code"
@@ -574,7 +579,7 @@ function SecondFactor({ status, onChanged }: { status: Status; onChanged: () => 
                   })
                 }
               >
-                Desligar
+                {t('Desligar')}
               </Button>
             </div>
           </div>
@@ -582,12 +587,12 @@ function SecondFactor({ status, onChanged }: { status: Status; onChanged: () => 
           <div className="space-y-3">
             <img
               src={qr}
-              alt="Código QR para o app autenticador"
+              alt={t('Código QR para o app autenticador')}
               className="size-48 rounded-lg bg-white p-2"
             />
 
             <p className="text-sm text-muted-foreground">
-              Para digitar manualmente: <span className="tracking-wider text-foreground">{secret}</span>
+              {t('Para digitar manualmente:')} <span className="tracking-wider text-foreground">{secret}</span>
             </p>
 
             <div className="flex items-center gap-2">
@@ -613,7 +618,7 @@ function SecondFactor({ status, onChanged }: { status: Status; onChanged: () => 
                 }
               >
                 {busy && <Loader2 className="animate-spin" />}
-                Ligar
+                {t('Ligar')}
               </Button>
             </div>
           </div>
@@ -629,7 +634,7 @@ function SecondFactor({ status, onChanged }: { status: Status; onChanged: () => 
               })
             }
           >
-            Ligar o segundo fator
+            {t('Ligar o segundo fator')}
           </Button>
         )}
 
@@ -650,11 +655,11 @@ function MasterPassword({ status, onChanged }: { status: Status; onChanged: () =
     try {
       await api.changeProtection(next)
       setPassword('')
-      setDone(next === null ? 'Senha removida.' : 'Senha trocada.')
+      setDone(next === null ? t('Senha removida.') : t('Senha trocada.'))
       setError('')
       onChanged()
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
+      setError(cause instanceof ApiError ? cause.message : t('O Keyhold não respondeu. Tente novamente.'))
       setDone('')
     }
   }
@@ -664,18 +669,20 @@ function MasterPassword({ status, onChanged }: { status: Status; onChanged: () =
       <CardHeader className="px-6">
         <CardTitle className="flex items-center gap-2">
           <KeyRound className="size-4" />
-          Senha-mestra
-          {hasPassword ? <Badge variant="secondary">ativa</Badge> : <Badge>recomendada</Badge>}
+          {t('Senha-mestra')}
+          {hasPassword ? <Badge variant="secondary">{t('ativa')}</Badge> : <Badge>{t('recomendada')}</Badge>}
         </CardTitle>
         <CardDescription>
           {hasPassword
-            ? 'Trocar a senha não altera o conteúdo dos cofres. Apenas uma chave é cifrada novamente.'
-            : 'Este cofre abre sem senha. Com uma senha definida, o arquivo passa a ser protegido por criptografia, e não apenas por permissão de arquivo.'}
+            ? t('Trocar a senha não altera o conteúdo dos cofres. Apenas uma chave é cifrada novamente.')
+            : t(
+                'Este cofre abre sem senha. Com uma senha definida, o arquivo passa a ser protegido por criptografia, e não apenas por permissão de arquivo.',
+              )}
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-2 px-6">
-        <Label htmlFor="new-password">{hasPassword ? 'Nova senha' : 'Senha-mestra'}</Label>
+        <Label htmlFor="new-password">{hasPassword ? t('Nova senha') : t('Senha-mestra')}</Label>
         <PasswordInput
           id="new-password"
           value={password}
@@ -692,14 +699,14 @@ function MasterPassword({ status, onChanged }: { status: Status; onChanged: () =
           onClick={() => void api.generatePassword().then((made) => setPassword(made.password))}
         >
           <Wand2 />
-          Gerar
+          {t('Gerar')}
         </Button>
         <Button disabled={password.trim().length === 0} onClick={() => void apply(password)}>
-          {hasPassword ? 'Trocar' : 'Definir'}
+          {hasPassword ? t('Trocar') : t('Definir')}
         </Button>
         {hasPassword && (
           <Button variant="ghost" onClick={() => void apply(null)}>
-            Remover a senha
+            {t('Remover a senha')}
           </Button>
         )}
       </CardFooter>
@@ -723,12 +730,12 @@ function Rotation({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged: ()
       <CardHeader className="px-6">
         <CardTitle className="flex items-center gap-2">
           <RefreshCw className="size-4" />
-          Trocar a chave de um cofre
+          {t('Trocar a chave de um cofre')}
         </CardTitle>
         <CardDescription>
-          Gera uma nova chave para o cofre e cifra novamente as chaves que dependiam da antiga. O
-          conteúdo não é cifrado novamente, por isso a troca é rápida e pode ser feita por simples
-          suspeita.
+          {t(
+            'Gera uma nova chave para o cofre e cifra novamente as chaves que dependiam da antiga. O conteúdo não é cifrado novamente, por isso a troca é rápida e pode ser feita por simples suspeita.',
+          )}
         </CardDescription>
       </CardHeader>
 
@@ -741,13 +748,16 @@ function Rotation({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged: ()
                 <span className="block truncate text-sm">{vault.name}</span>
                 <span className="block text-xs text-muted-foreground">
                   {vault.key_rotated_at
-                    ? `geração ${vault.key_version}, trocada em ${vault.key_rotated_at.slice(0, 10)}`
-                    : 'na chave original'}
+                    ? t('geração {n}, trocada em {date}', {
+                        n: vault.key_version,
+                        date: vault.key_rotated_at.slice(0, 10),
+                      })
+                    : t('na chave original')}
                 </span>
               </span>
 
               <Button variant="outline" size="sm" onClick={() => setRotating(vault)}>
-                Trocar
+                {t('Trocar')}
               </Button>
             </div>
           ))}
@@ -756,15 +766,16 @@ function Rotation({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged: ()
       <AlertDialog open={rotating !== null} onOpenChange={(open) => !open && setRotating(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Trocar a chave de {rotating?.name}</AlertDialogTitle>
+            <AlertDialogTitle>{t('Trocar a chave de {name}', { name: rotating?.name ?? '' })}</AlertDialogTitle>
             <AlertDialogDescription>
-              O conteúdo do cofre continua legível e apenas os envelopes das chaves mudam. A troca é
-              feita de uma só vez: todos os registros passam para a nova chave, ou nenhum passa.
+              {t(
+                'O conteúdo do cofre continua legível e apenas os envelopes das chaves mudam. A troca é feita de uma só vez: todos os registros passam para a nova chave, ou nenhum passa.',
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
 
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel>{t('Cancelar')}</AlertDialogCancel>
             <AlertDialogAction
               disabled={busy}
               onClick={() => {
@@ -782,7 +793,7 @@ function Rotation({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged: ()
                   .finally(() => setBusy(false))
               }}
             >
-              Trocar a chave
+              {t('Trocar a chave')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -791,11 +802,11 @@ function Rotation({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged: ()
   )
 }
 
-const RETENTION_CHOICES: Array<[string, number]> = [
-  ['7 dias', 7],
-  ['30 dias', 30],
-  ['90 dias', 90],
-  ['Nunca', 0],
+const retentionChoices = (): Array<[string, number]> => [
+  [t('7 dias'), 7],
+  [t('30 dias'), 30],
+  [t('90 dias'), 90],
+  [t('Nunca'), 0],
 ]
 
 /** How long the trash keeps what was deleted (F5). */
@@ -805,18 +816,19 @@ function Retention({ days, onChanged }: { days: number; onChanged: () => void })
       <CardHeader className="px-6">
         <CardTitle className="flex items-center gap-2">
           <Trash2 className="size-4" />
-          Lixeira
+          {t('Lixeira')}
         </CardTitle>
         <CardDescription>
-          Um registro excluído fica na lixeira e é removido permanentemente no primeiro destranque
-          após o prazo. Com o prazo em “Nunca”, a lixeira só é esvaziada manualmente.
+          {t(
+            'Um registro excluído fica na lixeira e é removido permanentemente no primeiro destranque após o prazo. Com o prazo em “Nunca”, a lixeira só é esvaziada manualmente.',
+          )}
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-2 px-6">
-        <Label>Manter registros excluídos por</Label>
+        <Label>{t('Manter registros excluídos por')}</Label>
         <div className="flex flex-wrap gap-1.5">
-          {RETENTION_CHOICES.map(([label, value]) => (
+          {retentionChoices().map(([label, value]) => (
             <Button
               key={label}
               size="sm"
@@ -845,11 +857,12 @@ function TrailSettings({ on, onChanged }: { on: boolean; onChanged: () => void }
       <CardHeader className="px-6">
         <CardTitle className="flex items-center gap-2">
           <ScrollText className="size-4" />
-          Trilha
+          {t('Trilha')}
         </CardTitle>
         <CardDescription>
-          Destrancar, criar, alterar e excluir são sempre registrados, o que permite conferir depois
-          se algo aconteceu sem você. Registrar a revelação e a cópia de um segredo é opcional.
+          {t(
+            'Destrancar, criar, alterar e excluir são sempre registrados, o que permite conferir depois se algo aconteceu sem você. Registrar a revelação e a cópia de um segredo é opcional.',
+          )}
         </CardDescription>
       </CardHeader>
 
@@ -857,7 +870,7 @@ function TrailSettings({ on, onChanged }: { on: boolean; onChanged: () => void }
         <div className="divide-y overflow-hidden rounded-xl border">
           <div className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-hover">
             <Label htmlFor="log-reads" className="flex-1 cursor-pointer py-1 font-normal">
-              Registrar quando um segredo é revelado ou copiado
+              {t('Registrar quando um segredo é revelado ou copiado')}
             </Label>
             <Switch
               id="log-reads"
@@ -869,7 +882,7 @@ function TrailSettings({ on, onChanged }: { on: boolean; onChanged: () => void }
 
         {!on && (
           <p className="text-sm text-muted-foreground">
-            Desligado, não é possível saber depois o que um assistente leu.
+            {t('Desligado, não é possível saber depois o que um assistente leu.')}
           </p>
         )}
       </CardContent>
@@ -882,9 +895,9 @@ function FieldAutocomplete({ on, onChanged }: { on: boolean; onChanged: () => vo
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Campos de senha</CardTitle>
+        <CardTitle>{t('Campos de senha')}</CardTitle>
         <CardDescription>
-          Como o navegador trata os campos de senha e os campos ocultos ao criar ou editar um registro.
+          {t('Como o navegador trata os campos de senha e os campos ocultos ao criar ou editar um registro.')}
         </CardDescription>
       </CardHeader>
 
@@ -892,11 +905,11 @@ function FieldAutocomplete({ on, onChanged }: { on: boolean; onChanged: () => vo
         <div className="divide-y overflow-hidden rounded-xl border">
           <div className="flex items-start justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-hover">
             <Label htmlFor="field-autocomplete" className="flex flex-1 cursor-pointer flex-col items-start gap-1 font-normal">
-              Permitir o preenchimento automático do navegador
+              {t('Permitir o preenchimento automático do navegador')}
               <span className="mt-1 block text-sm text-muted-foreground">
-                Desligado, o navegador não sugere senhas salvas nesses campos nem oferece salvar o que você digita.
-                Ligado, eles funcionam como campos de senha comuns, e o navegador ou a extensão de senhas pode
-                preencher e guardar uma cópia fora do Keyhold.
+                {t(
+                  'Desligado, o navegador não sugere senhas salvas nesses campos nem oferece salvar o que você digita. Ligado, eles funcionam como campos de senha comuns, e o navegador ou a extensão de senhas pode preencher e guardar uma cópia fora do Keyhold.',
+                )}
               </span>
             </Label>
             <Switch
@@ -906,7 +919,7 @@ function FieldAutocomplete({ on, onChanged }: { on: boolean; onChanged: () => vo
                 void api
                   .setFieldAutocomplete(next)
                   .then(onChanged)
-                  .catch((cause) => toastError(cause, 'Não foi possível salvar o ajuste'))
+                  .catch((cause) => toastError(cause, t('Não foi possível salvar o ajuste')))
               }
             />
           </div>
@@ -934,25 +947,27 @@ function DesktopKnock() {
   return (
     <div className="flex items-start justify-between gap-4">
       <Label className="font-normal">
-        Avisar na área de trabalho
+        {t('Avisar na área de trabalho')}
         <span className="mt-1 block text-sm text-muted-foreground">
           {state === 'granted'
-            ? 'Cada pedido é exibido como notificação do sistema, com o processo e o campo, nunca com o valor.'
+            ? t('Cada pedido é exibido como notificação do sistema, com o processo e o campo, nunca com o valor.')
             : state === 'denied'
-              ? 'O navegador está bloqueando as notificações deste endereço. Libere nas permissões do site para voltar a recebê-las.'
-              : 'Um pedido expira em 90 segundos. Sem notificação, ele só é exibido quando esta janela está visível.'}
+              ? t(
+                  'O navegador está bloqueando as notificações deste endereço. Libere nas permissões do site para voltar a recebê-las.',
+                )
+              : t('Um pedido expira em 90 segundos. Sem notificação, ele só é exibido quando esta janela está visível.')}
         </span>
       </Label>
 
       {state === 'granted' ? (
         <Badge variant="secondary" className="shrink-0 gap-1">
           <Bell className="size-3" />
-          ligado
+          {t('ligado')}
         </Badge>
       ) : state === 'denied' ? (
         <Badge variant="secondary" className="shrink-0 gap-1">
           <BellOff className="size-3" />
-          bloqueado
+          {t('bloqueado')}
         </Badge>
       ) : (
         <Button
@@ -961,7 +976,7 @@ function DesktopKnock() {
           className="shrink-0"
           onClick={() => void askToNotify().then(setState)}
         >
-          Permitir
+          {t('Permitir')}
         </Button>
       )}
     </div>
@@ -1008,15 +1023,16 @@ function StandingGrants({ onChanged }: { onChanged: () => void }) {
   return (
     <div className="space-y-3 border-t pt-4">
       <div className="flex items-center justify-between gap-4">
-        <Label>Permissões ativas</Label>
+        <Label>{t('Permissões ativas')}</Label>
         <Button variant="outline" size="sm" onClick={() => void revoke()}>
-          Revogar todas
+          {t('Revogar todas')}
         </Button>
       </div>
 
       <p className="text-sm text-muted-foreground">
-        Enquanto uma permissão estiver ativa, o pedido correspondente é atendido sem nova aprovação. O
-        uso continua registrado na trilha.
+        {t(
+          'Enquanto uma permissão estiver ativa, o pedido correspondente é atendido sem nova aprovação. O uso continua registrado na trilha.',
+        )}
       </p>
 
       <ul className="space-y-1">
@@ -1026,23 +1042,24 @@ function StandingGrants({ onChanged }: { onChanged: () => void }) {
             className="flex items-center justify-between gap-3 rounded-lg border p-3"
           >
             <div className="min-w-0 space-y-0.5">
-              <p className="truncate text-sm">
-                <span className="text-foreground">{grant.field === '*' ? 'todos os campos' : grant.field}</span>
-                <span className="text-muted-foreground"> de </span>
-                <span className="text-foreground">{grant.record_title || grant.record_id}</span>
+              <p className="truncate text-sm text-muted-foreground">
+                {rich(t('{field} de {record}'), {
+                  field: <span className="text-foreground">{grant.field === '*' ? t('todos os campos') : grant.field}</span>,
+                  record: <span className="text-foreground">{grant.record_title || grant.record_id}</span>,
+                })}
               </p>
               <p className="truncate text-xs text-muted-foreground">
                 {grant.intent === 'run'
-                  ? `usar em comandos de ${grant.program ?? 'qualquer programa'}`
+                  ? t('usar em comandos de {program}', { program: grant.program ?? t('qualquer programa') })
                   : grant.intent === 'copy'
-                    ? 'copiar para a área de transferência'
-                    : 'ler o valor'}
+                    ? t('copiar para a área de transferência')
+                    : t('ler o valor')}
                 , {untilWhen(grant)}
               </p>
             </div>
 
             <Button variant="ghost" size="sm" onClick={() => void revoke(grant.id)}>
-              Revogar
+              {t('Revogar')}
             </Button>
           </li>
         ))}
@@ -1053,11 +1070,11 @@ function StandingGrants({ onChanged }: { onChanged: () => void }) {
 
 function untilWhen(grant: AgentGrant): string {
   if (grant.scope.kind === 'always') {
-    return 'Sem prazo, válida até ser revogada'
+    return t('Sem prazo, válida até ser revogada')
   }
 
   if (grant.scope.kind === 'while-running') {
-    return `Enquanto ${grant.scope.process} (PID ${grant.scope.pid}) estiver aberto`
+    return t('Enquanto {process} (PID {pid}) estiver aberto', { process: grant.scope.process, pid: grant.scope.pid })
   }
 
   const at = new Date(grant.scope.at * 1000)
@@ -1069,7 +1086,19 @@ function untilWhen(grant: AgentGrant): string {
         ? `${Math.floor(left / 3600)} h`
         : `${Math.max(1, Math.floor(left / 60))} min`
 
-  return `Até ${at.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} (faltam ${remaining})`
+  return t('Até {date} (faltam {left})', {
+    date: at.toLocaleString(locale(), { dateStyle: 'short', timeStyle: 'short' }),
+    left: remaining,
+  })
+}
+
+/** A translated sentence with elements in its `{name}` slots, wherever each language puts them. */
+function rich(text: string, nodes: Record<string, React.ReactNode>): React.ReactNode[] {
+  return text.split(/(\{\w+\})/).map((part, index) => {
+    const name = /^\{(\w+)\}$/.exec(part)?.[1]
+
+    return name && name in nodes ? <Fragment key={index}>{nodes[name]}</Fragment> : part
+  })
 }
 
 /**
@@ -1109,40 +1138,48 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
       <CardHeader className="px-6">
         <CardTitle className="flex items-center gap-2">
           <Bot className="size-4" />
-          Acesso por agente
-          {surface?.listening ? <Badge>ligado</Badge> : <Badge variant="secondary">desligado</Badge>}
+          {t('Acesso por agente')}
+          {surface?.listening ? <Badge>{t('ligado')}</Badge> : <Badge variant="secondary">{t('desligado')}</Badge>}
         </CardTitle>
         <CardDescription>
-          Um assistente em execução nesta máquina pode buscar e solicitar segredos dos cofres marcados
-          abaixo. Cada pedido de valor exige aprovação nesta janela, com o processo e o PID visíveis.
+          {t(
+            'Um assistente em execução nesta máquina pode buscar e solicitar segredos dos cofres marcados abaixo. Cada pedido de valor exige aprovação nesta janela, com o processo e o PID visíveis.',
+          )}
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-4 px-6">
         <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm">
-          <p className="font-medium">Como um assistente usa uma credencial sem lê-la</p>
+          <p className="font-medium">{t('Como um assistente usa uma credencial sem lê-la')}</p>
           <p className="text-muted-foreground">
-            O assistente executa o comando pelo Keyhold, e o segredo vai para uma variável de ambiente
-            do processo, nunca para o texto da conversa:
+            {t(
+              'O assistente executa o comando pelo Keyhold, e o segredo vai para uma variável de ambiente do processo, nunca para o texto da conversa:',
+            )}
           </p>
           <code className="block rounded-md border bg-background px-3 py-2 text-xs">
-            keyhold run "Banco de dados" Senha -- psql "$KEYHOLD_SECRET"
+            {t('keyhold run "Banco de dados" Senha -- psql "$KEYHOLD_SECRET"')}
           </code>
           <p className="text-muted-foreground">
-            Quando <span className="text-foreground">você</span> precisa da senha, o assistente usa{' '}
-            <span className="text-foreground">keyhold_copy</span>: o valor vai para a sua área de
-            transferência e ele recebe apenas a confirmação.
+            {rich(
+              t(
+                'Quando {you} precisa da senha, o assistente usa {tool}: o valor vai para a sua área de transferência e ele recebe apenas a confirmação.',
+              ),
+              {
+                you: <span className="text-foreground">{t('você')}</span>,
+                tool: <span className="text-foreground">keyhold_copy</span>,
+              },
+            )}
           </p>
         </div>
 
         <div className="divide-y overflow-hidden rounded-xl border">
         <div className="flex items-start justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-hover">
           <Label htmlFor="agent-reveal" className="flex flex-1 cursor-pointer flex-col items-start gap-1 font-normal">
-            Permitir que o assistente leia campos comuns
+            {t('Permitir que o assistente leia campos comuns')}
             <span className="mt-1 block text-sm text-muted-foreground">
-              Vale para campos como usuário, host e URL. Senhas e outros campos secretos nunca são
-              entregues ao assistente, mesmo ligado: ele só consegue usá-los dentro de um comando, e
-              o Keyhold apaga o valor da saída antes de devolvê-la.
+              {t(
+                'Vale para campos como usuário, host e URL. Senhas e outros campos secretos nunca são entregues ao assistente, mesmo ligado: ele só consegue usá-los dentro de um comando, e o Keyhold apaga o valor da saída antes de devolvê-la.',
+              )}
             </span>
           </Label>
           <Switch
@@ -1154,7 +1191,7 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
 
         <div className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-hover">
           <Label htmlFor="agent-surface" className="flex-1 cursor-pointer py-1 font-normal">
-            Aceitar pedidos de um assistente local
+            {t('Aceitar pedidos de um assistente local')}
           </Label>
           <Switch
             id="agent-surface"
@@ -1167,14 +1204,14 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
 
         {marked === 0 && (
           <p className="text-sm text-muted-foreground">
-            Marque ao menos um cofre abaixo para aceitar pedidos.
+            {t('Marque ao menos um cofre abaixo para aceitar pedidos.')}
           </p>
         )}
 
         <DesktopKnock />
 
         <div className="space-y-2 border-t pt-4">
-          <Label>Cofres disponíveis ao assistente</Label>
+          <Label>{t('Cofres disponíveis ao assistente')}</Label>
 
           <div className="divide-y overflow-hidden rounded-xl border">
           {vaults
@@ -1184,7 +1221,7 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
                 <Label htmlFor={`agent-${vault.id}`} className="flex-1 cursor-pointer py-1 font-normal">
                   {vault.name}
                   {vault.kind === 'aws' && (
-                    <span className="ml-2 text-xs text-faint">cofre AWS, lido com a sessão aberta no Keyhold</span>
+                    <span className="ml-2 text-xs text-faint">{t('cofre AWS, lido com a sessão aberta no Keyhold')}</span>
                   )}
                 </Label>
                 <Switch
@@ -1206,10 +1243,11 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
 
         {surface && (
           <div className="space-y-2 border-t pt-4">
-            <Label>Conectar o Claude Code a este cofre</Label>
+            <Label>{t('Conectar o Claude Code a este cofre')}</Label>
             <p className="text-sm text-muted-foreground">
-              Execute este comando uma vez no terminal. O Keyhold não altera a configuração de outros
-              programas.
+              {t(
+                'Execute este comando uma vez no terminal. O Keyhold não altera a configuração de outros programas.',
+              )}
             </p>
 
             <div className="flex items-center gap-2">
@@ -1225,7 +1263,7 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
                   window.setTimeout(() => setCopied(false), 2000)
                 }}
               >
-                {copied ? 'Copiado' : 'Copiar'}
+                {copied ? t('Copiado') : t('Copiar')}
               </Button>
             </div>
 
@@ -1251,9 +1289,9 @@ function GeneratorSettings({ recipe, onChanged }: { recipe?: Recipe; onChanged: 
   return (
     <section className="rounded-[14px] border bg-card">
       <div className="border-b px-5 py-4">
-        <h3 className="text-[15px] font-semibold">Gerador de senhas</h3>
+        <h3 className="text-[15px] font-semibold">{t('Gerador de senhas')}</h3>
         <p className="mt-1 max-w-2xl text-[13px] text-muted-foreground">
-          As opções iniciais do gerador. Elas podem ser ajustadas a cada senha, no próprio gerador.
+          {t('As opções iniciais do gerador. Elas podem ser ajustadas a cada senha, no próprio gerador.')}
         </p>
       </div>
       <div className="grid max-w-xl gap-5 p-5">
@@ -1274,12 +1312,12 @@ function GeneratorSettings({ recipe, onChanged }: { recipe?: Recipe; onChanged: 
                 .catch((cause) => toastError(cause))
             }
           >
-            Salvar como padrão
+            {t('Salvar como padrão')}
           </Button>
           <Button variant="ghost" onClick={() => setDraft(DEFAULT_RECIPE)}>
-            Voltar ao padrão do Keyhold
+            {t('Voltar ao padrão do Keyhold')}
           </Button>
-          {saved && <span className="text-[13px] text-mint">Salvo</span>}
+          {saved && <span className="text-[13px] text-mint">{t('Salvo')}</span>}
         </div>
       </div>
     </section>

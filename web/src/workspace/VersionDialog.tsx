@@ -10,6 +10,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { t } from '@/i18n'
 
 import { api, ApiError, type Payload } from '../api'
 import { FieldRow } from './record/FieldRow'
@@ -39,7 +40,7 @@ export function VersionDialog({ recordId, version, onRestore, onCancel }: Versio
       .readVersion(recordId, version)
       .then((answer) => setPayload(answer.payload))
       .catch((cause) =>
-        setError(cause instanceof ApiError ? cause.message : 'Não foi possível abrir esta versão.'),
+        setError(cause instanceof ApiError ? cause.message : t('Não foi possível abrir esta versão.')),
       )
   }, [recordId, version])
 
@@ -47,10 +48,9 @@ export function VersionDialog({ recordId, version, onRestore, onCancel }: Versio
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent className="sm:max-w-lg">
         <AlertDialogHeader>
-          <AlertDialogTitle>Versão {version}</AlertDialogTitle>
+          <AlertDialogTitle>{t('Versão {n}', { n: version })}</AlertDialogTitle>
           <AlertDialogDescription>
-            Ao restaurar, o conteúdo atual é mantido como mais uma versão no histórico, e esta passa a
-            ser a atual.
+            {t('Ao restaurar, o conteúdo atual é mantido como mais uma versão no histórico, e esta passa a ser a atual.')}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -63,15 +63,15 @@ export function VersionDialog({ recordId, version, onRestore, onCancel }: Versio
               <FieldRow key={index} field={field} index={index} recordId={recordId} live={false} version={version} />
             ))}
             {payload.fields.length === 0 && (
-              <p className="px-5 py-3 text-sm text-faint">Esta versão não possui campos.</p>
+              <p className="px-5 py-3 text-sm text-faint">{t('Esta versão não possui campos.')}</p>
             )}
           </div>
         )}
 
         <AlertDialogFooter>
-          <AlertDialogCancel>Fechar</AlertDialogCancel>
+          <AlertDialogCancel>{t('Fechar')}</AlertDialogCancel>
           <Button disabled={!payload} onClick={onRestore}>
-            Restaurar esta versão
+            {t('Restaurar esta versão')}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

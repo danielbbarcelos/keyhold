@@ -1,4 +1,3 @@
-import { FolderCombobox } from './FolderCombobox'
 import { useState } from 'react'
 
 import {
@@ -13,11 +12,13 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
+import { t } from '@/i18n'
 
 import { api, ApiError, type FolderNode } from '../api'
-import { Checkbox } from '@/components/ui/checkbox'
 import { awsPathOf, AwsNameField, nameProblem, suggestName, titleProblem } from './awsName'
 import { ColourPicker } from './ColourPicker'
+import { FolderCombobox } from './FolderCombobox'
 import { toast } from './toast'
 
 /**
@@ -52,23 +53,23 @@ export function RenameFolderDialog({
   const parent = path.split('/').slice(0, -1).join('/') || null
   const changed = name.trim() !== folder.name || leaf !== null
   const segment = aws && move && changed ? leaf ?? suggestName(name, 'pasta') : null
-  const wrong = aws ? titleProblem(name, 'O nome da pasta') ?? (segment !== null ? nameProblem(parent, segment) : null) : null
+  const wrong = aws ? titleProblem(name, 'folder') ?? (segment !== null ? nameProblem(parent, segment) : null) : null
 
   return (
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Renomear pasta</AlertDialogTitle>
+          <AlertDialogTitle>{t('Renomear pasta')}</AlertDialogTitle>
           <AlertDialogDescription>
             {aws
-              ? 'O nome é exibido no Keyhold como você escrever. Na AWS, a pasta faz parte do nome de cada parâmetro dentro dela.'
-              : 'O nome e a cor são cifrados como o restante do cofre.'}
+              ? t('O nome é exibido no Keyhold como você escrever. Na AWS, a pasta faz parte do nome de cada parâmetro dentro dela.')
+              : t('O nome e a cor são cifrados como o restante do cofre.')}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="folder-name">Nome</Label>
+            <Label htmlFor="folder-name">{t('Nome')}</Label>
             <Input
               id="folder-name"
               value={name}
@@ -83,20 +84,20 @@ export function RenameFolderDialog({
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-[13px]">
                   <Checkbox checked={move} onCheckedChange={(on) => setMove(on === true)} />
-                  Renomear também na AWS
+                  {t('Renomear também na AWS')}
                 </label>
                 {move ? (
                   <>
                     <AwsNameField parent={parent} from={name} value={leaf} onChange={setLeaf} fallback="pasta" />
                     <p className="text-xs text-amber">
-                      Cada parâmetro dentro de {path} é movido para o novo caminho e perde o histórico. Quem lê
-                      pelo caminho antigo deixa de encontrá-lo. Se algum parâmetro tiver anexos, apenas o nome no
-                      Keyhold muda.
+                      {t('Cada parâmetro dentro de {path} é movido para o novo caminho e perde o histórico. Quem lê pelo caminho antigo deixa de encontrá-lo. Se algum parâmetro tiver anexos, apenas o nome no Keyhold muda.', { path })}
                     </p>
                   </>
                 ) : (
                   <p className="text-xs text-faint">
-                    Na AWS, o caminho permanece <code className="font-mono">{path}</code>. Apenas o nome no Keyhold muda.
+                    {t('Na AWS, o caminho permanece')} <code className="font-mono">{path}</code>
+                    {'. '}
+                    {t('Apenas o nome no Keyhold muda.')}
                   </p>
                 )}
               </div>
@@ -109,7 +110,7 @@ export function RenameFolderDialog({
         </div>
 
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogCancel>{t('Cancelar')}</AlertDialogCancel>
           <Button
             disabled={!name.trim() || busy || wrong !== null}
             onClick={() => {
@@ -117,14 +118,14 @@ export function RenameFolderDialog({
               void api
                 .renameFolder(folder.id, name.trim(), aws ? null : colour, segment ?? undefined)
                 .then((answer) => {
-                  if (answer.warning) toast('Pasta renomeada com um aviso', answer.warning, 'error')
+                  if (answer.warning) toast(t('Pasta renomeada com um aviso'), answer.warning, 'error')
                   onDone(answer.folder)
                 })
                 .catch((cause) => setError(describe(cause)))
                 .finally(() => setBusy(false))
             }}
           >
-            Salvar
+            {t('Salvar')}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -171,16 +172,16 @@ export function MoveFolderDialog({
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Mover {folder.name}</AlertDialogTitle>
+          <AlertDialogTitle>{t('Mover {name}', { name: folder.name })}</AlertDialogTitle>
           <AlertDialogDescription>
-            O conteúdo da pasta não é alterado e a chave da pasta é mantida.
+            {t('O conteúdo da pasta não é alterado e a chave da pasta é mantida.')}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
         <div className="space-y-2">
-          <Label>Destino</Label>
+          <Label>{t('Destino')}</Label>
           <FolderCombobox
-            label="Destino"
+            label={t('Destino')}
             folders={folders.filter((candidate) => !descendants.has(candidate.id))}
             value={parentId === 'root' ? null : parentId}
             onChange={(id) => setParentId(id ?? 'root')}
@@ -190,7 +191,7 @@ export function MoveFolderDialog({
         </div>
 
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogCancel>{t('Cancelar')}</AlertDialogCancel>
           <Button
             onClick={() =>
               void api
@@ -199,7 +200,7 @@ export function MoveFolderDialog({
                 .catch((cause) => setError(describe(cause)))
             }
           >
-            Mover
+            {t('Mover')}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -231,20 +232,20 @@ export function DeleteFolderDialog({
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Excluir pasta {folder.name}</AlertDialogTitle>
+          <AlertDialogTitle>{t('Excluir pasta {name}', { name: folder.name })}</AlertDialogTitle>
           <AlertDialogDescription>
             {records > 0
               ? records === 1
-                ? 'O registro desta pasta não é excluído e é movido para a raiz do cofre.'
-                : `Os ${records} registros desta pasta não são excluídos e são movidos para a raiz do cofre.`
-              : 'A pasta está vazia.'}
+                ? t('O registro desta pasta não é excluído e é movido para a raiz do cofre.')
+                : t('Os {n} registros desta pasta não são excluídos e são movidos para a raiz do cofre.', { n: records })
+              : t('A pasta está vazia.')}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogCancel>{t('Cancelar')}</AlertDialogCancel>
           <Button
             variant="destructive"
             onClick={() =>
@@ -254,7 +255,7 @@ export function DeleteFolderDialog({
                 .catch((cause) => setError(describe(cause)))
             }
           >
-            Excluir pasta
+            {t('Excluir pasta')}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -263,5 +264,5 @@ export function DeleteFolderDialog({
 }
 
 function describe(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.'
+  return cause instanceof ApiError ? cause.message : t('O Keyhold não respondeu. Tente novamente.')
 }

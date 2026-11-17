@@ -1,14 +1,15 @@
-import { FolderCombobox } from '../FolderCombobox'
 import { useState } from 'react'
 import { SquareDashed } from 'lucide-react'
 
 import { DatePicker } from '@/components/common/DatePicker'
+import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 
 import type { Field, FolderNode, Payload } from '../../api'
 import { fieldsOfType, useCustom } from '../custom'
+import { FolderCombobox } from '../FolderCombobox'
 import { RecordTile } from '../icons'
 import { IconPicker } from '../IconPicker'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -95,21 +96,21 @@ export function RecordEdit({
 
   return (
     <div className="space-y-5 pb-6">
-      <Card title={creating ? (creating.cloning ? 'Clonar registro' : 'Novo registro') : 'Registro'}>
+      <Card title={creating ? (creating.cloning ? t('Clonar registro') : t('Novo registro')) : t('Registro')}>
         {/* Labels on top, controls level with each other, hints under their own control. Each
             column aligns to the top, so a hint never pushes its neighbours down. */}
         <div className="flex flex-wrap items-start gap-x-4 gap-y-4 px-5 pt-4 pb-5">
           <div className="flex min-w-[280px] flex-1 items-start gap-3">
             <div className="grid shrink-0 gap-1.5">
-              <span className="text-[13px] font-medium whitespace-nowrap">Ícone</span>
+              <span className="text-[13px] font-medium whitespace-nowrap">{t('Ícone')}</span>
               <IconPicker icon={draft.payload.icon} kind={kind} onChange={(icon) => setPayload({ icon })} />
             </div>
             <label className="grid min-w-0 flex-1 gap-1.5">
-              <span className="text-[13px] font-medium">Título</span>
+              <span className="text-[13px] font-medium">{t('Título')}</span>
               <Input
                 autoFocus
                 value={draft.payload.title}
-                placeholder="Ex.: GitHub"
+                placeholder={t('Ex.: GitHub')}
                 aria-invalid={titleWrong !== null}
                 onChange={(event) => setPayload({ title: event.target.value })}
               />
@@ -126,18 +127,18 @@ export function RecordEdit({
           </div>
           <div className="flex flex-wrap items-start gap-4">
             <label className="grid w-[220px] gap-1.5">
-              <span className="text-[13px] font-medium">Pasta</span>
+              <span className="text-[13px] font-medium">{t('Pasta')}</span>
               <FolderCombobox
                 folders={folders}
                 value={draft.folderId}
                 onChange={(folderId) => onChange({ ...draft, folderId })}
               />
               {aws && !creating && (
-                <span className="text-xs text-faint">Mudar a pasta na AWS exclui o histórico do nome antigo.</span>
+                <span className="text-xs text-faint">{t('Mudar a pasta na AWS exclui o histórico do nome antigo.')}</span>
               )}
             </label>
             <div className="grid w-[190px] gap-1.5">
-              <span className="text-[13px] font-medium">Trocar até</span>
+              <span className="text-[13px] font-medium">{t('Trocar até')}</span>
               <DatePicker
                 value={draft.rotation?.slice(0, 10) ?? ''}
                 onChange={(value) => onChange({ ...draft, rotation: value || null })}
@@ -147,10 +148,10 @@ export function RecordEdit({
         </div>
         {creating && !creating.cloning && (
           <div className="grid gap-1.5 border-t px-5 py-3.5">
-            <span className="text-[13px] font-medium">Começar com</span>
+            <span className="text-[13px] font-medium">{t('Começar com')}</span>
             <div className="flex flex-wrap gap-1.5">
               <Chip on={template === 'branco'} icon={<SquareDashed className="size-3.5" />} onClick={() => pick('branco')}>
-                Em branco
+                {t('Em branco')}
               </Chip>
               {types.map((one) => (
                 <Chip
@@ -170,11 +171,11 @@ export function RecordEdit({
         )}
       </Card>
 
-      <Card title="Alertas" hint="Exibidos no topo do registro">
+      <Card title={t('Alertas')} hint={t('Exibidos no topo do registro')}>
         <AlertsEditor alerts={draft.payload.alerts ?? []} onChange={(alerts) => setPayload({ alerts })} />
       </Card>
 
-      <Card title="Campos" hint="Arraste para reordenar">
+      <Card title={t('Campos')} hint={t('Arraste para reordenar')}>
         <FieldEditor
           framed={false}
           recordId={recordId}
@@ -183,11 +184,11 @@ export function RecordEdit({
         />
       </Card>
 
-      <Card title="Observação">
+      <Card title={t('Observação')}>
         <div className="px-5 pt-4 pb-5">
           <Textarea
             value={draft.payload.notes}
-            placeholder="Ex.: conta criada para o projeto X"
+            placeholder={t('Ex.: conta criada para o projeto X')}
             spellCheck={false}
             onChange={(event) => setPayload({ notes: event.target.value })}
           />
@@ -261,14 +262,14 @@ function AwsName({
       {!asked ? (
         <span className="flex flex-wrap items-center gap-x-2 text-xs text-faint">
           <span>
-            Na AWS: <code className="font-mono text-muted-foreground">{now}</code>
+            {t('Na AWS:')} <code className="font-mono text-muted-foreground">{now}</code>
           </span>
           <button
             type="button"
             className="text-primary hover:underline"
             onClick={() => onChange({ ...draft, rename: true, leaf: leafOf(parameter) })}
           >
-            Editar nome
+            {t('Editar nome')}
           </button>
         </span>
       ) : (
@@ -278,7 +279,7 @@ function AwsName({
               checked={draft.rename ?? false}
               onCheckedChange={(on) => onChange({ ...draft, rename: on === true })}
             />
-            Renomear também na AWS
+            {t('Renomear também na AWS')}
           </label>
           {draft.rename ? (
             <>
@@ -289,13 +290,14 @@ function AwsName({
                 onChange={(leaf) => onChange({ ...draft, leaf })}
               />
               <span className="text-xs text-amber">
-                O Keyhold grava um novo parâmetro e exclui {parameter}, com o histórico dele. Quem lê pelo
-                nome antigo deixa de encontrá-lo.
+                {t('O Keyhold grava um novo parâmetro e exclui {parameter}, com o histórico dele. Quem lê pelo nome antigo deixa de encontrá-lo.', { parameter })}
               </span>
             </>
           ) : (
             <span className="text-xs text-faint">
-              Na AWS, o nome permanece <code className="font-mono text-muted-foreground">{now}</code>. Apenas o título muda.
+              {t('Na AWS, o nome permanece')} <code className="font-mono text-muted-foreground">{now}</code>
+              {'. '}
+              {t('Apenas o título muda.')}
             </span>
           )}
         </>

@@ -3,6 +3,7 @@ import { Eye, EyeOff } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 /**
@@ -46,7 +47,7 @@ export function PasswordInput({
         type="button"
         variant="ghost"
         size="icon-sm"
-        aria-label={visible ? 'Esconder' : 'Mostrar'}
+        aria-label={visible ? t('Esconder') : t('Mostrar')}
         aria-pressed={visible}
         // Sits inside the field rather than beside it, so a row of fields keeps one column of
         // inputs — a button that widens the row would break the editor's grid.

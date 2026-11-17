@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
 import { api, type AwsConnection, type AwsLogin, type AwsVault, type RecordIcon } from '../api'
+import { t } from '../i18n'
 import { AwsMark } from './AwsMark'
 import { IconPicker } from './IconPicker'
 import { VaultInitial } from './shell'
@@ -84,23 +85,24 @@ export function NewVaultDialog({
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Novo cofre</DialogTitle>
+          <DialogTitle>{t('Novo cofre')}</DialogTitle>
           <DialogDescription>
-            Um cofre agrupa registros. Ele pode ficar trancado enquanto outro está aberto, e o acesso por agente é
-            definido por cofre.
+            {t(
+              'Um cofre agrupa registros. Ele pode ficar trancado enquanto outro está aberto, e o acesso por agente é definido por cofre.',
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="grid gap-1.5">
-            <span className="text-[13px] font-medium">Ícone e nome</span>
+            <span className="text-[13px] font-medium">{t('Ícone e nome')}</span>
             <div className="flex items-center gap-3">
               <IconPicker
                 icon={icon}
-                label="Escolher ícone do cofre"
+                label={t('Escolher ícone do cofre')}
                 onChange={setIcon}
                 onClear={() => setIcon(null)}
-                clearLabel="Voltar às iniciais"
+                clearLabel={t('Voltar às iniciais')}
                 trigger={
                   icon ? undefined : (
                     <VaultInitial vault={{ name: name || '?', colour: 'default' }} size="lg" />
@@ -109,9 +111,9 @@ export function NewVaultDialog({
               />
               <Input
                 autoFocus
-                aria-label="Nome"
+                aria-label={t('Nome')}
                 value={name}
-                placeholder="Ex.: Trabalho"
+                placeholder={t('Ex.: Trabalho')}
                 onChange={(event) => setName(event.target.value)}
               />
             </div>
@@ -121,43 +123,43 @@ export function NewVaultDialog({
             <Kind
               on={kind === 'local'}
               mark={<HardDrive className={cn('size-[18px]', kind === 'local' ? 'text-primary-text' : 'text-muted-foreground')} />}
-              title="Cofre local"
-              detail="No arquivo desta máquina. O conteúdo não sai daqui."
+              title={t('Cofre local')}
+              detail={t('No arquivo desta máquina. O conteúdo não sai daqui.')}
               onClick={() => setKind('local')}
             />
             <Kind
               on={kind === 'aws'}
               mark={<AwsMark className="size-[22px]" />}
               title="AWS Parameter Store"
-              detail="Em uma conta da AWS. Quem o IAM autorizar pode ler e gravar."
+              detail={t('Em uma conta da AWS. Quem o IAM autorizar pode ler e gravar.')}
               onClick={() => setKind('aws')}
             />
           </div>
 
           {kind === 'aws' &&
             (connections === null ? (
-              <p className="text-sm text-faint">Carregando as contas AWS…</p>
+              <p className="text-sm text-faint">{t('Carregando as contas AWS…')}</p>
             ) : connections.length === 0 ? (
               <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line-2 px-6 py-6 text-center">
                 <AwsMark size="md" />
-                <b className="text-sm font-semibold">Nenhuma conta AWS conectada</b>
+                <b className="text-sm font-semibold">{t('Nenhuma conta AWS conectada')}</b>
                 <p className="max-w-xs text-xs text-muted-foreground">
-                  Conecte um login SSO e escolha as contas em Ajustes. Depois, volte aqui e selecione a conta.
+                  {t('Conecte um login SSO e escolha as contas em Ajustes. Depois, volte aqui e selecione a conta.')}
                 </p>
                 <Button size="sm" className="mt-1" onClick={onAccounts}>
-                  Conectar conta AWS
+                  {t('Conectar conta AWS')}
                 </Button>
               </div>
             ) : (
               <div className="space-y-3">
                 <div className="grid gap-1.5">
-                  <span className="text-[13px] font-medium">Conta</span>
+                  <span className="text-[13px] font-medium">{t('Conta')}</span>
                   <Combobox
-                    label="Conta"
+                    label={t('Conta')}
                     tall
                     value={connection}
-                    searchPlaceholder="Buscar pelo título, número da conta ou papel"
-                    empty="Nenhuma conta com esse nome."
+                    searchPlaceholder={t('Buscar pelo título, número da conta ou papel')}
+                    empty={t('Nenhuma conta com esse nome.')}
                     onChange={setConnection}
                     options={connections.map((one) => {
                       const live = logins.find((login) => login.id === one.login_id)?.connected ?? false
@@ -165,7 +167,7 @@ export function NewVaultDialog({
                       return {
                         value: one.id,
                         label: one.title || one.account_name || one.account_id,
-                        detail: `${one.account_id}, papel ${one.role}`,
+                        detail: t('{account}, papel {role}', { account: one.account_id, role: one.role }),
                         leading: <AwsMark size="sm" />,
                         trailing: (
                           <span
@@ -174,7 +176,7 @@ export function NewVaultDialog({
                               live ? 'bg-mint-soft text-mint' : 'bg-stone-soft text-muted-foreground',
                             )}
                           >
-                            {live ? 'sessão ativa' : 'sem sessão'}
+                            {live ? t('sessão ativa') : t('sem sessão')}
                           </span>
                         ),
                       }
@@ -183,14 +185,14 @@ export function NewVaultDialog({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="grid gap-1.5">
-                    <span className="text-[13px] font-medium">Região</span>
+                    <span className="text-[13px] font-medium">{t('Região')}</span>
                     <Input value={region} onChange={(event) => setRegion(event.target.value.trim())} />
                   </label>
                   <label className="grid gap-1.5">
-                    <span className="text-[13px] font-medium">Bucket dos anexos</span>
+                    <span className="text-[13px] font-medium">{t('Bucket dos anexos')}</span>
                     <Input
                       value={shownBucket}
-                      placeholder="keyhold-projeto"
+                      placeholder={t('keyhold-projeto')}
                       onChange={(event) => {
                         setBucketTouched(true)
                         setBucket(event.target.value.trim())
@@ -199,19 +201,20 @@ export function NewVaultDialog({
                   </label>
                 </div>
                 <p className="text-xs text-faint">
-                  O Keyhold não cria o bucket. Sem ele, os registros funcionam e apenas os anexos ficam indisponíveis.
+                  {t('O Keyhold não cria o bucket. Sem ele, os registros funcionam e apenas os anexos ficam indisponíveis.')}
                 </p>
                 <label className="grid gap-1.5">
-                  <span className="text-[13px] font-medium">Caminho na AWS (opcional)</span>
+                  <span className="text-[13px] font-medium">{t('Caminho na AWS (opcional)')}</span>
                   <Input
                     value={root}
-                    placeholder="/ (a conta inteira)"
+                    placeholder={t('/ (a conta inteira)')}
                     spellCheck={false}
                     onChange={(event) => setRoot(event.target.value.trim())}
                   />
                   <span className="text-xs text-faint">
-                    Deixe vazio para ver a conta inteira. Se o seu acesso é a uma pasta só, informe essa pasta, por
-                    exemplo /shared: o cofre começa nela.
+                    {t(
+                      'Deixe vazio para ver a conta inteira. Se o seu acesso é a uma pasta só, informe essa pasta, por exemplo /shared: o cofre começa nela.',
+                    )}
                   </span>
                 </label>
                 <label className="flex items-start gap-2.5 rounded-[10px] border p-3 text-[13px]">
@@ -221,10 +224,11 @@ export function NewVaultDialog({
                     onCheckedChange={(on) => setUnderstood(on === true)}
                   />
                   <span className="grid gap-0.5">
-                    <span className="font-medium">Entendi que conta, região, caminho e bucket não mudam depois</span>
+                    <span className="font-medium">{t('Entendi que conta, região, caminho e bucket não mudam depois')}</span>
                     <span className="text-xs text-faint">
-                      Depois de criado, só o nome e o ícone do cofre podem ser alterados. Para mudar o resto, crie um
-                      cofre novo.
+                      {t(
+                        'Depois de criado, só o nome e o ícone do cofre podem ser alterados. Para mudar o resto, crie um cofre novo.',
+                      )}
                     </span>
                   </span>
                 </label>
@@ -234,7 +238,7 @@ export function NewVaultDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button
             disabled={!ready}
@@ -246,7 +250,7 @@ export function NewVaultDialog({
               )
             }
           >
-            Criar cofre
+            {t('Criar cofre')}
           </Button>
         </DialogFooter>
       </DialogContent>

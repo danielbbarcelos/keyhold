@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Laptop, Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { t } from '@/i18n'
 
 import { api, ApiError, type Activity as ActivityAnswer, type ActivityEvent } from '../../api'
 import { kindOf, momentOf, whenShort } from '../activity'
@@ -30,7 +31,7 @@ export function Activity({ recordId }: { recordId: string }) {
         setAnswer(found)
         setEvents(found.events)
       })
-      .catch((cause) => alive && setError(cause instanceof ApiError ? cause.message : 'Não foi possível ler a atividade.'))
+      .catch((cause) => alive && setError(cause instanceof ApiError ? cause.message : t('Não foi possível ler a atividade.')))
 
     return () => {
       alive = false
@@ -47,14 +48,14 @@ export function Activity({ recordId }: { recordId: string }) {
       setEvents((current) => [...current, ...page.events])
       setAnswer((current) => (current ? { ...current, more: page.more } : page))
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível ler a atividade.')
+      setError(cause instanceof ApiError ? cause.message : t('Não foi possível ler a atividade.'))
     } finally {
       setLoading(false)
     }
   }
 
   if (error) return <p className="px-5 py-6 text-sm text-rose">{error}</p>
-  if (!answer) return <p className="px-5 py-6 text-sm text-faint">Lendo a atividade…</p>
+  if (!answer) return <p className="px-5 py-6 text-sm text-faint">{t('Lendo a atividade…')}</p>
 
   const aws = answer.source === 'aws'
 
@@ -62,8 +63,8 @@ export function Activity({ recordId }: { recordId: string }) {
     return (
       <p className="px-5 py-6 text-sm text-muted-foreground">
         {answer.denied
-          ? 'Sua permissão na AWS não inclui ler a trilha deste cofre. Peça a quem administra a conta a política audit-read.'
-          : `O log group ${answer.group} não existe nesta conta, então não há trilha para mostrar.`}
+          ? t('Sua permissão na AWS não inclui ler a trilha deste cofre. Peça a quem administra a conta a política audit-read.')
+          : t('O log group {group} não existe nesta conta, então não há trilha para mostrar.', { group: answer.group ?? '' })}
       </p>
     )
   }
@@ -72,8 +73,8 @@ export function Activity({ recordId }: { recordId: string }) {
     <div>
       <div className="flex items-center gap-3 border-b px-5 py-3 text-sm">
         {aws ? <AwsMark size="xs" className="size-4" /> : <Laptop className="size-4 text-faint" />}
-        <span className="font-medium">{aws ? 'Na AWS' : 'Neste computador'}</span>
-        {aws && <span className="text-faint">últimos {answer.days ?? 30} dias</span>}
+        <span className="font-medium">{aws ? t('Na AWS') : t('Neste computador')}</span>
+        {aws && <span className="text-faint">{t('últimos {n} dias', { n: answer.days ?? 30 })}</span>}
         <span className="flex-1" />
         {answer.group && <span className="font-mono text-[11px] text-faint">{answer.group}</span>}
       </div>
@@ -88,7 +89,7 @@ export function Activity({ recordId }: { recordId: string }) {
               <Icon className="size-4" />
             </span>
             <span className="min-w-0 flex-1 text-muted-foreground">
-              <b className="font-medium text-foreground">{event.person ?? 'Você'}</b> {kind.sentence(event.detail)}
+              <b className="font-medium text-foreground">{event.person ?? t('Você')}</b> {kind.sentence(event.detail)}
             </span>
             <span className="shrink-0 text-xs whitespace-nowrap text-faint">{whenShort(momentOf(event))}</span>
           </div>
@@ -97,7 +98,9 @@ export function Activity({ recordId }: { recordId: string }) {
 
       {events.length === 0 && (
         <p className="border-b px-5 py-6 text-sm text-faint">
-          {aws ? `Nada registrado nos últimos ${answer.days ?? 30} dias.` : 'Nada registrado para este registro neste computador.'}
+          {aws
+            ? t('Nada registrado nos últimos {n} dias.', { n: answer.days ?? 30 })
+            : t('Nada registrado para este registro neste computador.')}
         </p>
       )}
 
@@ -105,15 +108,15 @@ export function Activity({ recordId }: { recordId: string }) {
         <div className="border-b px-5 py-3">
           <Button variant="outline" size="sm" disabled={loading} onClick={() => void more()}>
             {loading && <Loader2 className="animate-spin" />}
-            Carregar mais
+            {t('Carregar mais')}
           </Button>
         </div>
       )}
 
       <p className="px-5 py-4 text-[13px] text-faint">
         {aws
-          ? 'A hora é a de quando a AWS recebeu cada evento. O que foi feito fora do Keyhold, pelo console da AWS ou pela CLI, fica no AWS CloudTrail da conta.'
-          : 'Revelações e cópias só aparecem aqui quando a Trilha registra leituras (Ajustes, Trilha).'}
+          ? t('A hora é a de quando a AWS recebeu cada evento. O que foi feito fora do Keyhold, pelo console da AWS ou pela CLI, fica no AWS CloudTrail da conta.')
+          : t('Revelações e cópias só aparecem aqui quando a Trilha registra leituras (Ajustes, Trilha).')}
       </p>
     </div>
   )

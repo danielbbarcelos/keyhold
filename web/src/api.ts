@@ -1,3 +1,4 @@
+import { locale } from './i18n'
 import { authHeaders, disown } from './session'
 
 /**
@@ -45,6 +46,8 @@ export interface Status {
   /** Widths the person dragged, in px. */
   layout?: Layout
   attemptsLeft: number
+  /** The language somebody chose for this Keyhold; `null` until somebody does. */
+  language?: 'pt-BR' | 'en' | null
 }
 
 export interface Recipe {
@@ -286,7 +289,7 @@ export class ApiError extends Error {
 function sentence(text: string): string {
   const trimmed = text.trim()
   if (!trimmed) return trimmed
-  const capital = trimmed.charAt(0).toLocaleUpperCase('pt-BR') + trimmed.slice(1)
+  const capital = trimmed.charAt(0).toLocaleUpperCase(locale()) + trimmed.slice(1)
   return /[.!?…:]$/.test(capital) ? capital : `${capital}.`
 }
 
@@ -589,6 +592,10 @@ export const api = {
 
   visibility: (visible: boolean) =>
     call<{ lock: LockState }>('POST', '/api/visibility', { visible }),
+
+  /** Allowed before setup and while locked, like the appearance. */
+  setLanguage: (language: 'pt-BR' | 'en') =>
+    call<{ language: 'pt-BR' | 'en' }>('PUT', '/api/settings/language', { language }),
 
   setAppearance: (appearance: Appearance) =>
     call<{ appearance: Appearance }>('PUT', '/api/settings/appearance', appearance),

@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Folder, Fold
 
 import { Input } from '@/components/ui/input'
 import { Tip } from '@/components/ui/tip'
+import { locale, t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 import type { FolderNode, RecordPreview } from '../../api'
@@ -141,7 +142,7 @@ export function TreeCard({
     records.filter((record) => record.folder_id === folderId).length +
     folders.filter((child) => child.parent_id === folderId).reduce((total, child) => total + countIn(child.id), 0)
 
-  const sortRecords = (list: RecordPreview[]) => [...list].sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'))
+  const sortRecords = (list: RecordPreview[]) => [...list].sort((a, b) => a.title.localeCompare(b.title, locale()))
 
   /** Every row in the order it is drawn, for Shift click. */
   function order(): string[] {
@@ -200,7 +201,7 @@ export function TreeCard({
 
     if (items.length > 1) {
       const badge = document.createElement('div')
-      badge.textContent = `${items.length} itens`
+      badge.textContent = t('{n} itens', { n: items.length })
       badge.style.cssText =
         'position:fixed;top:-100px;left:0;padding:6px 12px;border-radius:999px;font:600 13px system-ui;background:var(--primary);color:var(--primary-foreground)'
       document.body.appendChild(badge)
@@ -273,7 +274,7 @@ export function TreeCard({
               <span className="flex items-center gap-1 truncate text-xs text-faint">
                 <Folder className="size-3 shrink-0" />
                 <span className="truncate">
-                  {folderPath(folders, record.folder_id) || 'Raiz'}
+                  {folderPath(folders, record.folder_id) || t('Raiz')}
                   {record.subtitle && `, ${record.subtitle}`}
                 </span>
               </span>
@@ -320,10 +321,10 @@ export function TreeCard({
               dropping === folder.id && 'ring-2 ring-primary',
             )}
           >
-<Tip label={open ? 'Recolher' : 'Expandir'}>
+<Tip label={open ? t('Recolher') : t('Expandir')}>
             <button
               type="button"
-              aria-label={open ? 'Recolher' : 'Expandir'}
+              aria-label={open ? t('Recolher') : t('Expandir')}
               onClick={() =>
                 setClosed((current) => {
                   const next = new Set(current)
@@ -351,7 +352,7 @@ export function TreeCard({
             </button>
             <span className="text-xs text-faint group-hover:hidden group-has-aria-expanded:hidden">{countIn(folder.id)}</span>
             <span className="hidden group-hover:block group-has-aria-expanded:block">
-              <MenuButton entries={folderEntries(folder)} label={`Ações da pasta ${folder.name}`} />
+              <MenuButton entries={folderEntries(folder)} label={t('Ações da pasta {name}', { name: folder.name })} />
             </span>
           </div>
         </RowMenu>
@@ -375,24 +376,24 @@ export function TreeCard({
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-faint" />
           <Input
             className="h-8 pl-8"
-            placeholder="Filtrar neste cofre"
+            placeholder={t('Filtrar neste cofre')}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
         <div className="flex rounded-lg border bg-raised p-0.5">
-          <ModeButton on={mode === 'tree'} label="Árvore" onClick={() => onMode('tree')}>
+          <ModeButton on={mode === 'tree'} label={t('Árvore')} onClick={() => onMode('tree')}>
             <ListTree className="size-[15px]" />
           </ModeButton>
-          <ModeButton on={mode === 'list'} label="Lista" onClick={() => onMode('list')}>
+          <ModeButton on={mode === 'list'} label={t('Lista')} onClick={() => onMode('list')}>
             <List className="size-[15px]" />
           </ModeButton>
         </div>
         {mode === 'tree' && folders.length > 0 && (
-<Tip label={allClosed ? 'Expandir todas as pastas' : 'Recolher todas as pastas'}>
+<Tip label={allClosed ? t('Expandir todas as pastas') : t('Recolher todas as pastas')}>
           <button
             type="button"
-            aria-label={allClosed ? 'Expandir todas as pastas' : 'Recolher todas as pastas'}
+            aria-label={allClosed ? t('Expandir todas as pastas') : t('Recolher todas as pastas')}
             onClick={() => setClosed(allClosed ? new Set() : new Set(folders.map((folder) => folder.id)))}
             className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border bg-raised text-faint hover:text-foreground"
           >
@@ -403,13 +404,13 @@ export function TreeCard({
 
       <div className="flex flex-wrap gap-1.5 border-b px-3 pb-2.5">
         <FilterChip on={filter === 'all'} count={counts.all} onClick={() => onFilter('all')}>
-          Tudo
+          {t('Tudo')}
         </FilterChip>
         <FilterChip on={filter === 'favourites'} count={counts.favourites} onClick={() => onFilter('favourites')}>
-          Favoritos
+          {t('Favoritos')}
         </FilterChip>
         <FilterChip on={filter === 'attention'} count={counts.attention} onClick={() => onFilter('attention')}>
-          Atenção
+          {t('Atenção')}
         </FilterChip>
 
       </div>
@@ -417,17 +418,17 @@ export function TreeCard({
       {picked.size > 0 && (
         <div className="flex items-center gap-2 border-b bg-primary-soft/50 px-3 py-2 text-xs">
           <b className="min-w-0 flex-1 truncate font-semibold">
-            {picked.size} {picked.size === 1 ? 'selecionado' : 'selecionados'}
+            {picked.size === 1 ? t('{n} selecionado', { n: 1 }) : t('{n} selecionados', { n: picked.size })}
           </b>
           <MenuButton
-            text="Ações"
-            label="Ações para os itens selecionados"
+            text={t('Ações')}
+            label={t('Ações para os itens selecionados')}
             variant="outline"
             align="end"
             entries={pickedEntries([...picked], () => setPicked(new Set()))}
           />
           <button type="button" className="shrink-0 text-primary-text hover:underline" onClick={() => setPicked(new Set())}>
-            Limpar
+            {t('Limpar')}
           </button>
         </div>
       )}
@@ -444,8 +445,8 @@ export function TreeCard({
         ) : (
           <>
             <div className="flex justify-between px-2.5 pt-1 pb-1.5 text-xs text-faint">
-              <span>{shown.length} {shown.length === 1 ? 'registro' : 'registros'}</span>
-              <span>A a Z</span>
+              <span>{shown.length === 1 ? t('{n} registro', { n: 1 }) : t('{n} registros', { n: shown.length })}</span>
+              <span>{t('A a Z')}</span>
             </div>
             {sortRecords(shown).map((record) => recordRow(record, 0, true))}
           </>
@@ -454,12 +455,12 @@ export function TreeCard({
         {shown.length === 0 && (
           <p className="px-3 py-6 text-center text-[13px] text-faint">
             {records.length === 0
-              ? 'Este cofre está vazio. Crie o primeiro registro em “Novo registro”.'
+              ? t('Este cofre está vazio. Crie o primeiro registro em “Novo registro”.')
               : filter === 'favourites'
-                ? 'Nenhum favorito neste cofre. Marque a estrela de um registro para exibi-lo aqui.'
+                ? t('Nenhum favorito neste cofre. Marque a estrela de um registro para exibi-lo aqui.')
                 : filter === 'attention'
-                  ? 'Nenhum registro pede atenção neste cofre.'
-                  : 'Nenhum registro encontrado.'}
+                  ? t('Nenhum registro pede atenção neste cofre.')
+                  : t('Nenhum registro encontrado.')}
           </p>
         )}
         {/* The empty space under the rows is the vault's root: right-click there to make something in it. */}
@@ -479,13 +480,13 @@ export function TreeCard({
         )}
       >
         <Trash2 className="size-4" />
-        Lixeira
+        {t('Lixeira')}
         <span className="ml-auto text-xs text-faint">{trashCount}</span>
       </button>
       </TabMenu>
       ) : (
         <p className="flex h-11 shrink-0 items-center gap-2 border-t px-4 text-xs text-faint">
-          Na AWS não há lixeira: a exclusão é permanente.
+          {t('Na AWS não há lixeira: a exclusão é permanente.')}
         </p>
       )}
     </aside>

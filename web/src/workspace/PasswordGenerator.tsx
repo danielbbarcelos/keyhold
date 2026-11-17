@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 
 import { api, DEFAULT_RECIPE, type Recipe } from '../api'
 import { copyForSeconds } from '../clipboard'
+import { t } from '../i18n'
 
 const CLIPBOARD_SECONDS = 30
 import { toast, toastError } from './toast'
@@ -44,9 +45,9 @@ export function strengthOf(value: string): { bits: number; label: string; tone: 
   if (/[^a-zA-Z0-9]/.test(value)) pool += 32
   const bits = value.length * Math.log2(Math.max(pool, 1))
 
-  if (bits >= 80) return { bits, label: 'Forte', tone: 'mint' }
-  if (bits >= 50) return { bits, label: 'Razoável', tone: 'amber' }
-  return { bits, label: 'Fraca', tone: 'rose' }
+  if (bits >= 80) return { bits, label: t('Forte'), tone: 'mint' }
+  if (bits >= 50) return { bits, label: t('Razoável'), tone: 'amber' }
+  return { bits, label: t('Fraca'), tone: 'rose' }
 }
 
 /** Type, length, the four kinds of character and, under "Mostrar mais", which symbols. */
@@ -64,7 +65,7 @@ export function GeneratorControls({ recipe, onChange }: { recipe: Recipe; onChan
   return (
     <div className="grid gap-4">
       <label className="grid gap-1.5">
-        <span className="text-[13px] font-medium">Tipo</span>
+        <span className="text-[13px] font-medium">{t('Tipo')}</span>
         <Select
           value={kind}
           onValueChange={(value) =>
@@ -79,14 +80,14 @@ export function GeneratorControls({ recipe, onChange }: { recipe: Recipe; onChan
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="senha">Senha</SelectItem>
-            <SelectItem value="pin">PIN (apenas números)</SelectItem>
+            <SelectItem value="senha">{t('Senha')}</SelectItem>
+            <SelectItem value="pin">{t('PIN (apenas números)')}</SelectItem>
           </SelectContent>
         </Select>
       </label>
 
       <label className="grid gap-2">
-        <span className="text-[13px] font-medium">{recipe.length} caracteres</span>
+        <span className="text-[13px] font-medium">{t('{n} caracteres', { n: recipe.length })}</span>
         <input
           type="range"
           min={min}
@@ -101,10 +102,10 @@ export function GeneratorControls({ recipe, onChange }: { recipe: Recipe; onChan
         <div className="flex flex-wrap gap-x-5 gap-y-2">
           {(
             [
-              ['lowercase', 'Letras minúsculas'],
-              ['uppercase', 'Maiúsculas'],
-              ['digits', 'Números'],
-              ['symbols', 'Símbolos'],
+              ['lowercase', t('Letras minúsculas')],
+              ['uppercase', t('Maiúsculas')],
+              ['digits', t('Números')],
+              ['symbols', t('Símbolos')],
             ] as const
           ).map(([key, label]) => (
             <label key={key} className="flex items-center gap-2 text-[13px]">
@@ -142,14 +143,14 @@ export function GeneratorControls({ recipe, onChange }: { recipe: Recipe; onChan
               checked={recipe.avoid_ambiguous}
               onCheckedChange={(on) => onChange({ ...recipe, avoid_ambiguous: on === true })}
             />
-            Evitar caracteres parecidos (I, l, 1, O, 0)
+            {t('Evitar caracteres parecidos (I, l, 1, O, 0)')}
           </label>
         </div>
       )}
 
       {kind === 'senha' && (
         <button type="button" className="justify-self-end text-[13px] text-primary hover:underline" onClick={() => setMore(!more)}>
-          {more ? 'Mostrar menos' : 'Mostrar mais'}
+          {more ? t('Mostrar menos') : t('Mostrar mais')}
         </button>
       )}
     </div>
@@ -191,7 +192,7 @@ export function PasswordGenerator({ onUse, onCancel }: { onUse: (value: string) 
     void api
       .generate(from)
       .then((made) => setValue(made.password))
-      .catch((cause) => toastError(cause, 'Não foi possível gerar a senha'))
+      .catch((cause) => toastError(cause, t('Não foi possível gerar a senha')))
   }, [])
 
   useEffect(() => {
@@ -209,8 +210,8 @@ export function PasswordGenerator({ onUse, onCancel }: { onUse: (value: string) 
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
-          <DialogTitle>Gerador de senhas</DialogTitle>
-          <DialogDescription>Defina a composição da senha. O valor pode ser editado manualmente antes do uso.</DialogDescription>
+          <DialogTitle>{t('Gerador de senhas')}</DialogTitle>
+          <DialogDescription>{t('Defina a composição da senha. O valor pode ser editado manualmente antes do uso.')}</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-5 py-2">
@@ -221,27 +222,29 @@ export function PasswordGenerator({ onUse, onCancel }: { onUse: (value: string) 
                 type={showing ? 'text' : 'password'}
                 spellCheck={false}
                 autoComplete="off"
-                aria-label="Senha gerada"
+                aria-label={t('Senha gerada')}
                 className="pr-[104px] font-mono text-[14px]"
                 onChange={(event) => setValue(event.target.value)}
               />
               <span className="absolute top-1/2 right-1 flex -translate-y-1/2">
-                <Button variant="ghost" size="icon-sm" aria-label={showing ? 'Ocultar' : 'Mostrar'} onClick={() => setShowing(!showing)}>
+                <Button variant="ghost" size="icon-sm" aria-label={showing ? t('Ocultar') : t('Mostrar')} onClick={() => setShowing(!showing)}>
                   {showing ? <EyeOff /> : <Eye />}
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Copiar"
+                  aria-label={t('Copiar')}
                   onClick={() =>
                     void copyForSeconds(value, CLIPBOARD_SECONDS, () => undefined)
-                      .then(() => toast('Senha copiada', 'A área de transferência é limpa em 30 segundos.'))
-                      .catch(() => toast('Não foi possível copiar', 'O navegador bloqueou o acesso à área de transferência.', 'error'))
+                      .then(() => toast(t('Senha copiada'), t('A área de transferência é limpa em 30 segundos.')))
+                      .catch(() =>
+                        toast(t('Não foi possível copiar'), t('O navegador bloqueou o acesso à área de transferência.'), 'error'),
+                      )
                   }
                 >
                   <Copy />
                 </Button>
-                <Button variant="ghost" size="icon-sm" aria-label="Gerar outra senha" onClick={() => recipe && make(recipe)}>
+                <Button variant="ghost" size="icon-sm" aria-label={t('Gerar outra senha')} onClick={() => recipe && make(recipe)}>
                   <Dices />
                 </Button>
               </span>
@@ -261,18 +264,18 @@ export function PasswordGenerator({ onUse, onCancel }: { onUse: (value: string) 
               recipe &&
               void api
                 .saveGenerator(recipe)
-                .then(() => toast('Padrão salvo', 'O gerador passa a começar com estas opções.'))
+                .then(() => toast(t('Padrão salvo'), t('O gerador passa a começar com estas opções.')))
                 .catch((cause) => toastError(cause))
             }
           >
-            Salvar como padrão
+            {t('Salvar como padrão')}
           </button>
           <span className="flex gap-2">
             <Button variant="outline" onClick={onCancel}>
-              Cancelar
+              {t('Cancelar')}
             </Button>
             <Button disabled={!value} onClick={() => onUse(value)}>
-              Usar senha
+              {t('Usar senha')}
             </Button>
           </span>
         </DialogFooter>

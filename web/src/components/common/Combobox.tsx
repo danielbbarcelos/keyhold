@@ -4,6 +4,7 @@ import { Check, ChevronsUpDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 export interface ComboboxOption {
@@ -31,9 +32,9 @@ export function Combobox({
   value,
   onChange,
   label,
-  placeholder = 'Selecione…',
-  searchPlaceholder = 'Buscar',
-  empty = 'Nada encontrado.',
+  placeholder = t('Selecione…'),
+  searchPlaceholder = t('Buscar'),
+  empty = t('Nada encontrado.'),
   tall = false,
   className,
 }: {

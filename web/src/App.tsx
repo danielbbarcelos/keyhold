@@ -10,10 +10,13 @@ import { applyAppearance } from './theme'
 import { LogoLockup } from './workspace/Logo'
 import { applyLayout } from './workspace/Splitter'
 import { useStatus } from './useStatus'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+
+import { api } from './api'
+import { fromTag, getLang, setLang, t, useLang } from './i18n'
 
 /**
  * Which screen keyhold is on, decided by one question asked of the binary.
@@ -25,6 +28,33 @@ import { Button } from '@/components/ui/button'
  */
 export function App() {
   const { status, offline, refresh } = useStatus()
+
+  // The whole tree re-renders when the language changes: this component subscribes, and nothing
+  // below it is wrapped in React.memo, so every child renders again and every t() is read anew.
+  // No key on the root on purpose: remounting would throw away what is half typed (a step of the
+  // setup, a generated password, an open dialog).
+  useLang()
+
+  // The binary's choice wins whenever it has one (it can change from another tab, or from the
+  // settings once the toggle exists). Until somebody chooses, main.tsx followed the browser.
+  const language = status?.language
+  useEffect(() => {
+    const chosen = fromTag(language)
+    if (chosen) setLang(chosen)
+  }, [language])
+
+  // A new Keyhold with nobody's choice yet: keep the browser's language on the binary too, so the
+  // messages it writes match the screen. Once, and only on the first screen.
+  const initialised = status?.identity.initialised
+  const savedLanguage = useRef(false)
+  useEffect(() => {
+    if (initialised === false && language === null && !savedLanguage.current) {
+      savedLanguage.current = true
+      void api.setLanguage(getLang()).catch(() => {
+        savedLanguage.current = false
+      })
+    }
+  }, [initialised, language])
 
   const theme = status?.appearance.theme
   const accent = status?.appearance.accent
@@ -61,7 +91,7 @@ export function App() {
     }
 
     if (!status) {
-      return <Notice title="Conferindo o cofre…">{null}</Notice>
+      return <Notice title={t('Conferindo o cofre…')}>{null}</Notice>
     }
 
     if (!status.identity.initialised) {
@@ -102,12 +132,12 @@ function Offline({ onRetry }: { onRetry: () => void }) {
   const [asked, setAsked] = useState(false)
 
   return (
-    <Notice logo={false} title="O Keyhold não está respondendo">
+    <Notice logo={false} title={t('O Keyhold não está respondendo')}>
       <span className="flex flex-col items-start gap-4">
         <span>
-          Esta aba perdeu a conexão com o Keyhold, que foi fechado ou reiniciado. A chave do cofre
-          foi removida da memória, e os dados continuam no arquivo. Abra o Keyhold novamente e
-          destranque o cofre.
+          {t(
+            'Esta aba perdeu a conexão com o Keyhold, que foi fechado ou reiniciado. A chave do cofre foi removida da memória, e os dados continuam no arquivo. Abra o Keyhold novamente e destranque o cofre.',
+          )}
         </span>
         <span className="flex flex-wrap gap-2">
           <Button
@@ -116,16 +146,17 @@ function Offline({ onRetry }: { onRetry: () => void }) {
               window.location.href = 'keyhold://open'
             }}
           >
-            Abrir o Keyhold
+            {t('Abrir o Keyhold')}
           </Button>
           <Button variant="outline" onClick={onRetry}>
-            Tentar novamente
+            {t('Tentar novamente')}
           </Button>
         </span>
         {asked && (
           <span className="text-xs">
-            O Keyhold é aberto em uma nova aba, e esta pode ser fechada. Caso nada aconteça, abra o
-            Keyhold pelo menu de aplicativos.
+            {t(
+              'O Keyhold é aberto em uma nova aba, e esta pode ser fechada. Caso nada aconteça, abra o Keyhold pelo menu de aplicativos.',
+            )}
           </span>
         )}
       </span>
@@ -160,28 +191,27 @@ function OpenFromBookmark() {
       }
     } catch {
       setState('failed')
-      setMessage('O Keyhold não está em execução. Abra pelo atalho ou pelo terminal.')
+      setMessage(t('O Keyhold não está em execução. Abra pelo atalho ou pelo terminal.'))
     }
   }
 
   return (
-    <Notice title={state === 'opened' ? 'Keyhold aberto em uma nova aba' : 'Abrir o Keyhold'}>
+    <Notice title={state === 'opened' ? t('Keyhold aberto em uma nova aba') : t('Abrir o Keyhold')}>
       {state === 'opened' ? (
-        'Esta aba pode ser fechada. A sessão vai apenas para a nova aba, nunca para um endereço salvo.'
+        t('Esta aba pode ser fechada. A sessão vai apenas para a nova aba, nunca para um endereço salvo.')
       ) : (
         <span className="flex flex-col items-start gap-4">
           {wasReplayed() && (
             <span className="text-destructive">
-              O endereço que abriu esta aba já tinha sido usado antes. Outro programa pode ter lido o endereço, e a
-              sessão criada com ele foi encerrada por segurança.
+              {t(
+                'O endereço que abriu esta aba já tinha sido usado antes. Outro programa pode ter lido o endereço, e a sessão criada com ele foi encerrada por segurança.',
+              )}
             </span>
           )}
-          <span>
-            Esta aba não possui uma sessão do Keyhold. O Keyhold abre uma nova aba já com a sessão.
-          </span>
+          <span>{t('Esta aba não possui uma sessão do Keyhold. O Keyhold abre uma nova aba já com a sessão.')}</span>
           <Button onClick={() => void open()} disabled={state === 'busy'}>
             {state === 'busy' && <Loader2 className="animate-spin" />}
-            Abrir o Keyhold
+            {t('Abrir o Keyhold')}
           </Button>
           {state === 'failed' && message && <span className="text-destructive">{message}</span>}
         </span>

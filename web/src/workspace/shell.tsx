@@ -22,6 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils'
 
 import { api, type AwsLogin, type RecordIcon, type Status, type VaultSummary } from '../api'
+import { locale, t } from '../i18n'
 import { linkProps, TabMenu, type Destination } from './nav'
 import { AWS_CHANGED, useAwsRenew } from './AwsAccounts'
 import { AwsMark } from './AwsMark'
@@ -38,12 +39,12 @@ import { LogoIcon } from './Logo'
  */
 export type Place = 'home' | 'vault' | 'trail' | 'instances' | 'custom' | 'settings'
 
-const RAIL: Array<{ id: Exclude<Place, 'vault'>; label: string; icon: LucideIcon }> = [
-  { id: 'home', label: 'Início', icon: Home },
-  { id: 'trail', label: 'Trilha', icon: ScrollText },
-  { id: 'instances', label: 'Instâncias', icon: Cpu },
-  { id: 'custom', label: 'Personalizar', icon: Paintbrush },
-  { id: 'settings', label: 'Ajustes', icon: SlidersHorizontal },
+const RAIL = (): Array<{ id: Exclude<Place, 'vault'>; label: string; icon: LucideIcon }> => [
+  { id: 'home', label: t('Início'), icon: Home },
+  { id: 'trail', label: t('Trilha'), icon: ScrollText },
+  { id: 'instances', label: t('Instâncias'), icon: Cpu },
+  { id: 'custom', label: t('Personalizar'), icon: Paintbrush },
+  { id: 'settings', label: t('Ajustes'), icon: SlidersHorizontal },
 ]
 
 export function Rail({
@@ -68,7 +69,7 @@ export function Rail({
         <LogoIcon className="size-9" />
       </span>
 
-      {RAIL.map(({ id, label, icon: Icon }) => (
+      {RAIL().map(({ id, label, icon: Icon }) => (
         <TabMenu key={id} to={{ place: id }}>
         <button
           type="button"
@@ -96,7 +97,7 @@ export function Rail({
 
 /** "2 h", "45 min", "30 s": how long is left, in the rail's few characters. */
 function remaining(seconds: number): string {
-  if (seconds <= 0) return 'expirou'
+  if (seconds <= 0) return t('expirou')
   if (seconds >= 3600) return `${Math.floor(seconds / 3600)} h`
   if (seconds >= 60) return `${Math.ceil(seconds / 60)} min`
 
@@ -104,7 +105,7 @@ function remaining(seconds: number): string {
 }
 
 function clock(at: number): string {
-  return new Date(at * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  return new Date(at * 1000).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
 }
 
 /**
@@ -161,7 +162,7 @@ function AwsSession({ onAccounts }: { onAccounts: () => void }) {
   // A session that renews itself is only a countdown once renewing stopped working (the last ten
   // minutes, which Keyhold would otherwise have spent renewing it).
   const quiet = !urgent && timed.every((login) => login.renews)
-  const shown = quiet ? 'ativa' : remaining(left)
+  const shown = quiet ? t('ativa') : remaining(left)
 
   return (
     <>
@@ -170,7 +171,7 @@ function AwsSession({ onAccounts }: { onAccounts: () => void }) {
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={`Sessão AWS: ${shown}`}
+          aria-label={t('Sessão AWS: {shown}', { shown })}
           className={cn(
             'mb-1 flex w-16 flex-col items-center gap-1 rounded-[10px] py-2 text-[11px] text-muted-foreground hover:bg-hover',
             urgent && 'text-rose',
@@ -186,7 +187,7 @@ function AwsSession({ onAccounts }: { onAccounts: () => void }) {
       <PopoverContent side="right" align="end" sideOffset={10} className="w-[300px] p-0">
         <div className="flex items-center gap-2.5 border-b px-4 py-3">
           <AwsMark size="xs" />
-          <b className="text-sm font-semibold">Sessões AWS</b>
+          <b className="text-sm font-semibold">{t('Sessões AWS')}</b>
         </div>
         <div className="divide-y">
           {timed.map((login) => {
@@ -203,23 +204,23 @@ function AwsSession({ onAccounts }: { onAccounts: () => void }) {
                     )}
                   >
                     {gone
-                      ? `expirou às ${clock(login.expires_at)}`
+                      ? t('expirou às {time}', { time: clock(login.expires_at) })
                       : login.renews && login.expires_at - now > 600
-                        ? 'renovada automaticamente enquanto o Keyhold estiver aberto'
-                        : `expira às ${clock(login.expires_at)}`}
+                        ? t('renovada automaticamente enquanto o Keyhold estiver aberto')
+                        : t('expira às {time}', { time: clock(login.expires_at) })}
                   </span>
                 </span>
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={busy}
-                  aria-label={`Renovar ${login.label || login.start_url}`}
+                  aria-label={t('Renovar {name}', { name: login.label || login.start_url })}
                   onClick={() => {
                     setOpen(false)
                     void renew(login)
                   }}
                 >
-                  Renovar
+                  {t('Renovar')}
                 </Button>
               </div>
             )
@@ -234,7 +235,7 @@ function AwsSession({ onAccounts }: { onAccounts: () => void }) {
             }}
             className="w-full rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-hover hover:text-foreground"
           >
-            Abrir Contas AWS
+            {t('Abrir Contas AWS')}
           </button>
         </div>
       </PopoverContent>
@@ -257,7 +258,7 @@ function LockButton({
   const seconds = status.lock.locks_in
   const total = status.lock.policy.idle_seconds ?? seconds ?? 1
   const share = seconds === null ? 1 : Math.max(0, Math.min(1, seconds / Math.max(total, 1)))
-  const label = seconds === null ? 'sem tranca' : seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${seconds} s`
+  const label = seconds === null ? t('sem tranca') : seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${seconds} s`
   const urgent = seconds !== null && seconds <= 30
 
   return (
@@ -265,7 +266,7 @@ function LockButton({
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={`Tranca: ${label}`}
+          aria-label={t('Tranca: {label}', { label })}
           className="flex w-16 flex-col items-center gap-1 rounded-[10px] py-2 text-[11px] text-muted-foreground hover:bg-hover"
         >
           <span
@@ -286,16 +287,16 @@ function LockButton({
 
       <PopoverContent side="right" align="end" sideOffset={10} className="w-[264px] p-4">
         <b className="block text-sm font-semibold">
-          {seconds === null ? 'Sem tranca automática' : `Tranca em ${label}`}
+          {seconds === null ? t('Sem tranca automática') : t('Tranca em {label}', { label })}
         </b>
         <p className="mt-1 text-xs text-muted-foreground">
           {seconds === null
-            ? 'O cofre só é trancado manualmente ou ao fechar o Keyhold.'
-            : 'Sem nenhum clique ou tecla no Keyhold. O prazo é contado pelo Keyhold, não por esta janela.'}
+            ? t('O cofre só é trancado manualmente ou ao fechar o Keyhold.')
+            : t('Sem nenhum clique ou tecla no Keyhold. O prazo é contado pelo Keyhold, não por esta janela.')}
         </p>
         <Button className="mt-3.5 w-full" onClick={onLock}>
           <Lock />
-          Trancar agora
+          {t('Trancar agora')}
         </Button>
         <span className="mt-2 flex justify-center gap-1 text-xs">
           {seconds !== null && (
@@ -304,7 +305,7 @@ function LockButton({
               className="rounded-md px-2 py-1 text-muted-foreground hover:bg-hover hover:text-foreground"
               onClick={() => void api.heartbeat().then(onChanged)}
             >
-              Adiar
+              {t('Adiar')}
             </button>
           )}
           <button
@@ -312,7 +313,7 @@ function LockButton({
             className="rounded-md px-2 py-1 text-muted-foreground hover:bg-hover hover:text-foreground"
             onClick={onSettings}
           >
-            Ajustar a tranca
+            {t('Ajustar a tranca')}
           </button>
         </span>
       </PopoverContent>
@@ -340,7 +341,7 @@ export function TopBar({
           className="flex h-9 w-[340px] max-w-[30vw] items-center gap-2.5 rounded-[9px] border bg-field px-3 text-sm text-faint hover:border-line-2"
         >
           <Search className="size-4" />
-          <span className="flex-1 truncate text-left">Buscar em todos os registros</span>
+          <span className="flex-1 truncate text-left">{t('Buscar em todos os registros')}</span>
           <kbd className="rounded-md border px-1.5 py-px font-sans text-[11px]">Ctrl P</kbd>
         </button>
       )}
@@ -457,7 +458,7 @@ export function VaultSwitcher({
         >
           <VaultInitial vault={current} />
           {current.name}
-          {current.kind === 'aws' && <AwsMark className="size-4" title="Cofre AWS" />}
+          {current.kind === 'aws' && <AwsMark className="size-4" title={t('Cofre AWS')} />}
           <ChevronDown className="size-3.5 text-faint" />
         </button>
       </PopoverTrigger>
@@ -466,7 +467,7 @@ export function VaultSwitcher({
         <Input
           autoFocus
           className="mb-1 h-8"
-          placeholder="Buscar cofre"
+          placeholder={t('Buscar cofre')}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -489,11 +490,11 @@ export function VaultSwitcher({
                 <span className="truncate">{vault.name}</span>
                 {vault.id === current.id && <Check className="size-4 shrink-0 text-primary" />}
               </span>
-              {vault.kind === 'aws' && <AwsMark className="size-4 shrink-0" title="Cofre AWS" />}
+              {vault.kind === 'aws' && <AwsMark className="size-4 shrink-0" title={t('Cofre AWS')} />}
             </button>
             </TabMenu>
           ))}
-          {shown.length === 0 && <p className="px-2 py-3 text-xs text-faint">Nenhum cofre com esse nome.</p>}
+          {shown.length === 0 && <p className="px-2 py-3 text-xs text-faint">{t('Nenhum cofre com esse nome.')}</p>}
         </div>
         <div className="my-1 h-px bg-border" />
         <button
@@ -505,7 +506,7 @@ export function VaultSwitcher({
           className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-sm hover:bg-hover"
         >
           <Plus className="size-4 text-muted-foreground" />
-          Novo cofre
+          {t('Novo cofre')}
         </button>
         <button
           type="button"
@@ -516,7 +517,7 @@ export function VaultSwitcher({
           className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-sm hover:bg-hover"
         >
           <Settings2 className="size-4 text-muted-foreground" />
-          Gerenciar cofres
+          {t('Gerenciar cofres')}
         </button>
         {onCopy && (
           <button
@@ -528,7 +529,7 @@ export function VaultSwitcher({
             className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-sm hover:bg-hover"
           >
             <Copy className="size-4 text-muted-foreground" />
-            Copiar este cofre
+            {t('Copiar este cofre')}
           </button>
         )}
       </PopoverContent>

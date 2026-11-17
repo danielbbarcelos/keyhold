@@ -1,4 +1,3 @@
-import { FolderCombobox } from './FolderCombobox'
 import { useEffect, useState } from 'react'
 
 import {
@@ -19,8 +18,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { t } from '@/i18n'
 
 import { api, ApiError, type FolderNode, type VaultSummary } from '../api'
+import { FolderCombobox } from './FolderCombobox'
 
 /**
  * Moving records to another vault.
@@ -91,7 +92,7 @@ export function MoveToVaultDialog({
 
       onDone()
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Não foi possível mover. Tente novamente.')
+      setError(cause instanceof ApiError ? cause.message : t('Não foi possível mover. Tente novamente.'))
     } finally {
       setBusy(false)
     }
@@ -101,22 +102,20 @@ export function MoveToVaultDialog({
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Mover {what} para outro cofre</AlertDialogTitle>
+          <AlertDialogTitle>{t('Mover {what} para outro cofre', { what })}</AlertDialogTitle>
           <AlertDialogDescription>
-            O conteúdo é decifrado e cifrado novamente com a chave do cofre de destino, junto com o
-            histórico e os anexos. Nada sai do arquivo do Keyhold. Para um cofre AWS, use “Copiar
-            para outro local”.
+            {t('O conteúdo é decifrado e cifrado novamente com a chave do cofre de destino, junto com o histórico e os anexos. Nada sai do arquivo do Keyhold. Para um cofre AWS, use “Copiar para outro local”.')}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
         {elsewhere.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Nenhum outro cofre disponível. Crie um em Ajustes.
+            {t('Nenhum outro cofre disponível. Crie um em Ajustes.')}
           </p>
         ) : (
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Cofre</Label>
+              <Label>{t('Cofre')}</Label>
               <Select value={vaultId} onValueChange={setVaultId}>
                 <SelectTrigger>
                   <SelectValue />
@@ -132,7 +131,7 @@ export function MoveToVaultDialog({
             </div>
 
             <div className="space-y-2">
-              <Label>Pasta</Label>
+              <Label>{t('Pasta')}</Label>
               <FolderCombobox
                 folders={folders}
                 value={folderId === 'root' ? null : folderId}
@@ -146,7 +145,7 @@ export function MoveToVaultDialog({
               */}
             {target?.agent_access && (
               <p className="text-sm text-amber-600 dark:text-amber-500">
-                Um agente local pode visualizar o cofre {target.name}.
+                {t('Um agente local pode visualizar o cofre {name}.', { name: target.name })}
               </p>
             )}
 
@@ -155,9 +154,9 @@ export function MoveToVaultDialog({
         )}
 
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogCancel>{t('Cancelar')}</AlertDialogCancel>
           <Button disabled={busy || !vaultId} onClick={() => void move()}>
-            Mover
+            {t('Mover')}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

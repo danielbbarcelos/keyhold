@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 import { api, type Layout } from '../api'
@@ -41,8 +42,8 @@ export function Splitter({ which, className }: { which: keyof Layout; className?
     <div
       role="separator"
       aria-orientation="vertical"
-      aria-label={which === 'tree' ? 'Largura da árvore' : 'Largura dos nomes dos campos'}
-      title="Arraste para ajustar. Clique duas vezes para voltar ao padrão"
+      aria-label={which === 'tree' ? t('Largura da árvore') : t('Largura dos nomes dos campos')}
+      title={t('Arraste para ajustar. Clique duas vezes para voltar ao padrão')}
       onPointerDown={(event) => {
         event.preventDefault()
         event.stopPropagation()

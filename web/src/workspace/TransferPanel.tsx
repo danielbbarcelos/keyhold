@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { t } from '@/i18n'
 
 import { api, ApiError, type VaultSummary } from '../api'
 import { PasswordInput } from '@/components/common/PasswordInput'
@@ -55,7 +56,7 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
       setNote(await action())
       setError('')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'O Keyhold não respondeu. Tente novamente.')
+      setError(cause instanceof ApiError ? cause.message : t('O Keyhold não respondeu. Tente novamente.'))
       setNote('')
     } finally {
       setBusy(false)
@@ -80,18 +81,17 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
       <CardHeader className="px-6">
         <CardTitle className="flex items-center gap-2">
           <Download className="size-4" />
-          Exportar e importar
+          {t('Exportar e importar')}
         </CardTitle>
         <CardDescription>
-          O arquivo exportado é cifrado com uma senha própria, nunca com a senha-mestra. O cabeçalho
-          registra como ele foi cifrado, para que continue legível daqui a alguns anos.
+          {t('O arquivo exportado é cifrado com uma senha própria, nunca com a senha-mestra. O cabeçalho registra como ele foi cifrado, para que continue legível daqui a alguns anos.')}
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-4 px-6">
         {live.length > 1 && (
           <div className="space-y-2">
-            <Label>Cofre</Label>
+            <Label>{t('Cofre')}</Label>
             <Select value={vaultId} onValueChange={setVaultId}>
               <SelectTrigger className="w-full">
                 <SelectValue />
@@ -108,7 +108,7 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
         )}
 
         <div className="space-y-2">
-          <Label htmlFor="archive-passphrase">Senha do arquivo</Label>
+          <Label htmlFor="archive-passphrase">{t('Senha do arquivo')}</Label>
           <div className="flex items-center gap-2">
             <PasswordInput
               id="archive-passphrase"
@@ -130,21 +130,23 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
 
                   setPassphrase('')
 
-                  return 'Arquivo salvo. Anote a senha do arquivo, pois ela não é armazenada.'
+                  return t('Arquivo salvo. Anote a senha do arquivo, pois ela não é armazenada.')
                 })
               }
             >
               {busy ? <Loader2 className="animate-spin" /> : <Download />}
-              Exportar
+              {t('Exportar')}
             </Button>
           </div>
           <p className="text-sm text-muted-foreground">
-            Mínimo de 12 caracteres. Esta senha é necessária para importar o arquivo.
+            {t('Mínimo de 12 caracteres. Esta senha é necessária para importar o arquivo.')}
           </p>
         </div>
 
         <div className="space-y-2 border-t pt-4">
-          <Label>Importar registros para {chosen?.name ?? 'este cofre'}</Label>
+          <Label>
+            {chosen ? t('Importar registros para {name}', { name: chosen.name }) : t('Importar registros para este cofre')}
+          </Label>
 
           <input
             ref={filePicker}
@@ -170,9 +172,11 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
 
                 onChanged()
 
-                return `${done.imported.records} ${
-                  done.imported.records === 1 ? 'registro importado' : 'registros importados'
-                }${done.imported.folders > 0 ? `, em ${done.imported.folders} pasta(s) nova(s)` : ''}.`
+                const records = done.imported.records
+                const folders = done.imported.folders
+                const items = records === 1 ? t('{n} registro importado.', { n: records }) : t('{n} registros importados.', { n: records })
+                if (folders === 0) return items
+                return `${items} ${folders === 1 ? t('Criada {n} pasta nova.', { n: folders }) : t('Criadas {n} pastas novas.', { n: folders })}`
               })
             }}
           />
@@ -183,13 +187,11 @@ export function TransferPanel({ vaults, onChanged }: TransferPanelProps) {
             onClick={() => filePicker.current?.click()}
           >
             <Upload />
-            Escolher arquivo
+            {t('Escolher arquivo')}
           </Button>
 
           <p className="text-sm text-muted-foreground">
-            Um arquivo do Keyhold (<span className="text-foreground">.json</span>, que exige a senha
-            acima) ou um CSV de outro gerenciador. Nenhum registro é sobrescrito: tudo é importado
-            como registro novo.
+            {t('Um arquivo do Keyhold (.json, que exige a senha acima) ou um CSV de outro gerenciador. Nenhum registro é sobrescrito: tudo é importado como registro novo.')}
           </p>
         </div>
 

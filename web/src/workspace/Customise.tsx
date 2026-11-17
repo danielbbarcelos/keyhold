@@ -32,6 +32,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils'
 
 import type { CustomIcon, FieldKind, RecordType, Status } from '../api'
+import { t } from '../i18n'
 import { addIcon, resetTypes, saveIcons, saveTypes, useCustom } from './custom'
 import { FIELD_TYPES, fieldType } from './fields'
 import { IconPicker, shrink } from './IconPicker'
@@ -47,11 +48,11 @@ import { toast, toastError } from './toast'
  * Ajustes decides how the vault is protected; this decides what it feels like to use. The line
  * between them is whether a choice changes who can read something. Nothing here does.
  */
-const SECTIONS: Array<{ id: string; label: string; icon: LucideIcon }> = [
-  { id: 'aparencia', label: 'Aparência', icon: Palette },
-  { id: 'tipos', label: 'Tipos de registro', icon: LayoutList },
-  { id: 'icones', label: 'Ícones', icon: Images },
-  { id: 'alertas', label: 'Alertas padrão', icon: ShieldAlert },
+const sections = (): Array<{ id: string; label: string; icon: LucideIcon }> => [
+  { id: 'aparencia', label: t('Aparência'), icon: Palette },
+  { id: 'tipos', label: t('Tipos de registro'), icon: LayoutList },
+  { id: 'icones', label: t('Ícones'), icon: Images },
+  { id: 'alertas', label: t('Alertas padrão'), icon: ShieldAlert },
 ]
 
 export function Customise({
@@ -70,8 +71,9 @@ export function Customise({
   /** Tells the top bar which section is being read. */
   onSection?: (label: string) => void
 }) {
+  const SECTIONS = sections()
   const known = (id?: string) => SECTIONS.some((one) => one.id === id)
-  const [active, setActive] = useState(known(initial) ? (initial as string) : SECTIONS[0].id)
+  const [active, setActive] = useState(initial && known(initial) ? initial : SECTIONS[0].id)
   const page = useRef<HTMLDivElement>(null)
 
   function open(id: string) {
@@ -79,9 +81,11 @@ export function Customise({
     page.current?.scrollTo({ top: 0 })
   }
 
+  // The label, not the id: a change of language reaches the top bar too.
+  const label = SECTIONS.find((one) => one.id === active)?.label ?? ''
   useEffect(() => {
-    onSection?.(SECTIONS.find((one) => one.id === active)?.label ?? '')
-  }, [active, onSection])
+    onSection?.(label)
+  }, [label, onSection])
 
   useEffect(() => {
     if (known(initial)) open(initial as string)
@@ -90,7 +94,7 @@ export function Customise({
 
   return (
     <div className="kh-wide grid min-h-0 flex-1 grid-cols-[232px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6 max-xl:grid-cols-[200px_minmax(0,1fr)]">
-      <nav aria-label="Seções da personalização" className="h-fit space-y-0.5 rounded-[14px] border bg-card p-2.5">
+      <nav aria-label={t('Seções da personalização')} className="h-fit space-y-0.5 rounded-[14px] border bg-card p-2.5">
         {SECTIONS.map(({ id, label, icon: Icon }) => (
           <TabMenu key={id} to={{ place: 'custom', section: id }}>
             <button
@@ -186,26 +190,27 @@ function RecordTypes() {
   const save = (next: RecordType[], done?: string) =>
     saveTypes(next)
       .then(() => done && toast(done))
-      .catch((cause) => toastError(cause, 'Não foi possível salvar os tipos de registro'))
+      .catch((cause) => toastError(cause, t('Não foi possível salvar os tipos de registro')))
 
   return (
     <Section
-      title="Tipos de registro"
+      title={t('Tipos de registro')}
       hint={
         <>
-          O ponto de partida de um registro novo, em “Começar com”: um ícone e os campos que ele já traz. O registro
-          não fica preso ao tipo. Alterar ou excluir um tipo não muda os registros que já existem.
+          {t(
+            'O ponto de partida de um registro novo, em “Começar com”: um ícone e os campos que ele já traz. O registro não fica preso ao tipo. Alterar ou excluir um tipo não muda os registros que já existem.',
+          )}
         </>
       }
       actions={
         <>
           <Button variant="outline" size="sm" onClick={() => setResetting(true)}>
             <RotateCcw />
-            Restaurar os padrões
+            {t('Restaurar os padrões')}
           </Button>
           <Button size="sm" onClick={() => setEditing('new')}>
             <Plus />
-            Novo tipo
+            {t('Novo tipo')}
           </Button>
         </>
       }
@@ -218,24 +223,24 @@ function RecordTypes() {
               <b className="block truncate text-sm font-medium">{type.label}</b>
               <span className="block truncate text-xs text-muted-foreground">
                 {type.fields.length === 0
-                  ? 'Sem campos'
+                  ? t('Sem campos')
                   : type.fields.map((field) => field.label || fieldType(field.kind).label).join(', ')}
               </span>
             </div>
-            <IconAction label="Mover para cima" icon={ArrowUp} disabled={index === 0} onClick={() => void save(moved(types, index, -1))} />
+            <IconAction label={t('Mover para cima')} icon={ArrowUp} disabled={index === 0} onClick={() => void save(moved(types, index, -1))} />
             <IconAction
-              label="Mover para baixo"
+              label={t('Mover para baixo')}
               icon={ArrowDown}
               disabled={index === types.length - 1}
               onClick={() => void save(moved(types, index, 1))}
             />
-            <IconAction label={`Editar ${type.label}`} icon={Pencil} onClick={() => setEditing(type)} />
-            <IconAction label={`Excluir ${type.label}`} icon={Trash2} onClick={() => setDeleting(type)} />
+            <IconAction label={t('Editar {name}', { name: type.label })} icon={Pencil} onClick={() => setEditing(type)} />
+            <IconAction label={t('Excluir {name}', { name: type.label })} icon={Trash2} onClick={() => setDeleting(type)} />
           </div>
         ))}
         {loaded && types.length === 0 && (
           <p className="px-5 py-8 text-center text-sm text-muted-foreground">
-            Nenhum tipo de registro. Um registro novo começa em branco.
+            {t('Nenhum tipo de registro. Um registro novo começa em branco.')}
           </p>
         )}
       </div>
@@ -247,7 +252,7 @@ function RecordTypes() {
           onDone={(made) => {
             const exists = types.some((one) => one.id === made.id)
             setEditing(null)
-            void save(exists ? types.map((one) => (one.id === made.id ? made : one)) : [...types, made], exists ? 'Tipo salvo' : 'Tipo criado')
+            void save(exists ? types.map((one) => (one.id === made.id ? made : one)) : [...types, made], exists ? t('Tipo salvo') : t('Tipo criado'))
           }}
         />
       )}
@@ -255,22 +260,22 @@ function RecordTypes() {
       <AlertDialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir o tipo {deleting?.label}</AlertDialogTitle>
+            <AlertDialogTitle>{t('Excluir o tipo {name}', { name: deleting?.label ?? '' })}</AlertDialogTitle>
             <AlertDialogDescription>
-              Ele deixa de aparecer em “Começar com”. Os registros criados com ele continuam como estão.
+              {t('Ele deixa de aparecer em “Começar com”. Os registros criados com ele continuam como estão.')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel>{t('Cancelar')}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={() => {
                 const gone = deleting
                 setDeleting(null)
-                if (gone) void save(types.filter((one) => one.id !== gone.id), 'Tipo excluído')
+                if (gone) void save(types.filter((one) => one.id !== gone.id), t('Tipo excluído'))
               }}
             >
-              Excluir tipo
+              {t('Excluir tipo')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -279,24 +284,25 @@ function RecordTypes() {
       <AlertDialog open={resetting} onOpenChange={setResetting}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Restaurar os tipos padrão</AlertDialogTitle>
+            <AlertDialogTitle>{t('Restaurar os tipos padrão')}</AlertDialogTitle>
             <AlertDialogDescription>
-              A lista volta a ter Login, Cartão, Chave SSH e Nota, como o Keyhold traz. Os tipos que você criou ou
-              alterou são excluídos. Os registros não mudam.
+              {t(
+                'A lista volta a ter Login, Cartão, Chave SSH e Nota, como o Keyhold traz. Os tipos que você criou ou alterou são excluídos. Os registros não mudam.',
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel>{t('Cancelar')}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={() => {
                 setResetting(false)
                 void resetTypes()
-                  .then(() => toast('Tipos padrão restaurados'))
-                  .catch((cause) => toastError(cause, 'Não foi possível restaurar os tipos'))
+                  .then(() => toast(t('Tipos padrão restaurados')))
+                  .catch((cause) => toastError(cause, t('Não foi possível restaurar os tipos')))
               }}
             >
-              Restaurar padrões
+              {t('Restaurar padrões')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -323,38 +329,39 @@ function TypeDialog({
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="max-h-[calc(100dvh-48px)] overflow-y-auto sm:max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>{initial ? 'Editar tipo de registro' : 'Novo tipo de registro'}</DialogTitle>
+          <DialogTitle>{initial ? t('Editar tipo de registro') : t('Novo tipo de registro')}</DialogTitle>
           <DialogDescription>
-            O nome, o ícone e os campos com que um registro deste tipo começa. Deixe o nome de um campo vazio para
-            usar o nome do próprio tipo de campo.
+            {t(
+              'O nome, o ícone e os campos com que um registro deste tipo começa. Deixe o nome de um campo vazio para usar o nome do próprio tipo de campo.',
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex items-end gap-3">
           <div className="grid gap-1.5">
-            <span className="text-[13px] font-medium">Ícone</span>
+            <span className="text-[13px] font-medium">{t('Ícone')}</span>
             <IconPicker icon={draft.icon} onChange={(icon) => setDraft({ ...draft, icon })} />
           </div>
           <label className="grid flex-1 gap-1.5">
-            <span className="text-[13px] font-medium">Nome</span>
+            <span className="text-[13px] font-medium">{t('Nome')}</span>
             <Input
               autoFocus
               value={draft.label}
-              placeholder="Ex.: Banco de dados"
+              placeholder={t('Ex.: Banco de dados')}
               onChange={(event) => setDraft({ ...draft, label: event.target.value })}
             />
           </label>
         </div>
 
         <div className="grid gap-2">
-          <span className="text-[13px] font-medium">Campos</span>
+          <span className="text-[13px] font-medium">{t('Campos')}</span>
           {draft.fields.map((field, index) => (
             <div key={index} className="flex items-center gap-1.5">
               <Select
                 value={field.kind}
                 onValueChange={(kind) => setFields(draft.fields.map((one, at) => (at === index ? { ...one, kind: kind as FieldKind } : one)))}
               >
-                <SelectTrigger className="w-[210px] shrink-0" aria-label="Tipo do campo">
+                <SelectTrigger className="w-[210px] shrink-0" aria-label={t('Tipo do campo')}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -368,22 +375,22 @@ function TypeDialog({
               </Select>
               <Input
                 className="min-w-0 flex-1"
-                aria-label="Nome do campo"
+                aria-label={t('Nome do campo')}
                 value={field.label}
                 placeholder={fieldType(field.kind).label}
                 onChange={(event) => setFields(draft.fields.map((one, at) => (at === index ? { ...one, label: event.target.value } : one)))}
               />
-              <IconAction label="Mover para cima" icon={ArrowUp} disabled={index === 0} onClick={() => setFields(moved(draft.fields, index, -1))} />
+              <IconAction label={t('Mover para cima')} icon={ArrowUp} disabled={index === 0} onClick={() => setFields(moved(draft.fields, index, -1))} />
               <IconAction
-                label="Mover para baixo"
+                label={t('Mover para baixo')}
                 icon={ArrowDown}
                 disabled={index === draft.fields.length - 1}
                 onClick={() => setFields(moved(draft.fields, index, 1))}
               />
-              <IconAction label="Remover campo" icon={Trash2} onClick={() => setFields(draft.fields.filter((_, at) => at !== index))} />
+              <IconAction label={t('Remover campo')} icon={Trash2} onClick={() => setFields(draft.fields.filter((_, at) => at !== index))} />
             </div>
           ))}
-          {draft.fields.length === 0 && <p className="text-xs text-faint">Sem campos: o registro começa só com o título.</p>}
+          {draft.fields.length === 0 && <p className="text-xs text-faint">{t('Sem campos: o registro começa só com o título.')}</p>}
           <Button
             variant="outline"
             size="sm"
@@ -391,16 +398,16 @@ function TypeDialog({
             onClick={() => setFields([...draft.fields, { kind: 'text', label: '' }])}
           >
             <Plus />
-            Adicionar campo
+            {t('Adicionar campo')}
           </Button>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button disabled={!draft.label.trim()} onClick={() => onDone({ ...draft, label: draft.label.trim() })}>
-            {initial ? 'Salvar tipo' : 'Criar tipo'}
+            {initial ? t('Salvar tipo') : t('Criar tipo')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -423,7 +430,7 @@ function IconLibrary() {
   async function add(files: FileList | File[] | null | undefined) {
     const pictures = [...(files ?? [])].filter((one) => one.type.startsWith('image/'))
     if (pictures.length === 0) {
-      toast('Nenhuma imagem para adicionar', 'Use PNG, JPEG, WebP ou SVG.', 'error')
+      toast(t('Nenhuma imagem para adicionar'), t('Use PNG, JPEG, WebP ou SVG.'), 'error')
 
       return
     }
@@ -435,11 +442,13 @@ function IconLibrary() {
         if ((await addIcon(picture.name.replace(/\.[a-z0-9]+$/i, ''), await shrink(picture))).added) added += 1
         else repeated += 1
       } catch (cause) {
-        toastError(cause, `Não foi possível adicionar ${picture.name}`)
+        toastError(cause, t('Não foi possível adicionar {name}', { name: picture.name }))
       }
     }
-    if (added) toast(added === 1 ? 'Ícone adicionado' : `${added} ícones adicionados`)
-    if (repeated) toast(repeated === 1 ? 'Uma imagem já estava na biblioteca' : `${repeated} imagens já estavam na biblioteca`)
+    if (added) toast(added === 1 ? t('Ícone adicionado') : t('{n} ícones adicionados', { n: added }))
+    if (repeated) {
+      toast(repeated === 1 ? t('Uma imagem já estava na biblioteca') : t('{n} imagens já estavam na biblioteca', { n: repeated }))
+    }
   }
 
   const rename = (icon: CustomIcon, name: string) => {
@@ -447,24 +456,24 @@ function IconLibrary() {
     if (!next || next === icon.name) return
 
     void saveIcons(icons.map((one) => (one.id === icon.id ? { ...one, name: next } : one))).catch((cause) =>
-      toastError(cause, 'Não foi possível renomear o ícone'),
+      toastError(cause, t('Não foi possível renomear o ícone')),
     )
   }
 
   return (
     <Section
-      title="Ícones personalizados"
+      title={t('Ícones personalizados')}
       hint={
         <>
-          Imagens suas (o logotipo de um serviço, por exemplo) para usar em qualquer registro ou cofre, na aba
-          Personalizados do seletor de ícones. Ficam cifradas com a sua chave e nada é buscado na internet. Cada
-          registro guarda a própria cópia: excluir um ícone daqui não altera os registros que o usam.
+          {t(
+            'Imagens suas (o logotipo de um serviço, por exemplo) para usar em qualquer registro ou cofre, na aba Personalizados do seletor de ícones. Ficam cifradas com a sua chave e nada é buscado na internet. Cada registro guarda a própria cópia: excluir um ícone daqui não altera os registros que o usam.',
+          )}
         </>
       }
       actions={
         <Button size="sm" onClick={() => file.current?.click()}>
           <ImageUp />
-          Adicionar imagens
+          {t('Adicionar imagens')}
         </Button>
       }
     >
@@ -491,7 +500,7 @@ function IconLibrary() {
         {icons.length > 8 && (
           <div className="relative mb-4 max-w-xs">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-faint" />
-            <Input className="pl-9" placeholder="Buscar ícone" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <Input className="pl-9" placeholder={t('Buscar ícone')} value={query} onChange={(event) => setQuery(event.target.value)} />
           </div>
         )}
 
@@ -502,12 +511,12 @@ function IconLibrary() {
               <Input
                 key={icon.name}
                 className="h-8 min-w-0 flex-1 border-transparent bg-transparent px-1.5 shadow-none hover:border-input focus-visible:bg-field"
-                aria-label="Nome do ícone"
+                aria-label={t('Nome do ícone')}
                 defaultValue={icon.name}
                 onBlur={(event) => rename(icon, event.target.value)}
                 onKeyDown={(event) => event.key === 'Enter' && event.currentTarget.blur()}
               />
-              <IconAction label={`Excluir ${icon.name}`} icon={Trash2} onClick={() => setDeleting(icon)} />
+              <IconAction label={t('Excluir {name}', { name: icon.name })} icon={Trash2} onClick={() => setDeleting(icon)} />
             </div>
           ))}
         </div>
@@ -519,15 +528,15 @@ function IconLibrary() {
             className="flex w-full flex-col items-center gap-1.5 rounded-xl border border-dashed border-line-2 px-4 py-10 text-center text-[13px] text-muted-foreground hover:bg-hover"
           >
             <ImageUp className="size-5 text-faint" />
-            <b className="text-sm font-semibold text-foreground">Sua biblioteca está vazia</b>
-            Arraste imagens para cá, cole ou escolha arquivos.
+            <b className="text-sm font-semibold text-foreground">{t('Sua biblioteca está vazia')}</b>
+            {t('Arraste imagens para cá, cole ou escolha arquivos.')}
           </button>
         )}
         {icons.length > 0 && shown.length === 0 && (
-          <p className="py-6 text-center text-sm text-muted-foreground">Nenhum ícone com esse nome.</p>
+          <p className="py-6 text-center text-sm text-muted-foreground">{t('Nenhum ícone com esse nome.')}</p>
         )}
         {icons.length > 0 && (
-          <p className="mt-4 text-xs text-faint">Arraste ou cole imagens aqui para adicionar. Clique em um nome para alterar.</p>
+          <p className="mt-4 text-xs text-faint">{t('Arraste ou cole imagens aqui para adicionar. Clique em um nome para alterar.')}</p>
         )}
 
         <input
@@ -546,13 +555,13 @@ function IconLibrary() {
       <AlertDialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir o ícone {deleting?.name}</AlertDialogTitle>
+            <AlertDialogTitle>{t('Excluir o ícone {name}', { name: deleting?.name ?? '' })}</AlertDialogTitle>
             <AlertDialogDescription>
-              Ele sai da sua biblioteca. Os registros e cofres que já o usam continuam com a imagem.
+              {t('Ele sai da sua biblioteca. Os registros e cofres que já o usam continuam com a imagem.')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel>{t('Cancelar')}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={() => {
@@ -560,12 +569,12 @@ function IconLibrary() {
                 setDeleting(null)
                 if (gone) {
                   void saveIcons(icons.filter((one) => one.id !== gone.id))
-                    .then(() => toast('Ícone excluído'))
-                    .catch((cause) => toastError(cause, 'Não foi possível excluir o ícone'))
+                    .then(() => toast(t('Ícone excluído')))
+                    .catch((cause) => toastError(cause, t('Não foi possível excluir o ícone')))
                 }
               }}
             >
-              Excluir ícone
+              {t('Excluir ícone')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 import { api, type Alert, type AlertPreset } from '../../api'
@@ -36,18 +37,18 @@ import { toastError } from '../toast'
 
 /** The icons an alert can wear: ones that say "careful", and a few that say who it is for. */
 export const ALERT_ICONS: Array<{ name: string; icon: LucideIcon; label: string }> = [
-  { name: 'shield-alert', icon: ShieldAlert, label: 'Proteção' },
-  { name: 'triangle-alert', icon: TriangleAlert, label: 'Cuidado' },
-  { name: 'info', icon: Info, label: 'Informação' },
-  { name: 'ban', icon: Ban, label: 'Proibido' },
-  { name: 'eye-off', icon: EyeOff, label: 'Sigilo' },
-  { name: 'lock', icon: Lock, label: 'Restrito' },
-  { name: 'bell', icon: Bell, label: 'Lembrete' },
-  { name: 'clock', icon: Clock, label: 'Prazo' },
-  { name: 'building-2', icon: Building2, label: 'Empresa' },
-  { name: 'users', icon: Users, label: 'Equipe' },
-  { name: 'flame', icon: Flame, label: 'Urgente' },
-  { name: 'star', icon: Star, label: 'Importante' },
+  { name: 'shield-alert', icon: ShieldAlert, get label() { return t('Proteção') } },
+  { name: 'triangle-alert', icon: TriangleAlert, get label() { return t('Cuidado') } },
+  { name: 'info', icon: Info, get label() { return t('Informação') } },
+  { name: 'ban', icon: Ban, get label() { return t('Proibido') } },
+  { name: 'eye-off', icon: EyeOff, get label() { return t('Sigilo') } },
+  { name: 'lock', icon: Lock, get label() { return t('Restrito') } },
+  { name: 'bell', icon: Bell, get label() { return t('Lembrete') } },
+  { name: 'clock', icon: Clock, get label() { return t('Prazo') } },
+  { name: 'building-2', icon: Building2, get label() { return t('Empresa') } },
+  { name: 'users', icon: Users, get label() { return t('Equipe') } },
+  { name: 'flame', icon: Flame, get label() { return t('Urgente') } },
+  { name: 'star', icon: Star, get label() { return t('Importante') } },
 ]
 
 const iconOf = (name: string) => ALERT_ICONS.find((one) => one.name === name)?.icon ?? TriangleAlert
@@ -115,7 +116,7 @@ export function AlertBanner({ alert, onRemove, className }: { alert: Alert; onRe
         {alert.text && <span className="mt-0.5 block text-[13px] text-muted-foreground">{alert.text}</span>}
       </span>
       {onRemove && (
-        <Button variant="ghost" size="icon-xs" aria-label={`Remover o alerta ${alert.title}`} title="Remover alerta" onClick={onRemove}>
+        <Button variant="ghost" size="icon-xs" aria-label={t('Remover o alerta {title}', { title: alert.title })} title={t('Remover alerta')} onClick={onRemove}>
           <X />
         </Button>
       )}
@@ -160,9 +161,9 @@ export function AlertForm({
 
   return (
     <div className="grid gap-3 rounded-xl border bg-raised p-3.5">
-      <AlertBanner alert={{ title: title || 'Título do alerta', text, colour, icon }} className="bg-card" />
-      <Input value={title} autoFocus placeholder="Ex.: Não compartilhar com terceiros" onChange={(event) => setTitle(event.target.value)} />
-      <Textarea className="min-h-[60px]" value={text} placeholder="Descrição (opcional)" onChange={(event) => setText(event.target.value)} />
+      <AlertBanner alert={{ title: title || t('Título do alerta'), text, colour, icon }} className="bg-card" />
+      <Input value={title} autoFocus placeholder={t('Ex.: Não compartilhar com terceiros')} onChange={(event) => setTitle(event.target.value)} />
+      <Textarea className="min-h-[60px]" value={text} placeholder={t('Descrição (opcional)')} onChange={(event) => setText(event.target.value)} />
       <div className="flex flex-wrap items-center gap-1.5">
         {ICON_COLOURS.map((one) => (
           <button
@@ -198,12 +199,12 @@ export function AlertForm({
         {offerSave && (
           <label className="mr-auto flex items-center gap-2 text-[13px]">
             <Checkbox checked={keep} onCheckedChange={(on) => setKeep(on === true)} />
-            Salvar como alerta padrão
+            {t('Salvar como alerta padrão')}
           </label>
         )}
         <span className={cn('flex gap-2', !offerSave && 'ml-auto')}>
           <Button variant="ghost" size="sm" onClick={onCancel}>
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button
             size="sm"
@@ -212,7 +213,7 @@ export function AlertForm({
               onDone({ id: initial?.id ?? newId(title), title: title.trim(), text: text.trim(), colour, icon }, keep)
             }
           >
-            {initial?.id ? 'Salvar' : 'Adicionar'}
+            {initial?.id ? t('Salvar') : t('Adicionar')}
           </Button>
         </span>
       </div>
@@ -255,7 +256,7 @@ export function AlertsEditor({ alerts, onChange }: { alerts: Alert[]; onChange: 
             if (keep) {
               void savePresets([...presets, made])
                 .then(() => onChange([...alerts, fromPreset(made)]))
-                .catch((cause) => toastError(cause, 'Não foi possível salvar o alerta padrão'))
+                .catch((cause) => toastError(cause, t('Não foi possível salvar o alerta padrão')))
             } else {
               onChange([...alerts, { colour: made.colour, icon: made.icon, title: made.title, text: made.text }])
             }
@@ -266,7 +267,7 @@ export function AlertsEditor({ alerts, onChange }: { alerts: Alert[]; onChange: 
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" className="justify-self-start">
               <Plus />
-              Adicionar alerta
+              {t('Adicionar alerta')}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-72">
@@ -284,7 +285,7 @@ export function AlertsEditor({ alerts, onChange }: { alerts: Alert[]; onChange: 
             {presets.length > 0 && <DropdownMenuSeparator />}
             <DropdownMenuItem onSelect={() => setWriting(true)}>
               <Plus />
-              Alerta personalizado
+              {t('Alerta personalizado')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -298,15 +299,14 @@ export function AlertPresetsPanel() {
   const presets = usePresets()
   const [editing, setEditing] = useState<string | 'new' | null>(null)
 
-  const save = (next: AlertPreset[]) => void savePresets(next).catch((cause) => toastError(cause, 'Não foi possível salvar os alertas'))
+  const save = (next: AlertPreset[]) => void savePresets(next).catch((cause) => toastError(cause, t('Não foi possível salvar os alertas')))
 
   return (
     <section className="rounded-[14px] border bg-card">
       <div className="border-b px-5 py-4">
-        <h3 className="text-[15px] font-semibold">Alertas padrão</h3>
+        <h3 className="text-[15px] font-semibold">{t('Alertas padrão')}</h3>
         <p className="mt-1 max-w-2xl text-[13px] text-muted-foreground">
-          Avisos exibidos no topo de um registro, como “Não compartilhar com terceiros”. Alterar um alerta padrão
-          altera todos os registros que o usam. Os alertas são cifrados com a sua chave.
+          {t('Avisos exibidos no topo de um registro, como “Não compartilhar com terceiros”. Alterar um alerta padrão altera todos os registros que o usam. Os alertas são cifrados com a sua chave.')}
         </p>
       </div>
       <div className="grid gap-2 p-5">
@@ -325,10 +325,10 @@ export function AlertPresetsPanel() {
             <div key={preset.id} className="flex items-center gap-2">
               <AlertBanner alert={preset} className="flex-1" />
               <Button variant="outline" size="sm" onClick={() => setEditing(preset.id)}>
-                Editar
+                {t('Editar')}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => save(presets.filter((one) => one.id !== preset.id))}>
-                Remover
+                {t('Remover')}
               </Button>
             </div>
           ),
@@ -344,11 +344,11 @@ export function AlertPresetsPanel() {
         ) : (
           <Button variant="outline" size="sm" className="justify-self-start" onClick={() => setEditing('new')}>
             <Plus />
-            Novo alerta padrão
+            {t('Novo alerta padrão')}
           </Button>
         )}
         <p className="text-xs text-faint">
-          Remover um alerta padrão não remove o aviso dos registros. Eles passam a exibir a cópia armazenada.
+          {t('Remover um alerta padrão não remove o aviso dos registros. Eles passam a exibir a cópia armazenada.')}
         </p>
       </div>
     </section>
