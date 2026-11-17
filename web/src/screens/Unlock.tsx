@@ -1,3 +1,4 @@
+import { PageFooter } from '@/i18n/Language'
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 
@@ -51,7 +52,8 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-background p-8">
+    <main className="flex min-h-screen flex-col items-center bg-background p-8">
+      <div className="flex w-full flex-1 items-center justify-center">
       <form
         className="flex w-full max-w-[26rem] flex-col rounded-2xl border bg-card p-8 shadow-pop"
         onSubmit={(event) => void submit(event)}
@@ -137,6 +139,8 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
           </button>
         )}
       </form>
+      </div>
+      <PageFooter version={status.version} />
     </main>
   )
 }

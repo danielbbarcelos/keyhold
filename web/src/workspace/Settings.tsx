@@ -341,7 +341,7 @@ function WidthPreview({ contained }: { contained: boolean }) {
   )
 }
 
-function ThemeCard({
+export function ThemeCard({
   label,
   chosen,
   onPick,

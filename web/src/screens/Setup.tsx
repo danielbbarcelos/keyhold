@@ -1,3 +1,4 @@
+import { PageFooter } from '@/i18n/Language'
 import { useState } from 'react'
 import { KeyRound, Loader2, ShieldCheck, Wand2 } from 'lucide-react'
 
@@ -44,7 +45,7 @@ const steps = (): Array<{ id: Step; label: string }> => [
   { id: 'recovery', label: t('Chave de recuperação') },
 ]
 
-export function Setup({ onDone }: { onDone: () => void }) {
+export function Setup({ version, onDone }: { version?: string; onDone: () => void }) {
   const [step, setStep] = useState<Step>('choose')
   const [protection, setProtection] = useState<Protection>('password')
   const [password, setPassword] = useState('')
@@ -71,7 +72,8 @@ export function Setup({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center p-8">
+    <main className="flex min-h-screen flex-col items-center p-8">
+      <div className="flex w-full flex-1 items-center justify-center">
       <Card className="w-full max-w-xl gap-5 py-8">
         <CardHeader className="px-8">
           <LogoLockup className="mb-4 h-[44px] w-auto self-start" />
@@ -272,6 +274,8 @@ export function Setup({ onDone }: { onDone: () => void }) {
           )}
         </CardFooter>
       </Card>
+      </div>
+      <PageFooter version={version} />
     </main>
   )
 }
