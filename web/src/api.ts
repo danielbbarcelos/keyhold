@@ -3,10 +3,10 @@ import { authHeaders, disown } from './session'
 /**
  * Every call to the binary goes through here.
  *
- * One entry point rather than `fetch` scattered around, so the token, the failure shape and the
- * same-origin rule are decided once. `credentials: 'omit'` is explicit: keyhold authenticates with
- * a header, never a cookie, and a request that could carry ambient credentials is a request another
- * page could make on the user's behalf.
+ * One entry point rather than `fetch` scattered around, so the session, the failure shape and the
+ * same-origin rule are decided once. `credentials: 'same-origin'` is what carries the session
+ * cookie; the binary also wants the mark header (see `session.ts`), which is the part another page
+ * cannot forge.
  */
 
 export type Protection = 'password' | 'device'
@@ -291,7 +291,7 @@ function sentence(text: string): string {
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const response = await fetch(path, {
     method,
-    credentials: 'omit',
+    credentials: 'same-origin',
     headers: {
       Accept: 'application/json',
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),

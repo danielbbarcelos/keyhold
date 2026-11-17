@@ -1,56 +1,94 @@
 /**
- * The session token, held the only place keyhold allows: memory.
+ * The session, as far as this page can know it.
  *
- * It arrives in the URL fragment — the one part of an address the browser never sends anywhere —
- * and stays in this module for the life of the tab. There is no `localStorage`, no
- * `sessionStorage`, no cookie and no IndexedDB anywhere in this bundle, and a test enforces that:
- * a vault that survives a reboot in a place a script can read is a vault that never locked.
+ * The session itself is an `HttpOnly` cookie: the browser keeps it and sends it, and no script on
+ * this page can read it, which is the point. What arrives in the address is a one-time code, good
+ * for thirty seconds and one exchange. It is traded for the cookie before anything renders and
+ * taken out of the address at once, so the address bar, a reload and the history hold nothing that
+ * still opens anything.
  *
- * The fragment is deliberately **not** stripped from the address bar. Clearing it would look
- * tidier and would mean a reload lands on a page that can no longer talk to the binary, which
- * teaches people to restart keyhold to fix it — a worse habit than a visible token in a URL that
- * is void the moment the process exits.
+ * There is still no `localStorage`, no `sessionStorage`, no `document.cookie` and no IndexedDB in
+ * this bundle, and a test enforces that.
  */
 
-let token = ''
+/** The header the binary wants on every request. Its value is irrelevant; its presence is what
+ * another site cannot add without asking, and keyhold never answers that question. */
+export const MARK = { 'X-Keyhold': '1' } as const
 
-export function adoptTokenFromLocation(): void {
-  const fragment = window.location.hash.replace(/^#/, '')
-  const found = new URLSearchParams(fragment).get('token')
+let open = false
+let replayed = false
 
-  if (found) {
-    token = found
+/**
+ * Redeem the code in the address, if there is one, and find out whether this tab has a session.
+ *
+ * Without a code this is a reload, a second tab, or a bookmark: the cookie, if the browser still
+ * has a live one, is what decides.
+ */
+export async function adoptSession(): Promise<void> {
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  const code = params.get('code')
+
+  if (code) {
+    params.delete('code')
+    const rest = params.toString()
+    window.history.replaceState(null, '', `${window.location.pathname}${rest ? `#${rest}` : ''}`)
+
+    try {
+      const response = await fetch('/session', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...MARK },
+        body: JSON.stringify({ code }),
+      })
+
+      replayed = response.status === 409
+    } catch {
+      // Keyhold is gone: the probe below says so too.
+    }
+  }
+
+  try {
+    const response = await fetch('/api/status', {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json', ...MARK },
+    })
+
+    open = response.ok
+  } catch {
+    open = false
   }
 }
 
 /**
  * Forget it.
  *
- * Called when the binary says the credential is not one of its own — most often a tab left open
- * across a restart, or one whose instance was replaced by another. Keeping it would leave the
- * interface asking a lock screen to fix something a master password cannot fix.
+ * Called when the binary says this tab's credential is not one of its own: a restart, a takeover,
+ * or an unlock in another address.
  */
 export function disown(): void {
-  token = ''
+  open = false
 }
 
 export function hasToken(): boolean {
-  return token.length > 0
+  return open
+}
+
+/** Whether the code in the address had already been used when this tab presented it. */
+export function wasReplayed(): boolean {
+  return replayed
 }
 
 /** Only the API client calls this. */
 export function authHeaders(): Record<string, string> {
-  return token ? { 'X-Keyhold-Token': token } : {}
+  return { ...MARK }
 }
 
 /**
- * This page's own address with the token and `extra` in the fragment, for a second tab of the
- * same session. The fragment never leaves the browser, and the token is already in this tab's
- * address bar, so a new tab learns nothing this one did not already show.
+ * This page's own address with `extra` in the fragment, for a second tab. Nothing secret goes in
+ * it: the new tab has the same cookie this one has.
  */
 export function tabAddress(extra: URLSearchParams): string {
-  const fragment = new URLSearchParams({ token })
-  extra.forEach((value, key) => fragment.set(key, value))
+  const fragment = extra.toString()
 
-  return `${window.location.origin}${window.location.pathname}#${fragment.toString()}`
+  return `${window.location.origin}${window.location.pathname}${fragment ? `#${fragment}` : ''}`
 }

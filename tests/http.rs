@@ -8,13 +8,15 @@
 use std::sync::Arc;
 
 use keyhold::db::Store;
-use keyhold::http::{router, AppState, TOKEN_HEADER};
+use keyhold::http::{router, AppState, KEYHOLD_HEADER};
 use keyhold::lock::{Lock, LockPolicy};
-use keyhold::session::SessionToken;
+use keyhold::session::{Exchange, SessionGate};
 
 struct Running {
     base: String,
-    token: String,
+    /// The whole `Cookie` header a tab of this session sends: `keyhold_<port>=<session>`. Replaced
+    /// whenever an answer sets a new one, as a browser would (unlocking renews the session).
+    token: std::sync::Mutex<String>,
     /// The very store the server is using, so a test can age a row the way a month of calendar
     /// would — without a second connection that would see its own snapshot.
     store: std::sync::Arc<std::sync::Mutex<Store>>,
@@ -26,13 +28,19 @@ async fn start() -> Running {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(&dir.path().join("vault.db")).unwrap();
 
-    let token = SessionToken::generate();
-    let exposed = token.expose().to_string();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let base = format!("http://{address}");
+
+    // What a browser has after redeeming the code in the address.
+    let gate = SessionGate::new(address.port(), false);
+    let Exchange::Granted(session) = gate.exchange(&gate.issue_code(), &base) else { panic!("no session") };
+    let exposed = format!("{}={session}", gate.cookie_name());
 
     let shared = std::sync::Arc::new(std::sync::Mutex::new(store));
 
     let state = Arc::new(AppState {
-        token,
+        gate,
         agent: Default::default(),
         store: shared.clone(),
         lock: Lock::new(LockPolicy::default()),
@@ -41,20 +49,33 @@ async fn start() -> Running {
         copies: Default::default(),
     });
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
-
     let served = state.clone();
     tokio::spawn(async move {
         axum::serve(listener, router(served)).await.unwrap();
     });
 
-    Running { base, token: exposed, store: shared, state, _dir: dir }
+    Running { base, token: std::sync::Mutex::new(exposed), store: shared, state, _dir: dir }
 }
 
 impl Running {
+    /// The cookie this tab holds right now.
+    fn cookie(&self) -> String {
+        self.token.lock().unwrap().clone()
+    }
+
+    /// Keep what the server set, the way the browser's cookie jar does.
+    fn adopt(&self, reply: Reply) -> Reply {
+        if let Some(set) = reply.header("set-cookie") {
+            let pair = set.split(';').next().unwrap_or_default().to_string();
+            *self.token.lock().unwrap() = pair;
+        }
+
+        reply
+    }
+
     async fn get(&self, path: &str) -> Reply {
-        http::send("GET", &format!("{}{path}", self.base), Some(&self.token), None).await
+        let reply = http::send("GET", &format!("{}{path}", self.base), Some(&self.cookie()), None).await;
+        self.adopt(reply)
     }
 
     async fn get_without_token(&self, path: &str) -> Reply {
@@ -66,7 +87,7 @@ impl Running {
         http::send_as(
             "GET",
             &format!("{}{path}", self.base),
-            Some(&self.token),
+            Some(&self.cookie()),
             None,
             Some(host),
         )
@@ -74,13 +95,14 @@ impl Running {
     }
 
     async fn post(&self, path: &str, body: serde_json::Value) -> Reply {
-        http::send(
+        let reply = http::send(
             "POST",
             &format!("{}{path}", self.base),
-            Some(&self.token),
+            Some(&self.cookie()),
             Some(&body.to_string()),
         )
-        .await
+        .await;
+        self.adopt(reply)
     }
 }
 
@@ -119,6 +141,50 @@ mod http {
         send_as(method, url, token, body, None).await
     }
 
+    /// A request with exactly these headers (beyond `Host` and the body's), for the tests that are
+    /// about which headers make a request count as our page's.
+    pub async fn send_raw(method: &str, url: &str, headers: &[(&str, &str)], body: Option<&str>) -> super::Reply {
+        let rest = url.strip_prefix("http://").expect("http url");
+        let (authority, path) = match rest.find('/') {
+            Some(at) => (&rest[..at], &rest[at..]),
+            None => (rest, "/"),
+        };
+
+        let mut stream = tokio::net::TcpStream::connect(authority).await.unwrap();
+        let mut request = format!("{method} {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n");
+
+        for (name, value) in headers {
+            request.push_str(&format!("{name}: {value}\r\n"));
+        }
+
+        if let Some(body) = body {
+            request.push_str("Content-Type: application/json\r\n");
+            request.push_str(&format!("Content-Length: {}\r\n", body.len()));
+        }
+
+        request.push_str("\r\n");
+
+        if let Some(body) = body {
+            request.push_str(body);
+        }
+
+        stream.write_all(request.as_bytes()).await.unwrap();
+
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).await.unwrap();
+        let text = String::from_utf8_lossy(&raw).into_owned();
+        let (head, body) = text.split_once("\r\n\r\n").unwrap_or((text.as_str(), ""));
+        let mut lines = head.lines();
+
+        let status = lines.next().and_then(|line| line.split_whitespace().nth(1)).and_then(|code| code.parse().ok()).unwrap_or(0);
+        let headers = lines
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, value)| (name.trim().to_lowercase(), value.trim().to_string()))
+            .collect();
+
+        super::Reply { status, headers, body: body.to_string() }
+    }
+
     pub async fn send_as(
         method: &str,
         url: &str,
@@ -138,8 +204,8 @@ mod http {
         let mut request =
             format!("{method} {path} HTTP/1.1\r\nHost: {named}\r\nConnection: close\r\n");
 
-        if let Some(token) = token {
-            request.push_str(&format!("{}: {}\r\n", super::TOKEN_HEADER, token));
+        if let Some(cookie) = token {
+            request.push_str(&format!("Cookie: {cookie}\r\n{}: 1\r\n", super::KEYHOLD_HEADER));
         }
 
         if let Some(body) = body {
@@ -189,12 +255,111 @@ async fn the_api_refuses_a_request_with_no_token() {
 #[tokio::test]
 async fn the_api_refuses_a_wrong_token() {
     let app = start().await;
-    let wrong = format!("{}x", &app.token[..app.token.len() - 1]);
+    let cookie = app.cookie();
+    let wrong = format!("{}x", &cookie[..cookie.len() - 1]);
 
     let reply =
         http::send("GET", &format!("{}/api/status", app.base), Some(&wrong), None).await;
 
     assert_eq!(reply.status, 401);
+}
+
+#[tokio::test]
+async fn a_cookie_without_the_mark_of_our_page_opens_nothing() {
+    let app = start().await;
+    let url = format!("{}/api/status", app.base);
+    let cookie = app.cookie();
+
+    // What a form or an image on another site makes the browser send: the cookie, nothing else.
+    assert_eq!(http::send_raw("GET", &url, &[("Cookie", &cookie)], None).await.status, 401);
+
+    // The mark, but sent from somebody else's page.
+    let foreign = [("Cookie", cookie.as_str()), (KEYHOLD_HEADER, "1"), ("Origin", "http://127.0.0.1:3000")];
+    assert_eq!(http::send_raw("GET", &url, &foreign, None).await.status, 401);
+
+    // A browser that says the request crossed sites, without an `Origin`.
+    let crossed = [("Cookie", cookie.as_str()), (KEYHOLD_HEADER, "1"), ("Sec-Fetch-Site", "cross-site")];
+    assert_eq!(http::send_raw("GET", &url, &crossed, None).await.status, 401);
+
+    // Our own page: same origin, or no `Origin` on a same-origin read.
+    let ours = [("Cookie", cookie.as_str()), (KEYHOLD_HEADER, "1"), ("Origin", app.base.as_str())];
+    assert_eq!(http::send_raw("GET", &url, &ours, None).await.status, 200);
+
+    let read = [("Cookie", cookie.as_str()), (KEYHOLD_HEADER, "1"), ("Sec-Fetch-Site", "same-origin")];
+    assert_eq!(http::send_raw("GET", &url, &read, None).await.status, 200);
+}
+
+#[tokio::test]
+async fn a_session_belongs_to_the_origin_that_opened_it() {
+    let app = start().await;
+    let port = app.base.rsplit(':').next().unwrap();
+    let elsewhere = format!("localhost:{port}");
+
+    // `localhost` is allowed to reach this port, but it is another site with its own session.
+    let reply = app.get_as_host("/api/status", &elsewhere).await;
+
+    assert_eq!(reply.status, 401);
+}
+
+#[tokio::test]
+async fn the_code_in_the_address_is_traded_once_for_a_cookie_the_page_cannot_read() {
+    let app = start().await;
+    let code = app.state.gate.issue_code();
+    let body = serde_json::json!({ "code": code }).to_string();
+    let url = format!("{}/session", app.base);
+    let marks = [(KEYHOLD_HEADER, "1"), ("Origin", app.base.as_str())];
+
+    // Without the mark of our page, the code is not even looked at.
+    let unmarked = http::send_raw("POST", &url, &[("Origin", app.base.as_str())], Some(&body)).await;
+    assert_eq!(unmarked.status, 403);
+
+    let reply = http::send_raw("POST", &url, &marks, Some(&body)).await;
+    assert_eq!(reply.status, 200);
+
+    let set = reply.header("set-cookie").expect("a cookie").to_string();
+    assert!(set.contains("HttpOnly"), "{set}");
+    assert!(set.contains("SameSite=Strict"), "{set}");
+    assert!(!set.contains("Expires"), "{set}");
+
+    let cookie = set.split(';').next().unwrap().to_string();
+    let status = [("Cookie", cookie.as_str()), (KEYHOLD_HEADER, "1"), ("Origin", app.base.as_str())];
+    assert_eq!(http::send_raw("GET", &format!("{}/api/status", app.base), &status, None).await.status, 200);
+
+    // The same code again: somebody else read it. The session it opened is closed.
+    let again = http::send_raw("POST", &url, &marks, Some(&body)).await;
+    assert_eq!(again.status, 409);
+    assert_eq!(again.json()["session"], "replayed");
+    assert_eq!(http::send_raw("GET", &format!("{}/api/status", app.base), &status, None).await.status, 401);
+}
+
+#[tokio::test]
+async fn a_wrong_code_is_refused_without_saying_why() {
+    let app = start().await;
+    let _ = app.state.gate.issue_code();
+    let marks = [(KEYHOLD_HEADER, "1"), ("Origin", app.base.as_str())];
+    let body = serde_json::json!({ "code": "not-the-code" }).to_string();
+
+    let reply = http::send_raw("POST", &format!("{}/session", app.base), &marks, Some(&body)).await;
+
+    assert_eq!(reply.status, 401);
+    assert!(reply.header("set-cookie").is_none());
+}
+
+#[tokio::test]
+async fn opening_the_vault_replaces_the_session() {
+    let app = start().await;
+    let before = app.cookie();
+
+    let reply = app.post("/api/setup", serde_json::json!({ "password": "correct horse battery staple" })).await;
+    assert_eq!(reply.status, 200, "{}", reply.body);
+
+    let after = app.cookie();
+    assert_ne!(before, after);
+
+    // A copy of the old cookie, as a browser restoring its last session would have it, opens nothing.
+    let old = http::send("GET", &format!("{}/api/status", app.base), Some(&before), None).await;
+    assert_eq!(old.status, 401);
+    assert_eq!(app.get("/api/status").await.status, 200);
 }
 
 #[tokio::test]
@@ -383,7 +548,7 @@ async fn the_lock_policy_can_be_changed_and_switched_off() {
     let reply = http::send(
         "PUT",
         &format!("{}/api/settings/lock", app.base),
-        Some(&app.token),
+        Some(&app.cookie()),
         Some(&serde_json::json!({ "idle_seconds": 300, "hidden_seconds": null }).to_string()),
     )
     .await;
@@ -395,7 +560,7 @@ async fn the_lock_policy_can_be_changed_and_switched_off() {
     let off = http::send(
         "PUT",
         &format!("{}/api/settings/lock", app.base),
-        Some(&app.token),
+        Some(&app.cookie()),
         Some(&serde_json::json!({ "idle_seconds": null, "hidden_seconds": null }).to_string()),
     )
     .await;
@@ -717,7 +882,7 @@ async fn saving_a_record_keeps_what_it_replaced() {
     let updated = http::send(
         "PUT",
         &format!("{}/api/records/{id}", app.base),
-        Some(&app.token),
+        Some(&app.cookie()),
         Some(
             &serde_json::json!({
                 "title": "Produção",
@@ -981,7 +1146,7 @@ async fn the_retention_window_can_be_changed_and_switched_off() {
     let saved = http::send(
         "PUT",
         &format!("{}/api/settings/retention", app.base),
-        Some(&app.token),
+        Some(&app.cookie()),
         Some(&serde_json::json!({ "days": 7 }).to_string()),
     )
     .await;
@@ -992,7 +1157,7 @@ async fn the_retention_window_can_be_changed_and_switched_off() {
     let off = http::send(
         "PUT",
         &format!("{}/api/settings/retention", app.base),
-        Some(&app.token),
+        Some(&app.cookie()),
         Some(&serde_json::json!({ "days": 0 }).to_string()),
     )
     .await;
@@ -1064,7 +1229,7 @@ async fn deleting_a_vault_needs_its_name_and_takes_everything_with_it() {
     let wrong = http::send(
         "DELETE",
         &format!("{}/api/vaults/{vault}", app.base),
-        Some(&app.token),
+        Some(&app.cookie()),
         Some(&serde_json::json!({ "confirm_name": "outro nome" }).to_string()),
     )
     .await;
@@ -1075,7 +1240,7 @@ async fn deleting_a_vault_needs_its_name_and_takes_everything_with_it() {
     let right = http::send(
         "DELETE",
         &format!("{}/api/vaults/{vault}", app.base),
-        Some(&app.token),
+        Some(&app.cookie()),
         Some(&serde_json::json!({ "confirm_name": "Pessoal" }).to_string()),
     )
     .await;
@@ -1199,7 +1364,7 @@ async fn reads_stop_being_recorded_when_that_is_switched_off() {
     http::send(
         "PUT",
         &format!("{}/api/settings/log-reads", app.base),
-        Some(&app.token),
+        Some(&app.cookie()),
         Some(&serde_json::json!({ "on": false }).to_string()),
     )
     .await;
@@ -1440,10 +1605,14 @@ async fn a_request_arriving_under_another_name_is_refused() {
         assert_eq!(refused.status, 421, "{name} was answered");
     }
 
-    // And the names that are ours still work, including the unauthenticated ones.
-    for name in ["127.0.0.1:7717", "localhost:7717", "localhost"] {
-        assert_eq!(app.get_as_host("/api/status", name).await.status, 200, "{name} was refused");
+    // The names that are ours get past the name check. A session belongs to the origin that opened
+    // it, so under another of our names it is a stranger (401, not 421).
+    for name in ["127.0.0.1:7717", "localhost:7717", "localhost", "keyhold.localhost:7717"] {
+        assert_eq!(app.get_as_host("/health", name).await.status, 200, "{name} was refused");
+        assert_eq!(app.get_as_host("/api/status", name).await.status, 401, "{name} shared the session");
     }
+
+    assert_eq!(app.get("/api/status").await.status, 200);
 
     assert_eq!(app.get_as_host("/health", "evil.example").await.status, 421);
 }

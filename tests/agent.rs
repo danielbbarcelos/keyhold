@@ -12,7 +12,7 @@ use keyhold::http::AppState;
 use keyhold::identity::{self, SetupOptions};
 use keyhold::lock::{Lock, LockPolicy};
 use keyhold::records::{Field, Payload};
-use keyhold::session::SessionToken;
+use keyhold::session::SessionGate;
 use keyhold::{records, vaults};
 
 struct Fixture {
@@ -69,7 +69,7 @@ fn fixture() -> Fixture {
     lock.unlock_with(outcome.vault_key);
 
     let state = Arc::new(AppState {
-        token: SessionToken::generate(),
+        gate: SessionGate::new(0, false),
         agent: AgentState::default(),
         store: Arc::new(std::sync::Mutex::new(store)),
         lock,

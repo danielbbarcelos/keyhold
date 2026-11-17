@@ -23,9 +23,9 @@ use crate::aws::state::Endpoints;
 use crate::aws::Credentials;
 use crate::crypto::SecretKey;
 use crate::db::Store;
-use crate::http::{router, AppState, TOKEN_HEADER};
+use crate::http::{router, AppState, KEYHOLD_HEADER};
 use crate::lock::{Lock, LockPolicy};
-use crate::session::SessionToken;
+use crate::session::{Exchange, SessionGate};
 use crate::vaults::{self, AwsVault, VaultMeta};
 
 // ── the fake ────────────────────────────────────────────────────────────────────────────────────
@@ -369,7 +369,8 @@ impl Harness {
         let mut request = self
             .client
             .request(reqwest::Method::from_bytes(method.as_bytes()).unwrap(), url)
-            .header(TOKEN_HEADER, &self.token);
+            .header(KEYHOLD_HEADER, "1")
+            .header("cookie", &self.token);
         if let Some(body) = body {
             request = request.header("content-type", "application/json").body(body.to_string());
         }
@@ -461,13 +462,20 @@ async fn start_at(seed: impl FnOnce(&mut Ssm), bucket: Option<String>, s3: Optio
     seed(&mut shared.lock().unwrap());
     let ssm_base = start_ssm(shared.clone()).await;
 
-    let token = SessionToken::generate();
-    let exposed = token.expose().to_string();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let base = format!("http://{address}");
+
     let lock = Lock::new(LockPolicy { idle_seconds: None, hidden_seconds: None });
     lock.unlock_with(key);
 
+    let gate = SessionGate::new(address.port(), false);
+    let Exchange::Granted(session) = gate.exchange(&gate.issue_code(), &base) else { panic!("no session") };
+    // The whole `Cookie` header the harness sends.
+    let exposed = format!("{}={session}", gate.cookie_name());
+
     let state = Arc::new(AppState {
-        token,
+        gate,
         agent: Default::default(),
         store: Arc::new(Mutex::new(store)),
         lock,
@@ -482,8 +490,6 @@ async fn start_at(seed: impl FnOnce(&mut Ssm), bucket: Option<String>, s3: Optio
         Credentials::new("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", None),
     );
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
     let app = router(state.clone());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
@@ -692,7 +698,8 @@ async fn saving_checks_the_version_and_switches_the_format_with_the_field_count(
     let header = h
         .client
         .put(format!("{}/api/records/{id}", h.base))
-        .header(TOKEN_HEADER, &h.token)
+        .header(KEYHOLD_HEADER, "1")
+        .header("cookie", &h.token)
         .header("x-keyhold-expected-version", "2")
         .header("content-type", "application/json")
         .body(json!({ "title": "Banco", "fields": [{ "label": "Senha", "kind": "password", "value": "so-isso" }] }).to_string())

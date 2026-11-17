@@ -74,11 +74,14 @@ fails the build on `innerHTML`, `eval`, `new Function`, or any remote URL in the
 The Unix model does not separate processes running as the same user. Anything you run can connect to
 Keyhold's port.
 
-**Defence.** Every API route requires a session token that is generated per run, never written to
-disk, delivered in the URL fragment, and compared in constant time. Authentication is a custom
-header rather than a cookie, so a page in another tab cannot have the browser attach credentials on
-its behalf. The agent surface (see the roadmap) uses a `0600` unix socket rather than a port, so
-filesystem permission is the authentication and there is no token in a config file to steal.
+**Defence.** Every API route requires a session, generated per run and never written to disk by
+Keyhold. The session is an `HttpOnly`, `SameSite=Strict` cookie named after the port, so the page's
+own script never holds it; and because a browser attaches a cookie on its own, the cookie is never
+enough: every request must also carry the `X-Keyhold` header (which another site cannot add without
+a CORS answer Keyhold never gives) and come from the same origin the session was opened on. A session
+belongs to one origin (scheme, name and port), and is replaced every time the vault is unlocked. The
+agent surface uses a `0600` unix socket rather than a port, so filesystem permission is the
+authentication and there is no token in a config file to steal.
 
 ### T6 · An unattended unlocked vault
 
@@ -157,18 +160,32 @@ Somebody holding `vault.db` and nothing else can read:
 What it does not show: a title, a username, an address, a note, a field label, a field value, a
 vault or folder name, or which field of which record an agent was ever given.
 
-### Where the session token lands
+### Where the session and its opening code land
 
-It lives in memory and in the URL fragment, and the fragment reaches two places outside this
-process: the `xdg-open` helper's `/proc/<pid>/cmdline` while it runs, and — when Keyhold was started
-from the desktop shortcut — `~/.local/state/keyhold/app.log`, because that log is where the URL can
-be read when the browser did not open. The log is `0600` inside a `0700` directory and is rotated
-once (`app.log.1`) on every start. The browser also keeps the address, fragment included, in its
-history and session files, and shows it in its own command line when Keyhold opened it. Every token
-dies with the process that made it, but while that process lives, **anything running as this user
-that reads those places can act as the interface**, an assistant with a shell included. That is the
-same-user limit stated under "What Keyhold does not defend against", and the reason a one-time
-code in place of the token in the address is on the roadmap.
+The address Keyhold opens carries a **one-time code**, never the session: thirty seconds, one
+exchange, one outstanding at a time. The code does not go on a command line, where every user of
+the machine could read it in `/proc/<pid>/cmdline`. It is written into a small page in the state
+directory (`0600` inside `0700`), the opener is handed that page's path, and the page forwards the
+browser. The page traded the code for the session cookie and removed it from the address before
+rendering anything, so the browser's history, a reload and `app.log` hold only spent codes. A code
+presented a second time means something else read it: the session it opened is revoked, and the tab
+says so.
+
+What still holds a live credential, while the process lives:
+
+- **The browser's cookie jar.** A browser that restores its last session keeps session cookies on
+  disk. The next unlock replaces the session, so a restored copy opens a locked vault at most, and
+  the lock screen still wants the master password.
+- **The opening page**, for its thirty seconds, readable by this user.
+- **Other ports of the same name.** A cookie is sent to every port of the name it was set for. On
+  `keyhold.localhost` (the default when the system resolves it) or a name from `set-host`, that is
+  only Keyhold. When Keyhold falls back to `127.0.0.1` (Safari before macOS 26 does not resolve
+  `.localhost` names), the cookie also rides along to every other local server the browser visits,
+  which may log it; the custom header still stops those servers' pages from using it in the
+  browser. `sudo keyhold set-host keyhold.localhost` removes the fallback.
+
+Anything running as this user that reads those places can act as the interface, an assistant with a
+shell included. That is the same-user limit stated under "What Keyhold does not defend against".
 
 ### A20 · The one thing that leaves the machine: an AWS vault's content, to its own account
 

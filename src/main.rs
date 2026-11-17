@@ -5,7 +5,7 @@
 //! reaches the network. Every design decision in this codebase is downstream of those three.
 //!
 //! What this binary does when run with no arguments: opens the vault file, picks a free loopback
-//! port, generates a session token, serves the interface, and points a browser at it.
+//! port, serves the interface, and points a browser at it with a one-time code.
 
 use keyhold::{db, hosts, http, instance, paths, session};
 
@@ -18,7 +18,7 @@ use clap::{Parser, Subcommand};
 use db::Store;
 use http::AppState;
 use keyhold::lock::Lock;
-use session::SessionToken;
+use session::SessionGate;
 
 #[derive(Parser)]
 #[command(name = "keyhold", version, about = "A strictly local password vault.")]
@@ -100,6 +100,28 @@ enum Cmd {
 
 /// The port a Keyhold started without `--port` tries first, so a bookmark keeps working.
 const DEFAULT_PORT: u16 = 7717;
+
+/// The name the window opens on when `set-host` gave none and the system resolves it.
+const LOCAL_NAME: &str = "keyhold.localhost";
+
+/// Whether the system resolver sends `name` to loopback, and only there. Asked of the system, not
+/// assumed from RFC 6761, because the system is what Safari asks. Bounded, so a resolver that goes
+/// to the network for `.localhost` cannot hold up the start.
+async fn resolves_to_loopback(name: &'static str) -> bool {
+    let lookup = tokio::task::spawn_blocking(move || {
+        use std::net::ToSocketAddrs;
+
+        (name, 0)
+            .to_socket_addrs()
+            .map(|addresses| {
+                let addresses: Vec<_> = addresses.collect();
+                !addresses.is_empty() && addresses.iter().all(|address| address.ip().is_loopback())
+            })
+            .unwrap_or(false)
+    });
+
+    matches!(tokio::time::timeout(std::time::Duration::from_secs(1), lookup).await, Ok(Ok(true)))
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -197,7 +219,6 @@ async fn serve(cli: Cli) -> Result<()> {
     // it will run on is the one the person chose last time, not the default.
     let policy = keyhold::settings::lock_policy(&store);
     let agent_wanted = keyhold::settings::agent_surface(&store);
-    let token = SessionToken::generate();
 
     // A fixed port by default, so a bookmark or a browser's saved login keeps working run after run.
     // Asked for explicitly, a port is that port or an error; by default, a taken 7717 falls back to
@@ -224,22 +245,36 @@ async fn serve(cli: Cli) -> Result<()> {
     // The name `sudo keyhold set-host` wrote, if any. Read once: a name added later counts from the
     // next start, which is what `set-host` tells the person.
     let names = hosts::names_on_this_machine();
-    let host = names.first().cloned().unwrap_or_else(|| "127.0.0.1".to_string());
-    http::allow_names(names);
+    http::allow_names(names.clone());
 
     // HTTPS when `set-host` left a certificate: a name other than 127.0.0.1 is not a secure context
     // over plain HTTP, and the browser then refuses the clipboard and notifications this page needs.
     let tls = load_tls().await;
     let scheme = if tls.is_some() { "https" } else { "http" };
 
-    let url = format!("{scheme}://{host}:{}/#token={}", bound.port(), token.expose());
+    // Which name the window opens on. A cookie is sent to every port of the name it was set for, so
+    // a session on `127.0.0.1` would ride along to every local server the browser visits. A name of
+    // our own keeps it to us: the one `set-host` wrote, or `keyhold.localhost`, which Chrome and
+    // Firefox send to loopback on their own. Safari asks the system, and before macOS 26 the system
+    // does not know `.localhost` names; then the window opens on 127.0.0.1 and the screen there
+    // suggests `set-host`.
+    let host = match names.first() {
+        Some(name) => name.clone(),
+        None if resolves_to_loopback(LOCAL_NAME).await => LOCAL_NAME.to_string(),
+        None => "127.0.0.1".to_string(),
+    };
 
+    let base = format!("{scheme}://{host}:{}", bound.port());
+
+    // No address with a credential in it is ever printed: the window is opened through a page only
+    // this user can read (see `http::present`), and a terminal or a log is not that.
     println!();
     println!("  Keyhold {}", env!("CARGO_PKG_VERSION"));
-    println!("  {url}");
+    println!("  address {base}");
     println!("  vault   {}", paths::vault_file().display());
     println!();
     println!("  Ctrl+C to stop. Closing Keyhold forgets the key.");
+    println!("  To open the window again: keyhold --present");
 
     if agent_wanted {
         println!();
@@ -247,38 +282,8 @@ async fn serve(cli: Cli) -> Result<()> {
     }
     println!();
 
-    if !cli.no_browser {
-        instance::open_browser(&url);
-
-        // Only after a takeover, and only because of how one ends: somebody dismissed a dialog, and
-        // the tab that replaces the one they had lands in a browser window that may well be behind
-        // the dialog they were looking at. On a plain start they clicked the icon and are watching
-        // for exactly this, so saying it would be noise.
-        if took_over {
-            instance::announce("Comecei de novo. O cofre está trancado, na aba nova do navegador.");
-        }
-    }
-
-    // Another instance asking to be seen. It cannot open a browser on this process's behalf — it
-    // does not know the URL, and the URL is where the session token lives — so it asks, and this is
-    // the answer.
-    // On Windows there is no such signal; the same request arrives at `/open-window` instead.
-    #[cfg(unix)]
-    if let Some(mut signals) = show_yourself {
-        let url = url.clone();
-
-        tokio::spawn(async move {
-            while signals.recv().await.is_some() {
-                instance::open_browser(&url);
-                instance::announce("O cofre já estava aberto. A janela está no seu navegador.");
-            }
-        });
-    }
-    #[cfg(not(unix))]
-    let _ = show_yourself;
-
     let state = Arc::new(AppState {
-        token,
+        gate: SessionGate::new(bound.port(), tls.is_some()),
         agent: Default::default(),
         store: std::sync::Arc::new(std::sync::Mutex::new(store)),
         lock: Lock::new(policy),
@@ -290,8 +295,38 @@ async fn serve(cli: Cli) -> Result<()> {
     // So an auto-lock forgets every AWS session within seconds, with or without a request after it.
     http::start_aws_sweeper(&state);
 
-    // So a question from an agent can bring this window back when nobody has it in front of them.
-    state.agent.set_door(url.clone());
+    // Where the interface lives, for every path that opens a window: this start, a second start
+    // asking to be seen, an agent's question, a bookmark's "Abrir o Keyhold".
+    state.agent.set_door(base.clone());
+
+    if !cli.no_browser {
+        http::present(&state);
+
+        // Only after a takeover, and only because of how one ends: somebody dismissed a dialog, and
+        // the tab that replaces the one they had lands in a browser window that may well be behind
+        // the dialog they were looking at. On a plain start they clicked the icon and are watching
+        // for exactly this, so saying it would be noise.
+        if took_over {
+            instance::announce("Comecei de novo. O cofre está trancado, na aba nova do navegador.");
+        }
+    }
+
+    // Another instance asking to be seen. It cannot open a window on this process's behalf (only
+    // this process can issue a code), so it asks, and this is the answer.
+    // On Windows there is no such signal; the same request arrives at `/open-window` instead.
+    #[cfg(unix)]
+    if let Some(mut signals) = show_yourself {
+        let state = state.clone();
+
+        tokio::spawn(async move {
+            while signals.recv().await.is_some() {
+                http::present(&state);
+                instance::announce("O cofre já estava aberto. A janela está no seu navegador.");
+            }
+        });
+    }
+    #[cfg(not(unix))]
+    let _ = show_yourself;
 
     // Reopen the agent socket if it was left on.
     //

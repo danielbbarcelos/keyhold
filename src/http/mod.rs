@@ -4,8 +4,10 @@
 //! port, and any page in any tab can try to as well. So this module is written as if the network
 //! were hostile, because locally it is:
 //!
-//!  - **Everything under `/api` requires the session token**, compared in constant time. The only
-//!    routes that answer without one are `/health` and the static bundle.
+//!  - **Everything under `/api` requires a session** (see `crate::session`): this origin's cookie,
+//!    compared in constant time, plus the `X-Keyhold` header and this origin's `Origin`. The only
+//!    routes that answer without one are `/health`, `/open-window`, the code exchange at `/session`
+//!    and the static bundle.
 //!  - **A strict Content-Security-Policy on every response**, because the page that renders secrets
 //!    is the page an injected script would want. `default-src 'none'` and no CDN anywhere: every
 //!    byte the browser runs is compiled into this binary.
@@ -39,23 +41,24 @@ use crate::db::Store;
 use crate::generator::{self, Recipe};
 use crate::identity::{self, SetupOptions, UnlockAttempt};
 use crate::lock::{Lock, LockPolicy};
-use crate::session::SessionToken;
+use crate::session::{Exchange, SessionGate, MARK_HEADER};
 use crate::settings;
 use crate::totp;
 
-/// The header the interface sends its token in.
+/// The header every API request carries. Re-exported for the tests and the interface's sake.
 ///
-/// A custom header rather than a cookie, deliberately: a cookie is attached by the browser to
-/// every request to this origin, including ones another page caused. A header has to be set by
-/// code that is already running on our page.
-pub const TOKEN_HEADER: &str = "x-keyhold-token";
+/// The session itself is a cookie, which the browser attaches on its own, including to requests
+/// another page caused. This header is what such a request cannot have: adding it makes the browser
+/// ask first, and keyhold never says yes.
+pub const KEYHOLD_HEADER: &str = MARK_HEADER;
 
 #[derive(RustEmbed)]
 #[folder = "web/dist"]
 struct Assets;
 
 pub struct AppState {
-    pub token: SessionToken,
+    /// Codes and sessions for the interface (see `crate::session`).
+    pub gate: SessionGate,
     /// Everything the agent surface remembers, which is nothing that survives a restart (F7).
     pub agent: crate::agent::AgentState,
     pub store: std::sync::Arc<std::sync::Mutex<Store>>,
@@ -128,17 +131,18 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(contents::routes())
         .merge(aws::routes())
         .merge(copy::routes())
-        .route_layer(middleware::from_fn_with_state(state.clone(), require_token));
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_session));
 
     Router::new()
         .route("/health", get(health))
         .route("/open-window", post(open_window))
+        .route("/session", post(redeem))
         .nest("/api", api)
         .fallback(serve_asset)
         // An attachment travels as base64 inside JSON: 25 MB of file is about 34 MB of body.
         .layer(axum::extract::DefaultBodyLimit::max(crate::attachments::MAX_BYTES / 3 * 4 + 1024 * 1024))
         .layer(middleware::from_fn(security_headers))
-        // Outermost, so it also covers the routes that answer without a token.
+        // Outermost, so it also covers the routes that answer without a session.
         .layer(middleware::from_fn(only_this_machine))
         .with_state(state)
 }
@@ -154,8 +158,8 @@ pub fn router(state: Arc<AppState>) -> Router {
 /// name is not one of ours. A vault reached by any name but its own is not being reached by its
 /// own interface.
 ///
-/// It was never the whole defence — every route that matters wants a session token, and a rebound
-/// page has no way to learn one — but "they would have needed the token anyway" is the argument
+/// It was never the whole defence — every route that matters wants a session, and a rebound
+/// page has no way to obtain one — but "they would have needed the session anyway" is the argument
 /// that stops being true the first time something is added that does not.
 async fn only_this_machine(request: Request<Body>, next: Next) -> Response {
     let host = host_of(request.headers(), request.uri());
@@ -165,7 +169,7 @@ async fn only_this_machine(request: Request<Body>, next: Next) -> Response {
     // port it was reached on. Anything with credentials, a path, or another name is not.
     let name = host.rsplit_once(':').map(|(name, _)| name).unwrap_or(host);
 
-    if matches!(name, "127.0.0.1" | "localhost" | "[::1]" | "::1") || is_own_name(name) {
+    if matches!(name, "127.0.0.1" | "localhost" | "keyhold.localhost" | "[::1]" | "::1") || is_own_name(name) {
         return next.run(request).await;
     }
 
@@ -204,9 +208,9 @@ fn is_own_name(name: &str) -> bool {
     OWN_NAMES.get().map(|names| names.iter().any(|own| own == name)).unwrap_or(false)
 }
 
-/// "Abrir o Keyhold", from a page that has no token: a bookmark, or a tab opened by hand.
+/// "Abrir o Keyhold", from a page that has no session: a bookmark after a restart, or a tab opened by hand.
 ///
-/// The token never comes back in the answer. Like a second start choosing "Abrir e continuar", this
+/// No code comes back in the answer. Like a second start choosing "Abrir e continuar", this
 /// makes the running keyhold hand its own URL to the desktop, and the browser receives it from
 /// there. A request from another site is refused by its `Origin`; the worst a local process that
 /// forges one can do is open a tab, and only once every few seconds.
@@ -228,13 +232,110 @@ async fn open_window(State(state): State<Arc<AppState>>, uri: Uri, headers: Head
             .into_response();
     }
 
-    match state.agent.door() {
-        Some(door) => {
-            crate::instance::open_browser(door);
-            Json(json!({ "opened": true })).into_response()
+    if present(&state) {
+        Json(json!({ "opened": true })).into_response()
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": "não foi possível abrir o Keyhold a partir desta página" })))
+            .into_response()
+    }
+}
+
+/// Put the interface in front of the person: a fresh code, written into a page only this user can
+/// read, and the browser pointed at that page.
+///
+/// The one way every path opens a window (the first start, a second start asking to be seen, an
+/// agent's question, "Abrir o Keyhold" from a bookmark). The code never goes on a command line: the
+/// opener (`xdg-open`, `open`, `rundll32`) gets the path of the page, and the page forwards the
+/// browser to the address with the code in its fragment. The page is removed once the code could no
+/// longer be used. Answers `false` when there is no interface to open (tests).
+pub fn present(state: &AppState) -> bool {
+    let Some(base) = state.agent.door() else {
+        return false;
+    };
+
+    let code = state.gate.issue_code();
+    let address = format!("{base}/#code={code}");
+
+    match crate::instance::write_opener(&address) {
+        Ok(page) => {
+            crate::instance::open_browser(&page.display().to_string());
+
+            std::thread::spawn(move || {
+                std::thread::sleep(crate::session::CODE_LIFETIME + std::time::Duration::from_secs(5));
+                let _ = std::fs::remove_file(page);
+            });
+
+            true
         }
-        None => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": "não foi possível abrir o Keyhold a partir desta página" })))
+        Err(_) => false,
+    }
+}
+
+/// The origin a request was made to, as the browser writes it in `Origin`.
+fn origin_of(state: &AppState, headers: &HeaderMap, uri: &Uri) -> String {
+    let scheme = if state.gate.secure() { "https" } else { "http" };
+
+    format!("{scheme}://{}", host_of(headers, uri))
+}
+
+/// Whether a request carries the marks of this page's own script: the custom header, and either
+/// this origin's `Origin` or, where a browser leaves `Origin` out (a same-origin GET), a
+/// `Sec-Fetch-Site` that does not contradict it.
+fn from_our_page(headers: &HeaderMap, origin: &str) -> bool {
+    if !headers.contains_key(MARK_HEADER) {
+        return false;
+    }
+
+    match headers.get(header::ORIGIN).and_then(|value| value.to_str().ok()) {
+        Some(sent) => sent == origin,
+        None => headers
+            .get("sec-fetch-site")
+            .and_then(|value| value.to_str().ok())
+            .map(|site| site == "same-origin")
+            .unwrap_or(true),
+    }
+}
+
+#[derive(Deserialize)]
+struct RedeemBody {
+    code: String,
+}
+
+/// Trade the code from the address for a session cookie.
+async fn redeem(
+    State(state): State<Arc<AppState>>,
+    uri: Uri,
+    headers: HeaderMap,
+    Json(body): Json<RedeemBody>,
+) -> Response {
+    let origin = origin_of(&state, &headers, &uri);
+
+    if !from_our_page(&headers, &origin) {
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": "apenas a própria página do Keyhold pode fazer este pedido" })))
+            .into_response();
+    }
+
+    match state.gate.exchange(&body.code, &origin) {
+        Exchange::Granted(session) => {
+            let mut response = Json(json!({ "session": "open" })).into_response();
+            set_session_cookie(&state, &mut response, &session);
+            response
+        }
+        Exchange::Replayed => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "este endereço de abertura já tinha sido usado. A sessão aberta com ele foi encerrada por segurança",
+                "session": "replayed",
+            })),
+        )
             .into_response(),
+        Exchange::Refused => (StatusCode::UNAUTHORIZED, Json(json!({ "error": "unauthorised", "session": "invalid" }))).into_response(),
+    }
+}
+
+fn set_session_cookie(state: &AppState, response: &mut Response, session: &str) {
+    if let Ok(value) = HeaderValue::from_str(&state.gate.set_cookie(session)) {
+        response.headers_mut().append(header::SET_COOKIE, value);
     }
 }
 
@@ -1269,39 +1370,54 @@ fn qr_data_url(uri: &str) -> anyhow::Result<String> {
     ))
 }
 
-async fn require_token(
+async fn require_session(
     State(state): State<Arc<AppState>>,
     request: Request<Body>,
     next: Next,
 ) -> Response {
+    let origin = origin_of(&state, request.headers(), request.uri());
+
     let presented = request
         .headers()
-        .get(TOKEN_HEADER)
-        .and_then(|value| value.to_str().ok())
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find_map(|cookies| state.gate.from_cookie_header(cookies).map(str::to_string))
         .unwrap_or_default();
 
-    if state.token.matches(presented) {
+    if from_our_page(request.headers(), &origin) && state.gate.check(&origin, &presented) {
         // Activity is a request that changes something. Reads are what screens poll with, and a
         // poll must not keep an idle vault open (`Lock::with_key` no longer counts either). The
         // interface sends a heartbeat on key presses and clicks for the rest.
         let changes = !matches!(*request.method(), Method::GET | Method::HEAD | Method::OPTIONS);
-        let response = next.run(request).await;
+
+        // Opening the vault replaces the session (see `SessionGate::renew`), so a copy of the
+        // cookie a browser restored from disk opens nothing after the next unlock.
+        let path = request.uri().path().trim_start_matches("/api").to_string();
+        let opens = matches!(path.as_str(), "/unlock" | "/setup");
+
+        let mut response = next.run(request).await;
 
         if changes && response.status().is_success() {
             state.lock.touch();
         }
 
+        if opens && response.status().is_success() {
+            let renewed = state.gate.renew(&origin);
+            set_session_cookie(&state, &mut response, &renewed);
+        }
+
         return response;
     }
 
-    // No detail, no hint about which part was wrong, and the same answer whether the header was
-    // missing or incorrect.
+    // No detail, no hint about which part was wrong, and the same answer whether the cookie was
+    // missing, wrong, or the request did not come from our page.
     //
     // `session` is the one thing worth distinguishing, and it is about this tab rather than about
     // the vault: a wrong master password is also a 401, and an interface that treated the two the
     // same would throw somebody out of the lock screen for a typo. This says "the credential you
-    // are holding is not one of ours" — which, since a takeover became a normal thing to do, is
-    // what an old tab is holding after another instance took over.
+    // are holding is not one of ours" — which is what a tab holds after a restart, a takeover, or
+    // an unlock in another origin.
     (
         StatusCode::UNAUTHORIZED,
         Json(json!({ "error": "unauthorised", "session": "invalid" })),
