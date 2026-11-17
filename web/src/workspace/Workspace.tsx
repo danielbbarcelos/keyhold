@@ -4,6 +4,7 @@ import { api, type RecordPreview, type Status, type VaultSummary } from '../api'
 import { clearNow } from '../clipboard'
 import { AgentApproval } from './AgentApproval'
 import { AuditPanel } from './AuditPanel'
+import { AwsTrail, TrailSource } from './AwsTrail'
 import { CommandPalette } from './CommandPalette'
 import { Customise } from './Customise'
 import { DiscardDialog } from './DiscardDialog'
@@ -48,6 +49,8 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   // Vaults whose records could not be read (an AWS vault without a session): unknown, not empty.
   const [unreadable, setUnreadable] = useState<Set<string>>(new Set())
   const [place, setPlace] = useState<Place>(start.place)
+  // Which trail the Trilha shows: this computer's (`null`) or one AWS vault's.
+  const [trailSource, setTrailSource] = useState<string | null>(null)
   const [vaultId, setVaultId] = useState<string | null>(start.place === 'vault' ? start.vault : null)
   const [selection, setSelection] = useState<Selection>(() => {
     if (start.place !== 'vault') return null
@@ -151,6 +154,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
   }, [refresh])
 
   const vault = vaults.find((one) => one.id === vaultId && !one.archived) ?? null
+  const trailVault = vaults.find((one) => one.id === trailSource && one.kind === 'aws' && !one.archived) ?? null
 
   // The address follows the tab, so a reload lands where it was.
   useEffect(() => {
@@ -259,8 +263,12 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <TopBar onSearch={search}>
             <Title>Trilha</Title>
+            <TrailSource vaults={vaults} source={trailSource} onPick={setTrailSource} />
           </TopBar>
           <Body className="flex flex-col">
+            {trailVault ? (
+              <AwsTrail vault={trailVault} onOpenVault={() => openVault(trailVault.id)} />
+            ) : (
             <AuditPanel
               names={names}
               vaultOf={(id) => records.find((one) => one.id === id)?.vault_id}
@@ -269,6 +277,7 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
                 if (record) openRecord(record)
               }}
             />
+            )}
           </Body>
         </div>
       )

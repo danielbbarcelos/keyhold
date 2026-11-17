@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowRight, Bot, Folder, HardDrive, Lock, Plus, ShieldCheck, Star } from 'lucide-react'
+import { ArrowRight, Bot, Copy, Folder, Globe, HardDrive, Lock, Plus, ShieldCheck, Star, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -18,6 +18,7 @@ import { AwsMark } from './AwsMark'
 import { linkProps, TabMenu } from './nav'
 import { Body, Panel, PanelHead, TopBar, Title, VaultInitial } from './shell'
 import { when } from './vault/paths'
+import { toast } from './toast'
 
 /**
  * Início: where the day starts. The vaults, what was opened lately, what is starred or asks for
@@ -124,6 +125,8 @@ export function Home({
           {records.length === 1 ? 'registro' : 'registros'}
           {attention.length > 0 && `, ${attention.length} ${attention.length === 1 ? 'pede' : 'pedem'} atenção`}.
         </p>
+
+        <SetHostHint dismissed={status.set_host_hint_dismissed ?? false} />
 
         <div className="mt-6 grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-5">
           {open.map((vault) => {
@@ -358,3 +361,62 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <p className="px-5 py-6 text-sm text-faint">{children}</p>
 }
 
+/**
+ * Keyhold opened on 127.0.0.1 because this system does not resolve keyhold.localhost (Safari's
+ * resolver before macOS 26, a Linux without systemd-resolved). On 127.0.0.1 the browser sends the
+ * session cookie to every local server, whatever its port. Dismissed on this machine, not in the
+ * browser: the interface keeps nothing in web storage.
+ */
+function SetHostHint({ dismissed }: { dismissed: boolean }) {
+  const [hidden, setHidden] = useState(dismissed)
+  const command = 'sudo keyhold set-host keyhold.localhost'
+
+  if (hidden || window.location.hostname !== '127.0.0.1') return null
+
+  return (
+    <section className="mt-6 rounded-[14px] border bg-card">
+      <div className="flex items-start gap-3 px-5 py-4">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-amber-soft text-amber">
+          <Globe className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <b className="block text-sm font-medium">O Keyhold abriu em 127.0.0.1</b>
+          <p className="mt-0.5 text-[13px] text-muted-foreground">
+            Este sistema não reconhece o endereço keyhold.localhost, então o Keyhold abriu pelo 127.0.0.1. Nesse endereço,
+            o navegador também entrega o cookie da sua sessão a outros programas que rodam neste computador, como
+            servidores de desenvolvimento e contêineres, que podem gravá-lo em log. Para usar o endereço próprio, rode uma
+            vez no terminal e abra o Keyhold de novo:
+          </p>
+          <div className="mt-3 flex max-w-[560px] items-center gap-2 rounded-[9px] border bg-field py-1 pr-1 pl-3">
+            <code className="min-w-0 flex-1 truncate font-mono text-[13px]">{command}</code>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Copiar comando"
+              onClick={() =>
+                void navigator.clipboard
+                  .writeText(command)
+                  .then(() => toast('Comando copiado'))
+                  .catch(() => toast('Não foi possível copiar', 'O navegador bloqueou o acesso à área de transferência nesta página.', 'error'))
+              }
+            >
+              <Copy />
+            </Button>
+          </div>
+        </div>
+        <button
+          type="button"
+          aria-label="Dispensar"
+          title="Dispensar"
+          className="grid size-6 shrink-0 place-items-center rounded-md text-faint hover:bg-hover hover:text-foreground"
+          onClick={() => {
+            setHidden(true)
+            void api.dismissSetHostHint().catch(() => undefined)
+          }}
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+    </section>
+  )
+}

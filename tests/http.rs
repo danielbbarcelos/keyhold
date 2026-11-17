@@ -905,6 +905,35 @@ async fn an_old_version_is_sealed_and_its_secrets_are_asked_for_by_version() {
 }
 
 #[tokio::test]
+async fn a_local_records_activity_is_its_own_lines_of_the_trail() {
+    let app = start().await;
+    let vault = with_one_vault(&app).await;
+    let one = record_with_secrets(&app, &vault).await;
+    let other = record_with_secrets(&app, &vault).await;
+
+    app.secret(&one, 1, None).await;
+    app.secret(&other, 1, None).await;
+
+    let activity = app.get(&format!("/api/records/{one}/activity")).await;
+    assert_eq!(activity.status, 200, "{}", activity.body);
+    let events = activity.json()["events"].as_array().unwrap().clone();
+    assert!(events.iter().any(|e| e["action"] == "field.revealed" && e["person"].is_null()), "{events:?}");
+    assert!(events.iter().any(|e| e["action"] == "record.created"));
+    assert_eq!(events.iter().filter(|e| e["action"] == "field.revealed").count(), 1, "only this record's");
+}
+
+#[tokio::test]
+async fn the_set_host_hint_is_dismissed_on_this_machine() {
+    let app = start().await;
+    with_one_vault(&app).await;
+
+    assert_eq!(app.get("/api/status").await.json()["set_host_hint_dismissed"], false);
+    let dismissed = http::send("DELETE", &format!("{}/api/settings/set-host-hint", app.base), Some(&app.cookie()), None).await;
+    assert_eq!(dismissed.status, 200, "{}", dismissed.body);
+    assert_eq!(app.get("/api/status").await.json()["set_host_hint_dismissed"], true);
+}
+
+#[tokio::test]
 async fn nothing_about_the_contents_answers_while_the_vault_is_locked() {
     let app = start().await;
     let vault = with_one_vault(&app).await;
