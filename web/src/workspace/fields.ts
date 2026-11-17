@@ -115,7 +115,7 @@ export function subtitleField(fields: Field[]): Field | undefined {
 export function primaryField(fields: Field[]): Field | undefined {
   // Never a 2FA field: its value is the seed that makes codes, which is exactly what the
   // interface promises never to hand out.
-  const secrets = fields.filter((f) => isSecret(f) && f.value !== '' && f.kind !== 'totp')
+  const secrets = fields.filter((f) => isSecret(f) && (f.value !== '' || f.sealed !== undefined) && f.kind !== 'totp')
 
   return secrets.find((f) => f.primary) ?? secrets[0]
 }

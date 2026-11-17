@@ -143,9 +143,19 @@ export function RecordView({
         {primary ? (
           <Button
             onClick={() => {
-              void copyForSeconds(primary.value, CLIPBOARD_SECONDS, () => setCopied(0))
+              // A sealed secret is fetched inside the click (the binary notes the copy as it hands
+              // it over); one the page already has is reported as before.
+              const sealedAt = primary.sealed
+              const value =
+                sealedAt === undefined
+                  ? primary.value
+                  : api.secret(record.id, sealedAt, 'copy').then((secret) =>
+                      primary.kind === 'card' ? secret.value.replace(/\s+/g, '') : secret.value,
+                    )
+
+              void copyForSeconds(value, CLIPBOARD_SECONDS, () => setCopied(0))
                 .then(() => {
-                  void api.reportAccess(record.id, 'copy', primary.label).catch(() => {})
+                  if (sealedAt === undefined) void api.reportAccess(record.id, 'copy', primary.label).catch(() => {})
                   setCopied(CLIPBOARD_SECONDS)
                   toast(`${primary.label} copiado`, 'A área de transferência é limpa em 30 segundos.')
                 })

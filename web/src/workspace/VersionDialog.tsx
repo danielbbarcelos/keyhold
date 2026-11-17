@@ -60,7 +60,7 @@ export function VersionDialog({ recordId, version, onRestore, onCancel }: Versio
           <div className="overflow-hidden rounded-xl border bg-raised">
             <div className="border-b px-5 py-3 text-sm font-semibold">{payload.title}</div>
             {payload.fields.map((field, index) => (
-              <FieldRow key={index} field={field} index={index} recordId={recordId} live={false} />
+              <FieldRow key={index} field={field} index={index} recordId={recordId} live={false} version={version} />
             ))}
             {payload.fields.length === 0 && (
               <p className="px-5 py-3 text-sm text-faint">Esta versão não possui campos.</p>

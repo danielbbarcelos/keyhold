@@ -1849,6 +1849,18 @@ pub(crate) async fn create_record(
 }
 
 pub(crate) async fn open_record(state: &AppState, id: &str) -> Answer {
+    let mut record = record_json(state, id).await?;
+
+    // What goes to the page: secrets sealed (see `records::sealed_json`).
+    let payload: Payload = serde_json::from_value(record["payload"].clone()).map_err(|e| Failure(StatusCode::BAD_GATEWAY, e.to_string(), None))?;
+    record["payload"] = crate::records::sealed_json(&payload);
+
+    Ok(Json(json!({ "record": record })))
+}
+
+/// A record read fresh from Parameter Store, secrets and all: for the binary's own use (copying
+/// between vaults, the agent surface), never for the page.
+pub(crate) async fn record_json(state: &AppState, id: &str) -> Result<Value, Failure> {
     let (vault_id, name) = target_record(id)?;
     let place = place(state, &vault_id).await?;
     let (opened, kind) = open_parameter(state, &place, &name).await?;
@@ -1858,7 +1870,7 @@ pub(crate) async fn open_record(state: &AppState, id: &str) -> Answer {
         object.insert("parameter".into(), json!(mapping::absolute(&name)));
     }
 
-    Ok(Json(json!({ "record": record })))
+    Ok(record)
 }
 
 /// What a write over an existing parameter produced: the new header, and a sentence for the person
@@ -2002,7 +2014,17 @@ pub(crate) async fn update_record(
 ) -> Answer {
     let (vault_id, name) = target_record(id)?;
     let place = place(state, &vault_id).await?;
-    let written = write_over(state, &place, &name, payload, expected).await?;
+
+    // Secrets the page never had come back sealed; put the stored ones in their place. Read
+    // fresh, like any open: what the page saw may be older than what is in AWS now, and the
+    // version check in `write_over` is what refuses that case.
+    let mut payload = payload.clone();
+    if payload.fields.iter().any(|field| field.sealed.is_some()) {
+        let (stored, _) = open_parameter(state, &place, &name).await?;
+        crate::records::unseal(&mut payload, &stored.payload).map_err(|error| Failure(StatusCode::BAD_REQUEST, error.to_string(), None))?;
+    }
+
+    let written = write_over(state, &place, &name, &payload, expected).await?;
 
     note(
         state,
@@ -2343,7 +2365,41 @@ pub(crate) async fn read_version(state: &AppState, id: &str, version: i64) -> An
     let place = place(state, &vault_id).await?;
     let (payload, _) = version_payload(&place, &name, version).await?;
 
-    Ok(Json(json!({ "payload": payload })))
+    Ok(Json(json!({ "payload": crate::records::sealed_json(&payload) })))
+}
+
+/// One secret field of an AWS record, read fresh from Parameter Store (a `GetParameter` of its own
+/// in CloudTrail) and noted in the trail before it is handed over.
+pub(crate) async fn reveal_secret(
+    state: &AppState,
+    id: &str,
+    index: usize,
+    copying: bool,
+    version: Option<i64>,
+) -> Answer {
+    let (vault_id, name) = target_record(id)?;
+    let place = place(state, &vault_id).await?;
+
+    let payload = match version {
+        Some(version) => version_payload(&place, &name, version).await?.0,
+        None => open_parameter(state, &place, &name).await?.0.payload,
+    };
+
+    let secret = crate::records::secret_of(&payload, index).map_err(|error| Failure(StatusCode::BAD_REQUEST, error.to_string(), None))?;
+
+    // The local trail follows the same switch as a local vault's reads. The AWS trail (CloudWatch)
+    // does not ask: there, the account decides.
+    let log_reads = crate::settings::log_reads(&state.store.lock().unwrap());
+    if log_reads {
+        note(
+            state,
+            if copying { audit::action::SECRET_COPIED } else { audit::action::SECRET_REVEALED },
+            id,
+            Detail::new().with("field", secret["label"].as_str().unwrap_or_default().to_string()),
+        );
+    }
+
+    Ok(Json(json!({ "secret": secret })))
 }
 
 /// Bring an old version back by writing it as a new one: AWS's history only grows.
@@ -2747,7 +2803,7 @@ pub(crate) async fn agent_previews(state: &AppState, vault_id: &str) -> Result<V
 /// An AWS record's payload, for an agent that was allowed to read it. The reason it did not open
 /// (an expired session, a denied parameter) comes back in words.
 pub(crate) async fn agent_payload(state: &AppState, record_id: &str) -> Result<Payload, String> {
-    let Json(opened) = open_record(state, record_id).await.map_err(|failure| {
+    let record = record_json(state, record_id).await.map_err(|failure| {
         if failure.2 == Some("session_expired") {
             "a sessão da AWS expirou. Peça que ela seja renovada no Keyhold".to_string()
         } else {
@@ -2755,5 +2811,5 @@ pub(crate) async fn agent_payload(state: &AppState, record_id: &str) -> Result<P
         }
     })?;
 
-    serde_json::from_value(opened["record"]["payload"].clone()).map_err(|e| e.to_string())
+    serde_json::from_value(record["payload"].clone()).map_err(|e| e.to_string())
 }

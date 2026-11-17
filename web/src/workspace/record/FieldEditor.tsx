@@ -22,7 +22,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
-import type { Field, FieldKind } from '../../api'
+import { api, ApiError, type Field, type FieldKind } from '../../api'
+import { toast } from '../toast'
 import { CARD_PARTS, FIELD_TYPES, fieldType, hasParts, isSecret, newField, primaryField, subtitleField } from '../fields'
 import { MenuButton } from '../menu'
 import { PasswordGenerator } from '../PasswordGenerator'
@@ -39,10 +40,13 @@ export function FieldEditor({
   fields,
   onChange,
   framed = true,
+  recordId,
 }: {
   fields: Field[]
   onChange: (fields: Field[]) => void
   framed?: boolean
+  /** The saved record, for fetching a sealed secret. */
+  recordId?: string
 }) {
   const [dragging, setDragging] = useState<number | null>(null)
   const [over, setOver] = useState<number | null>(null)
@@ -136,7 +140,7 @@ export function FieldEditor({
             )}
           </div>
 
-          <ValueEditor field={field} onChange={(change) => update(index, change)} />
+          <ValueEditor field={field} recordId={recordId} onChange={(change) => update(index, change)} />
 
           <span className="mt-0.5">
             <MenuButton
@@ -250,11 +254,65 @@ function Mark({ children, primary }: { children: React.ReactNode; primary?: bool
   )
 }
 
-function ValueEditor({ field, onChange }: { field: Field; onChange: (change: Partial<Field>) => void }) {
+function ValueEditor({
+  field,
+  recordId,
+  onChange,
+}: {
+  field: Field
+  recordId?: string
+  onChange: (change: Partial<Field>) => void
+}) {
   const type = fieldType(field.kind)
   const [showing, setShowing] = useState(false)
   const extra = field.extra ?? {}
   const setExtra = (key: string, value: string) => onChange({ extra: { ...extra, [key]: value } })
+
+  // A saved secret the page was never given. It stays as it is unless somebody reveals it (fetched
+  // and noted in the trail, then editable) or replaces it with a new value.
+  if (field.sealed !== undefined && type.secret) {
+    const unseal = (value: string, parts: Record<string, string>) =>
+      onChange({ value, extra: { ...extra, ...parts }, sealed: undefined, hint: undefined })
+
+    return (
+      <div className="space-y-2">
+        {field.kind === 'security_question' && (
+          <Input
+            aria-label="Pergunta"
+            placeholder="Pergunta"
+            value={extra.question ?? ''}
+            onChange={(event) => setExtra('question', event.target.value)}
+          />
+        )}
+        {field.kind === 'card' && (
+          <div className="grid grid-cols-2 gap-2">
+            {CARD_PARTS.filter((part) => !part.secret).map((part) => (
+              <Input
+                key={part.key}
+                aria-label={part.label}
+                placeholder={part.placeholder ?? part.label}
+                value={extra[part.key] ?? ''}
+                onChange={(event) => setExtra(part.key, event.target.value)}
+              />
+            ))}
+          </div>
+        )}
+        <SealedValue
+          hint={field.hint}
+          onReveal={
+            recordId
+              ? () =>
+                  api.secret(recordId, field.sealed!, 'reveal').then((secret) => unseal(secret.value, secret.extra))
+              : undefined
+          }
+          onReplace={() => {
+            const parts = Object.fromEntries(Object.entries(extra).filter(([key]) => key !== 'code' && key !== 'pin'))
+            onChange({ value: '', extra: parts, sealed: undefined, hint: undefined })
+          }}
+        />
+      </div>
+    )
+  }
 
   if (field.kind === 'security_question') {
     return (
@@ -375,6 +433,49 @@ function ValueEditor({ field, onChange }: { field: Field; onChange: (change: Par
       placeholder={type.placeholder}
       onChange={(event) => onChange({ value: event.target.value })}
     />
+  )
+}
+
+/** A saved secret in the editor: unchanged unless revealed for editing or replaced. */
+function SealedValue({
+  hint,
+  onReveal,
+  onReplace,
+}: {
+  hint?: string
+  onReveal?: () => Promise<void>
+  onReplace: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+
+  return (
+    <div className="flex min-h-9 w-full flex-wrap items-center justify-between gap-2 rounded-[9px] border bg-field px-3 py-1.5 text-sm text-muted-foreground">
+      <span className="tracking-[0.2em]">{hint ? `•••• ${hint}` : '••••••••••••'}</span>
+      <span className="flex items-center gap-1">
+        {onReveal && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true)
+              onReveal()
+                .catch((cause) =>
+                  toast('Não foi possível revelar', cause instanceof ApiError ? cause.message : 'Tente de novo.', 'error'),
+                )
+                .finally(() => setBusy(false))
+            }}
+          >
+            <Eye />
+            Mostrar para editar
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" onClick={onReplace}>
+          <Replace />
+          Substituir
+        </Button>
+      </span>
+    </div>
   )
 }
 

@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 
 import { Clip, Splitter } from '../Splitter'
 
-import { api, type Field } from '../../api'
+import { api, ApiError, type Field, type SecretValue } from '../../api'
 import { copyForSeconds } from '../../clipboard'
 import { CARD_PARTS, fieldType } from '../fields'
 import { toast } from '../toast'
@@ -27,14 +27,16 @@ const CLIPBOARD_SECONDS = 30
 interface FieldRowProps {
   field: Field
   index: number
-  /** Absent for an old version being previewed: nothing to record a read against. */
+  /** Absent for a record not saved yet: nothing to ask the binary for, nothing to record. */
   recordId?: string
   badge?: 'list' | 'primary'
   /** False for an old version: reads still reach the trail, but no live 2FA code is fetched. */
   live?: boolean
+  /** The version being previewed, when it is not the current one. */
+  version?: number
 }
 
-export function FieldRow({ field, index, recordId, badge, live = true }: FieldRowProps) {
+export function FieldRow({ field, index, recordId, badge, live = true, version }: FieldRowProps) {
   const type = fieldType(field.kind)
   const Icon = type.icon
 
@@ -56,13 +58,42 @@ export function FieldRow({ field, index, recordId, badge, live = true }: FieldRo
         <Splitter which="label" className="-right-3.5 -my-3 opacity-0 group-hover/field:opacity-100" />
       </span>
 
-      <Value field={field} index={index} recordId={recordId} live={live} />
+      <Value field={field} index={index} recordId={recordId} live={live} version={version} />
     </div>
   )
 }
 
-function Value({ field, index, recordId, live }: { field: Field; index: number; recordId?: string; live: boolean }) {
+/**
+ * Where a secret field's value comes from.
+ *
+ * A sealed field (the binary did not send its value, see `records::sealed_json`) is asked for when
+ * somebody reveals or copies it: the binary reads it again and writes the trail line before it
+ * answers, so the trail records what happened rather than what the page chose to report. A field
+ * that is not sealed (a record being drafted) has its value already.
+ */
+interface Source {
+  field: Field
+  index: number
+  recordId?: string
+  version?: number
+}
+
+function sealed(source: Source): boolean {
+  return source.field.sealed !== undefined && !!source.recordId
+}
+
+function fetchSecret(source: Source, intent: 'reveal' | 'copy'): Promise<SecretValue> {
+  return api.secret(source.recordId!, source.field.sealed ?? source.index, intent, source.version)
+}
+
+/** What the copy button copies: the value, or the promise of it for a sealed field. */
+function copyOf(source: Source): string | (() => Promise<string>) {
+  return sealed(source) ? () => fetchSecret(source, 'copy').then((secret) => secret.value) : source.field.value
+}
+
+function Value({ field, index, recordId, live, version }: { field: Field; index: number; recordId?: string; live: boolean; version?: number }) {
   const label = field.label || fieldType(field.kind).label
+  const source: Source = { field, index, recordId, version }
 
   switch (field.kind) {
     case 'totp':
@@ -72,14 +103,13 @@ function Value({ field, index, recordId, live }: { field: Field; index: number; 
       return (
         <Secret
           label={label}
-          value={field.value}
-          recordId={recordId}
+          source={source}
           above={<span className="block text-sm">{field.extra?.question || 'Sem pergunta'}</span>}
         />
       )
 
     case 'card':
-      return <Card field={field} recordId={recordId} label={label} />
+      return <Card source={source} label={label} />
 
     case 'date':
       return (
@@ -96,8 +126,7 @@ function Value({ field, index, recordId, live }: { field: Field; index: number; 
       return fieldType(field.kind).secret ? (
         <Secret
           label={label}
-          value={field.value}
-          recordId={recordId}
+          source={source}
           multiline={fieldType(field.kind).multiline}
           mono={field.kind === 'pin' || field.kind === 'multiline_hidden'}
         />
@@ -145,21 +174,21 @@ function Url({ value, label, recordId }: { value: string; label: string; recordI
 }
 
 function Secret({
-  value,
+  source,
   label,
-  recordId,
   above,
   multiline,
   mono,
 }: {
-  value: string
+  source: Source
   label: string
-  recordId?: string
   above?: React.ReactNode
   multiline?: boolean
   mono?: boolean
 }) {
-  const [showing, remaining, toggle] = useReveal(recordId, label)
+  const [shown, remaining, toggle] = useReveal(source, label)
+  const present = source.field.value !== '' || sealed(source)
+  const value = shown?.value ?? ''
 
   return (
     <>
@@ -168,44 +197,49 @@ function Secret({
         <span
           className={cn(
             'block text-sm',
-            showing
+            shown
               ? cn(multiline ? 'whitespace-pre-wrap break-all' : 'truncate', mono && 'font-mono text-[13px]')
               : 'tracking-[0.2em] text-muted-foreground select-none',
           )}
         >
-          {showing ? value || '—' : '•'.repeat(12)}
+          {shown ? value || '—' : '•'.repeat(12)}
         </span>
       </span>
       <Ops>
-        {value && (
+        {present && (
           <IconButton
-            label={showing ? `Ocultar (${remaining}s restantes)` : 'Revelar por 20 segundos'}
+            label={shown ? `Ocultar (${remaining}s restantes)` : 'Revelar por 20 segundos'}
             onClick={toggle}
           >
-            {showing ? <EyeOff /> : <Eye />}
+            {shown ? <EyeOff /> : <Eye />}
           </IconButton>
         )}
-        {value && <CopyButton value={value} label={label} recordId={recordId} />}
+        {present && <CopyButton value={copyOf(source)} label={label} recordId={source.recordId} report={!sealed(source)} />}
       </Ops>
-      {showing && <Drain seconds={remaining} />}
+      {shown && <Drain seconds={remaining} />}
     </>
   )
 }
 
-function Card({ field, recordId, label }: { field: Field; recordId?: string; label: string }) {
-  const [showing, remaining, toggle] = useReveal(recordId, label)
-  const number = field.value.replace(/\s+/g, '')
+function Card({ source, label }: { source: Source; label: string }) {
+  const [shown, remaining, toggle] = useReveal(source, label)
+  const field = source.field
+  const number = (shown?.value ?? field.value).replace(/\s+/g, '')
+  const last = field.hint ?? number.slice(-4)
   const grouped = number.replace(/(.{4})/g, '$1 ').trim()
+  const isSealed = sealed(source)
+  const present = !!number || !!last || isSealed
 
   return (
     <>
       <span className="min-w-0 space-y-1 text-sm">
-        <span className={cn('block font-mono text-[13px]', !showing && 'text-muted-foreground')}>
-          {showing ? grouped || '—' : number ? `•••• ${number.slice(-4)}` : '—'}
+        <span className={cn('block font-mono text-[13px]', !shown && 'text-muted-foreground')}>
+          {shown ? grouped || '—' : last ? `•••• ${last}` : isSealed ? '••••' : '—'}
         </span>
         <span className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
           {CARD_PARTS.map((part) => {
-            const value = field.extra?.[part.key]
+            // A sealed card's code and PIN are not on the page until revealed.
+            const value = shown?.extra[part.key] ?? field.extra?.[part.key]
 
             if (!value) {
               return null
@@ -214,8 +248,8 @@ function Card({ field, recordId, label }: { field: Field; recordId?: string; lab
             return (
               <span key={part.key}>
                 {part.label}:{' '}
-                <span className={cn('text-foreground', part.secret && !showing && 'tracking-[0.15em]')}>
-                  {part.secret && !showing ? '•••' : value}
+                <span className={cn('text-foreground', part.secret && !shown && 'tracking-[0.15em]')}>
+                  {part.secret && !shown ? '•••' : value}
                 </span>
               </span>
             )
@@ -223,14 +257,21 @@ function Card({ field, recordId, label }: { field: Field; recordId?: string; lab
         </span>
       </span>
       <Ops>
-        {(number || field.extra?.code || field.extra?.pin) && (
-          <IconButton label={showing ? `Ocultar (${remaining}s restantes)` : 'Revelar por 20 segundos'} onClick={toggle}>
-            {showing ? <EyeOff /> : <Eye />}
+        {present && (
+          <IconButton label={shown ? `Ocultar (${remaining}s restantes)` : 'Revelar por 20 segundos'} onClick={toggle}>
+            {shown ? <EyeOff /> : <Eye />}
           </IconButton>
         )}
-        {number && <CopyButton value={number} label={`${label} (número)`} recordId={recordId} />}
+        {(number || isSealed) && (
+          <CopyButton
+            value={isSealed ? () => fetchSecret(source, 'copy').then((secret) => secret.value.replace(/\s+/g, '')) : number}
+            label={`${label} (número)`}
+            recordId={source.recordId}
+            report={!isSealed}
+          />
+        )}
       </Ops>
-      {showing && <Drain seconds={remaining} />}
+      {shown && <Drain seconds={remaining} />}
     </>
   )
 }
@@ -323,13 +364,17 @@ function Totp({ recordId, trail, index, label }: { recordId?: string; trail?: st
   )
 }
 
-function useReveal(recordId: string | undefined, label: string): [boolean, number, () => void] {
-  const [showing, setShowing] = useState(false)
+/**
+ * Reveal for twenty seconds. For a sealed field the value is fetched on the click and dropped when
+ * the twenty seconds end, so the page holds a secret only while it is on screen.
+ */
+function useReveal(source: Source, label: string): [SecretValue | null, number, () => void] {
+  const [shown, setShown] = useState<SecretValue | null>(null)
   const [remaining, setRemaining] = useState(0)
   const timer = useRef<number | undefined>(undefined)
 
   useEffect(() => {
-    if (!showing) {
+    if (!shown) {
       return
     }
 
@@ -337,7 +382,7 @@ function useReveal(recordId: string | undefined, label: string): [boolean, numbe
     timer.current = window.setInterval(() => {
       setRemaining((left) => {
         if (left <= 1) {
-          setShowing(false)
+          setShown(null)
 
           return 0
         }
@@ -347,21 +392,32 @@ function useReveal(recordId: string | undefined, label: string): [boolean, numbe
     }, 1000)
 
     return () => window.clearInterval(timer.current)
-  }, [showing])
+  }, [shown])
 
-  return [
-    showing,
-    remaining,
-    () => {
-      if (!showing && recordId) {
-        // Fire and forget: a trail that could block a reveal would stand between somebody and
-        // their own password.
-        void api.reportAccess(recordId, 'reveal', label).catch(() => {})
-      }
+  const toggle = () => {
+    if (shown) {
+      setShown(null)
+      return
+    }
 
-      setShowing(!showing)
-    },
-  ]
+    if (sealed(source)) {
+      fetchSecret(source, 'reveal')
+        .then(setShown)
+        .catch((cause) =>
+          toast('Não foi possível revelar', cause instanceof ApiError ? cause.message : 'Tente de novo.', 'error'),
+        )
+      return
+    }
+
+    if (source.recordId) {
+      // Not sealed only while a record is being drafted; kept for anything older that still is.
+      void api.reportAccess(source.recordId, 'reveal', label).catch(() => {})
+    }
+
+    setShown({ label, value: source.field.value, extra: source.field.extra ?? {} })
+  }
+
+  return [shown, remaining, toggle]
 }
 
 export function CopyButton({
@@ -371,7 +427,8 @@ export function CopyButton({
   report = true,
   seconds = CLIPBOARD_SECONDS,
 }: {
-  value: string
+  /** The value, or how to fetch it (a sealed secret): fetched inside the click, which the clipboard needs. */
+  value: string | (() => Promise<string>)
   label: string
   recordId?: string
   report?: boolean
@@ -393,7 +450,7 @@ export function CopyButton({
     <IconButton
       label={copied > 0 ? `A área de transferência é limpa em ${copied}s` : `Copiar (limpa em ${seconds}s)`}
       onClick={() => {
-        void copyForSeconds(value, seconds, () => setCopied(0))
+        void copyForSeconds(typeof value === 'string' ? value : value(), seconds, () => setCopied(0))
           .then(() => {
             // Reported once the copy happened: a trail that records copies that failed is a trail
             // nobody can trust.

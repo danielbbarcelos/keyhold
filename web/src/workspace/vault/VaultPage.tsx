@@ -35,6 +35,7 @@ import {
   type RecordPreview,
   type Status,
   type VaultSummary,
+  type Field,
 } from '../../api'
 import { COLOURS } from '../colours'
 import { emptyPayload } from '../fields'
@@ -463,8 +464,20 @@ export function VaultPage({
     setPreparing(true)
     try {
       const found = await api.openRecord(id)
+      // A clone is a new record, with nothing to keep a sealed secret from: its secrets are asked
+      // for (and noted in the trail) like any reveal, and go into the new record's draft.
+      const fields = await Promise.all(
+        found.record.payload.fields.map(async (field) => {
+          if (field.sealed === undefined) return field
+          const secret = await api.secret(id, field.sealed, 'reveal')
+          const plain: Field = { ...field, value: secret.value, extra: { ...(field.extra ?? {}), ...secret.extra } }
+          delete plain.sealed
+          delete plain.hint
+          return plain
+        }),
+      )
       startCreating(
-        { ...found.record.payload, title: `${found.record.payload.title} (cópia)` },
+        { ...found.record.payload, fields, title: `${found.record.payload.title} (cópia)` },
         found.record.folder_id,
         true,
       )
@@ -986,6 +999,7 @@ export function VaultPage({
           <div className="h-full min-h-0 overflow-auto">
             <RecordEdit
               draft={editing}
+              recordId={open.id}
               kind={open.kind}
               aws={aws}
               parameter={open.parameter}
@@ -1353,7 +1367,7 @@ function isPlainValue(payload: Payload): boolean {
     Object.keys(only.extra ?? {}).length === 0 &&
     !only.list &&
     !only.primary &&
-    only.value !== '' &&
+    (only.value !== '' || only.sealed !== undefined) &&
     !payload.icon &&
     (payload.alerts?.length ?? 0) === 0 &&
     payload.notes.trim() === ''

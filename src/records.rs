@@ -96,6 +96,11 @@ pub struct Field {
     /// Copied by the record's main button. Without one marked, the first secret is.
     #[serde(default, skip_serializing_if = "is_false")]
     pub primary: bool,
+    /// Only ever read from the interface, never written anywhere: "this secret is the one that was
+    /// at this position when the record was opened, unchanged". The page is not given secret values
+    /// (see [`sealed_json`]), so a save sends this instead and [`unseal`] puts the stored value back.
+    #[serde(default, skip_serializing)]
+    pub sealed: Option<usize>,
 }
 
 impl Field {
@@ -838,6 +843,112 @@ fn row_to_header(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecordHeader> {
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
     })
+}
+
+/// The parts of a composite field that are secret: a card's security code and PIN. The question of
+/// a security question, a card's holder and expiry are not.
+const SECRET_PARTS: [&str; 2] = ["code", "pin"];
+
+/// Whether a field holds anything secret worth sealing.
+fn has_secret(field: &Field) -> bool {
+    is_secret_kind(&field.kind)
+        && (!field.value.is_empty() || SECRET_PARTS.iter().any(|part| field.extra.get(*part).is_some_and(|v| !v.is_empty())))
+}
+
+/// A record as the interface may see it: every secret value replaced by where it was.
+///
+/// The page that draws a record never receives a password, a PIN, a 2FA seed, an answer or a card's
+/// number, code and PIN. A secret field arrives with an empty value and `"sealed": <its index>`
+/// (and, for a card, the last four digits as `"hint"`); the page asks for the value itself through
+/// a route that writes to the trail first. So "revealed" and "copied" in the trail are things the
+/// binary saw happen, not things the page chose to report.
+pub fn sealed_json(payload: &Payload) -> serde_json::Value {
+    let mut value = serde_json::to_value(payload).unwrap_or(serde_json::Value::Null);
+
+    if let Some(fields) = value.get_mut("fields").and_then(|f| f.as_array_mut()) {
+        for (index, (json, field)) in fields.iter_mut().zip(&payload.fields).enumerate() {
+            if !has_secret(field) {
+                continue;
+            }
+
+            let Some(object) = json.as_object_mut() else { continue };
+
+            object.insert("value".into(), serde_json::Value::String(String::new()));
+            object.insert("sealed".into(), serde_json::json!(index));
+
+            if field.kind == "card" {
+                let digits: String = field.value.chars().filter(|c| c.is_ascii_digit()).collect();
+                if digits.len() >= 4 {
+                    object.insert("hint".into(), serde_json::json!(digits[digits.len() - 4..]));
+                }
+            }
+
+            if let Some(extra) = object.get_mut("extra").and_then(|e| e.as_object_mut()) {
+                for part in SECRET_PARTS {
+                    extra.remove(part);
+                }
+            }
+        }
+    }
+
+    value
+}
+
+/// Put back the stored secrets of fields the interface sent still sealed.
+///
+/// A sealed field may have moved, been relabelled or changed kind in the editor, but it may only
+/// take its value from a secret field and only into a secret field: otherwise a password could be
+/// turned into a text field and read without anything ever being revealed.
+pub fn unseal(incoming: &mut Payload, stored: &Payload) -> Result<()> {
+    for field in &mut incoming.fields {
+        let Some(index) = field.sealed.take() else { continue };
+
+        let source = stored
+            .fields
+            .get(index)
+            .filter(|source| is_secret_kind(&source.kind))
+            .ok_or_else(|| anyhow!("um campo protegido não corresponde mais ao registro salvo; abra o registro de novo"))?;
+
+        if !is_secret_kind(&field.kind) {
+            bail!("um campo protegido só pode continuar como campo protegido; revele o valor antes de mudar o tipo");
+        }
+
+        field.value = source.value.clone();
+
+        for part in SECRET_PARTS {
+            match source.extra.get(part) {
+                Some(value) => field.extra.insert(part.to_string(), value.clone()),
+                None => field.extra.remove(part),
+            };
+        }
+    }
+
+    Ok(())
+}
+
+/// Refuse a payload that claims to keep a secret it has nothing to keep it from (a new record).
+pub fn refuse_seals(payload: &Payload) -> Result<()> {
+    if payload.fields.iter().any(|field| field.sealed.is_some()) {
+        bail!("um registro novo não pode ter campos protegidos sem valor");
+    }
+
+    Ok(())
+}
+
+/// The secret parts of one field: its value, and for a card its code and PIN.
+pub fn secret_of(payload: &Payload, index: usize) -> Result<serde_json::Value> {
+    let field = payload
+        .fields
+        .get(index)
+        .filter(|field| is_secret_kind(&field.kind))
+        .ok_or_else(|| anyhow!("o campo não é protegido"))?;
+
+    let extra: BTreeMap<&str, &String> = SECRET_PARTS
+        .iter()
+        .filter_map(|part| field.extra.get(*part).map(|value| (*part, value)))
+        .collect();
+
+    Ok(serde_json::json!({ "label": field.label, "value": field.value, "extra": extra }))
 }
 
 #[cfg(test)]

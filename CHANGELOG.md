@@ -16,6 +16,11 @@
 - **Opens on `keyhold.localhost`** when the system resolves it (and no `set-host` name exists), so
   the session cookie does not travel to other local servers on `127.0.0.1`.
 - Nothing prints an address with a credential any more. `keyhold --present` opens the window.
+- **The page never holds a secret it is not showing.** Opening a record sends its passwords, PINs,
+  2FA seeds, answers and card numbers sealed; revealing or copying one asks the binary, which reads
+  the record again (in AWS, a `GetParameter` of its own) and writes the trail line before handing
+  the value over. The editor keeps a sealed secret unchanged unless it is revealed for editing or
+  replaced, and cloning a record asks for its secrets the same way.
 
 ### Fixed
 

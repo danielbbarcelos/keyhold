@@ -74,17 +74,30 @@ async function overwrite(): Promise<void> {
 /**
  * Copy `value`, and clear it after `seconds`.
  *
+ * `value` may still be on its way: a secret is fetched from the binary when it is copied, never
+ * held by the page beforehand. Browsers only allow a clipboard write while the click that asked for
+ * it is still fresh (Safari, strictly within the click), so a value that is still on its way is
+ * handed over as a `ClipboardItem` holding the promise, which the browser accepts during the click
+ * and fills when the value arrives.
+ *
  * `onCleared` runs when the value is off the clipboard — because the deadline passed, or because
  * the person replaced it themselves.
  */
 export async function copyForSeconds(
-  value: string,
+  value: string | Promise<string>,
   seconds: number,
   onCleared: () => void,
 ): Promise<void> {
   settle(current)
 
-  await navigator.clipboard.writeText(value)
+  if (typeof value === 'string') {
+    await navigator.clipboard.writeText(value)
+  } else if (typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) {
+    const blob = value.then((text) => new Blob([text], { type: 'text/plain' }))
+    await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })])
+  } else {
+    await navigator.clipboard.writeText(await value)
+  }
 
   const onCopyElsewhere = () => settle(handoff)
 

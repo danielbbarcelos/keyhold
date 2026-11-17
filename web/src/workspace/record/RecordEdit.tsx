@@ -40,10 +40,12 @@ export function renameOf(draft: EditDraft, originalTitle: string): string | null
 }
 
 /** A field somebody already filled in, which switching template keeps. */
-const isFilled = (field: Field) => field.value.trim() !== '' || Object.values(field.extra ?? {}).some(Boolean)
+const isFilled = (field: Field) =>
+  field.sealed !== undefined || field.value.trim() !== '' || Object.values(field.extra ?? {}).some(Boolean)
 
 export function RecordEdit({
   draft,
+  recordId,
   kind,
   folders,
   onChange,
@@ -53,6 +55,8 @@ export function RecordEdit({
   creating,
 }: {
   draft: EditDraft
+  /** The record being edited, to fetch a sealed secret somebody wants to see or change. */
+  recordId?: string
   kind?: string
   aws?: boolean
   /** AWS: the parameter's name now. */
@@ -171,7 +175,12 @@ export function RecordEdit({
       </Card>
 
       <Card title="Campos" hint="Arraste para reordenar">
-        <FieldEditor framed={false} fields={draft.payload.fields} onChange={(fields) => setPayload({ fields })} />
+        <FieldEditor
+          framed={false}
+          recordId={recordId}
+          fields={draft.payload.fields}
+          onChange={(fields) => setPayload({ fields })}
+        />
       </Card>
 
       <Card title="Observação">
