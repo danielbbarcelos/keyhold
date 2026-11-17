@@ -346,6 +346,86 @@ async fn start_ssm(shared: Shared) -> String {
     format!("http://{address}")
 }
 
+// ── CloudWatch Logs and STS, for the audit trail ───────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum TrailMode {
+    #[default]
+    Up,
+    /// No `audit-write` policy: every call answers AccessDenied.
+    Denied,
+    /// CloudWatch is unreachable in all but name: every call answers 500.
+    Down,
+}
+
+#[derive(Default)]
+struct Trail {
+    mode: TrailMode,
+    /// Log groups that exist; `None` is every group.
+    groups: Option<Vec<String>>,
+    streams: std::collections::BTreeSet<(String, String)>,
+    /// (group, stream, message) in the order received.
+    events: Vec<(String, String, Value)>,
+}
+
+type SharedTrail = Arc<Mutex<Trail>>;
+
+async fn trail_endpoint(State(shared): State<SharedTrail>, request: Request) -> Response {
+    let target = request.headers().get("x-amz-target").and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
+    let body = axum::body::to_bytes(request.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8_lossy(&body).to_string();
+
+    if text.starts_with("Action=GetCallerIdentity") {
+        let xml = "<GetCallerIdentityResponse><GetCallerIdentityResult>\
+                   <Arn>arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_Leitura_0a1b/ana.souza</Arn>\
+                   <Account>123456789012</Account></GetCallerIdentityResult></GetCallerIdentityResponse>";
+        return (StatusCode::OK, xml).into_response();
+    }
+
+    let mut trail = shared.lock().unwrap();
+    let error = |code: &str| (StatusCode::BAD_REQUEST, axum::Json(json!({ "__type": code, "message": code }))).into_response();
+
+    match trail.mode {
+        TrailMode::Denied => return error("AccessDeniedException"),
+        TrailMode::Down => return (StatusCode::INTERNAL_SERVER_ERROR, "{}").into_response(),
+        TrailMode::Up => {}
+    }
+
+    let input: Value = serde_json::from_str(&text).unwrap_or_default();
+    let group = input["logGroupName"].as_str().unwrap_or_default().to_string();
+    let stream = input["logStreamName"].as_str().unwrap_or_default().to_string();
+
+    if trail.groups.as_ref().is_some_and(|groups| !groups.contains(&group)) {
+        return error("ResourceNotFoundException");
+    }
+
+    match target.as_str() {
+        "Logs_20140328.CreateLogStream" => {
+            trail.streams.insert((group, stream));
+            (StatusCode::OK, axum::Json(json!({}))).into_response()
+        }
+        "Logs_20140328.PutLogEvents" => {
+            if !trail.streams.contains(&(group.clone(), stream.clone())) {
+                return error("ResourceNotFoundException");
+            }
+            for event in input["logEvents"].as_array().cloned().unwrap_or_default() {
+                let message: Value = serde_json::from_str(event["message"].as_str().unwrap_or("{}")).unwrap_or_default();
+                trail.events.push((group.clone(), stream.clone(), message));
+            }
+            (StatusCode::OK, axum::Json(json!({}))).into_response()
+        }
+        other => error(&format!("Unexpected{other}")),
+    }
+}
+
+async fn start_trail(shared: SharedTrail) -> String {
+    let app = axum::Router::new().fallback(trail_endpoint).with_state(shared);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{address}")
+}
+
 // ── Keyhold, pointed at it ──────────────────────────────────────────────────────────────────────
 
 struct Harness {
@@ -353,6 +433,7 @@ struct Harness {
     token: String,
     vault: String,
     ssm: Shared,
+    trail: SharedTrail,
     state: Arc<AppState>,
     client: reqwest::Client,
     _dir: tempfile::TempDir,
@@ -496,12 +577,25 @@ async fn start_at(seed: impl FnOnce(&mut Ssm), bucket: Option<String>, s3: Optio
         aws: Default::default(),
         copies: Default::default(),
     });
-    state.aws.set_endpoints(Endpoints { ssm: Some(ssm_base), s3, ..Endpoints::default() });
+    let trail: SharedTrail = Arc::default();
+    let trail_base = start_trail(trail.clone()).await;
+    state.aws.set_endpoints(Endpoints {
+        ssm: Some(ssm_base),
+        s3,
+        logs: Some(trail_base.clone()),
+        sts: Some(trail_base),
+        ..Endpoints::default()
+    });
     state.aws.insert_credentials(
         &state.lock,
         "CONN",
         Credentials::new("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", None),
     );
+    // The bucket's tags, as if read: several tests script the S3 fake request by request, and a
+    // GetBucketTagging nobody wrote an answer for would take one of theirs.
+    state.aws.with(&state.lock, |inner| {
+        inner.bucket_settings.insert(vault.id.clone(), crate::aws::audit::BucketSettings::default())
+    });
 
     let app = router(state.clone());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -511,6 +605,7 @@ async fn start_at(seed: impl FnOnce(&mut Ssm), bucket: Option<String>, s3: Optio
         token: exposed,
         vault: vault.id,
         ssm: shared,
+        trail,
         state,
         client: reqwest::Client::new(),
         _dir: dir,
@@ -1508,6 +1603,8 @@ async fn removing_a_login_logs_it_out_of_identity_center() {
         portal: Some(sso.base.clone()),
         ssm: None,
         s3: None,
+        logs: None,
+        sts: None,
     });
 
     {
@@ -2391,4 +2488,120 @@ async fn a_role_that_cannot_describe_still_gets_titles_and_folder_labels_from_hi
     let again = h.get(&format!("/vaults/{}/records", h.vault)).await;
     assert!(again.body["records"].as_array().unwrap().iter().any(|r| r["title"] == "Topo"), "{}", again.body);
     assert_eq!(histories(&h), read + 1);
+}
+
+// ── the audit trail ────────────────────────────────────────────────────────────────────────────
+
+impl Harness {
+    fn events(&self) -> Vec<(String, String, Value)> {
+        self.trail.lock().unwrap().events.clone()
+    }
+
+    fn trail_mode(&self, mode: TrailMode) {
+        self.trail.lock().unwrap().mode = mode;
+    }
+}
+
+#[tokio::test]
+async fn a_reveal_lands_in_the_trail_of_its_boundary_under_the_persons_stream() {
+    let h = start(account, None, None).await;
+    let id = h.id("/app/prod/db");
+
+    assert_eq!(h.get(&format!("/records/{id}")).await.status, 200);
+    assert_eq!(h.secret(&id, 0).await, "hunter2");
+
+    let events = h.events();
+    let revealed = events.iter().find(|(_, _, m)| m["action"] == "field.revealed").expect("a reveal event");
+    assert_eq!(revealed.0, "/keyhold/audit/app", "the first segment is the boundary");
+    assert_eq!(revealed.1, "ana.souza", "the stream is the Identity Center user");
+    assert_eq!(revealed.2["record"], id.as_str());
+    assert_eq!(revealed.2["parameter"], "/app/prod/db");
+    assert!(!revealed.2.to_string().contains("hunter2"), "an event never carries a value");
+
+    // Opening the record is in the trail too, without having waited for it.
+    assert!(events.iter().any(|(_, _, m)| m["action"] == "record.viewed" && m["record"] == id.as_str()));
+}
+
+#[tokio::test]
+async fn without_the_trail_a_reveal_waits_and_viewing_does_not() {
+    let h = start(account, None, None).await;
+    let id = h.id("/app/prod/db");
+    h.trail_mode(TrailMode::Down);
+
+    let opened = h.get(&format!("/records/{id}")).await;
+    assert_eq!(opened.status, 200, "viewing does not wait on CloudWatch: {}", opened.body);
+
+    let refused = h.post(&format!("/records/{id}/secret"), json!({ "index": 0, "intent": "copy" })).await;
+    assert_eq!(refused.status, 503, "{}", refused.body);
+    assert_eq!(refused.body["aws"], "audit_unavailable");
+    assert!(!refused.body.to_string().contains("hunter2"));
+
+    let deleted = h.post(&format!("/records/{id}/archive"), json!({ "on": true })).await;
+    assert_ne!(deleted.status, 200, "a delete does not happen without its event either");
+    assert!(h.parameter("/app/prod/db").is_some());
+
+    // Back up: what was queued goes out with the next event.
+    h.trail_mode(TrailMode::Up);
+    assert_eq!(h.secret(&id, 0).await, "hunter2");
+    assert!(h.events().iter().any(|(_, _, m)| m["action"] == "record.viewed"), "the queued view was sent");
+}
+
+#[tokio::test]
+async fn an_account_without_a_trail_is_said_so_and_works_unless_the_bucket_requires_one() {
+    let h = start(account, None, None).await;
+    let id = h.id("/app/prod/db");
+    h.trail_mode(TrailMode::Denied);
+
+    let listed = h.get(&format!("/vaults/{}/records", h.vault)).await;
+    let groups = listed.body["audit"]["groups"].as_array().unwrap().clone();
+    let app = groups.iter().find(|g| g["group"] == "/keyhold/audit/app").expect("the app boundary");
+    assert_eq!(app["state"], "off");
+    assert!(app["reason"].as_str().unwrap().contains("audit-write"), "{app}");
+
+    assert_eq!(h.secret(&id, 0).await, "hunter2", "no trail set up is not a reason to refuse");
+
+    // The administrator says the trail is required: now it is.
+    h.state.aws.with(&h.state.lock, |inner| {
+        inner.bucket_settings.insert(h.vault.clone(), crate::aws::audit::BucketSettings { required: true, ..Default::default() });
+    });
+    let refused = h.post(&format!("/records/{id}/secret"), json!({ "index": 0, "intent": "reveal" })).await;
+    assert_eq!(refused.status, 403, "{}", refused.body);
+    assert_eq!(refused.body["aws"], "audit_required");
+}
+
+#[tokio::test]
+async fn a_missing_log_group_is_off_for_that_boundary_only() {
+    let h = start(account, None, None).await;
+    h.trail.lock().unwrap().groups = Some(vec!["/keyhold/audit/app".into()]);
+
+    let listed = h.get(&format!("/vaults/{}/records", h.vault)).await;
+    let groups = listed.body["audit"]["groups"].as_array().unwrap().clone();
+    let state_of = |name: &str| groups.iter().find(|g| g["group"] == name).map(|g| g["state"].clone());
+
+    assert_eq!(state_of("/keyhold/audit/app"), Some(json!("on")));
+    assert_eq!(state_of("/keyhold/audit/config"), Some(json!("off")));
+    assert!(h.events().iter().any(|(g, _, m)| g == "/keyhold/audit/app" && m["action"] == "session.opened"));
+}
+
+#[tokio::test]
+async fn moving_and_saving_say_what_changed_and_never_what_it_was() {
+    let h = start(account, None, None).await;
+    let id = h.id("/app/prod/api");
+
+    let saved = h.put(&format!("/records/{id}"), save_body(1, json!([
+        { "label": "Usuário", "kind": "text", "value": "deploy", "list": true },
+        { "label": "Senha", "kind": "password", "value": "outra-senha" }
+    ]))).await;
+    assert_eq!(saved.status, 200, "{}", saved.body);
+
+    let updated = h.events().into_iter().find(|(_, _, m)| m["action"] == "record.updated").expect("an update event");
+    let changed = updated.2["fields"].as_array().unwrap().clone();
+    assert!(changed.contains(&json!("Senha")) && !changed.contains(&json!("Usuário")), "{changed:?}");
+    assert!(!updated.2.to_string().contains("outra-senha") && !updated.2.to_string().contains("s3nha"));
+
+    let moved = h.post(&format!("/records/{id}/move"), json!({ "folder_id": h.folder("/app/dev") })).await;
+    assert_eq!(moved.status, 200, "{}", moved.body);
+    let event = h.events().into_iter().find(|(_, _, m)| m["action"] == "record.moved").expect("a move event");
+    assert_eq!(event.2["from"], "/app/prod/api");
+    assert_eq!(event.2["to"], "/app/dev/api");
 }

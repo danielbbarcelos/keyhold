@@ -31,7 +31,7 @@ use std::sync::{Arc, Mutex};
 use super::config::Login;
 use super::{
     now_unix, AwsError, AwsResult, Credentials, DeviceLogin, Parameter, ParameterMetadata,
-    S3Client, SsmClient, SsoClient, SsoToken, Tag,
+    LogsClient, S3Client, SsmClient, SsoClient, SsoToken, StsClient, Tag,
 };
 use crate::lock::Lock;
 
@@ -74,6 +74,8 @@ pub struct Endpoints {
     pub portal: Option<String>,
     pub ssm: Option<String>,
     pub s3: Option<String>,
+    pub logs: Option<String>,
+    pub sts: Option<String>,
 }
 
 #[derive(Default)]
@@ -94,6 +96,15 @@ pub struct Inner {
     /// long as the parameter is at the version it was read at, so it is checked against the
     /// listing rather than against a clock.
     pub history_metadata: HashMap<String, ParameterMetadata>,
+    /// Who each connection's credentials belong to (the role session's name), by connection id:
+    /// the name of that person's audit stream.
+    pub callers: HashMap<String, String>,
+    /// What writing to each audit log group came to, by `<connection id>|<log group>`.
+    pub audit: HashMap<String, super::audit::Status>,
+    /// The administrator's settings on each vault's bucket, by vault id.
+    pub bucket_settings: HashMap<String, super::audit::BucketSettings>,
+    /// Events that do not have to land before the action (viewing, saving), waiting to be sent.
+    pub audit_queue: Vec<super::audit::Queued>,
 }
 
 impl Inner {
@@ -211,6 +222,26 @@ impl AwsState {
     pub fn ssm(&self, region: &str, credentials: Credentials) -> AwsResult<SsmClient> {
         let endpoint = self.endpoints.lock().unwrap().ssm.clone();
         let client = SsmClient::new(region, credentials)?;
+
+        Ok(match endpoint {
+            Some(endpoint) => client.with_endpoint(&endpoint),
+            None => client,
+        })
+    }
+
+    pub fn logs(&self, region: &str, credentials: Credentials) -> AwsResult<LogsClient> {
+        let endpoint = self.endpoints.lock().unwrap().logs.clone();
+        let client = LogsClient::new(region, credentials)?;
+
+        Ok(match endpoint {
+            Some(endpoint) => client.with_endpoint(&endpoint),
+            None => client,
+        })
+    }
+
+    pub fn sts(&self, region: &str, credentials: Credentials) -> AwsResult<StsClient> {
+        let endpoint = self.endpoints.lock().unwrap().sts.clone();
+        let client = StsClient::new(region, credentials)?;
 
         Ok(match endpoint {
             Some(endpoint) => client.with_endpoint(&endpoint),

@@ -21,6 +21,12 @@
   the record again (in AWS, a `GetParameter` of its own) and writes the trail line before handing
   the value over. The editor keeps a sealed secret unchanged unless it is revealed for editing or
   replaced, and cloning a record asks for its secrets the same way.
+- **An AWS vault keeps an audit trail in its own account.** Every action on an AWS record goes to
+  CloudWatch Logs, `/keyhold/audit/<first segment>`, in a stream named after the person (see
+  `docs/AWS.md`). Revealing, copying, moving, deleting, downloading an attachment and copying to
+  another vault wait for their event and do not happen when CloudWatch cannot be reached; viewing
+  and saving queue theirs. An account without a trail is reported per boundary when a vault is
+  listed, and the bucket tag `keyhold:audit=required` makes the trail mandatory.
 
 ### Fixed
 

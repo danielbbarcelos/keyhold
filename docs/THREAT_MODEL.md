@@ -253,6 +253,19 @@ What that exception rests on, and what it does not claim:
   compiled-in roots, with redirects off (a signed request is never replayed to another host), with
   any system proxy ignored, and HTTPS only: the endpoint overrides the tests use do not exist in a
   release build.
+- **The audit trail is the account's, and only as good as the account makes it.** Keyhold writes
+  each action on an AWS record (viewed, revealed, copied, created, edited, moved, deleted, attachment
+  downloaded, copied to another vault) to CloudWatch Logs in the same account: one log group per
+  permission boundary (the first segment of the parameter's name), one stream per person, named by
+  `GetCallerIdentity`'s role session. The person and the time a reader is shown are the stream's
+  name and CloudWatch's ingestion time, because an event's body is written by the client and the
+  policy, not the client, pins the stream to the person. Events name records and fields, never a
+  value, and carry no IP address: CloudTrail has the real one. A sensitive action writes its event
+  first and does not happen when CloudWatch cannot be reached; when the account has no trail (no
+  permission, no log group) Keyhold says so and goes on, unless the bucket is tagged
+  `keyhold:audit=required`. What the trail cannot see is anybody who uses the console or the CLI:
+  for that, CloudTrail. The two new destinations, `logs.<region>` and `sts.<region>`, are AWS's own
+  endpoints for the vault's region, signed like the rest.
 - **The agent surface reaches an AWS vault only when it is switched on for agents**, with the same
   approval and trail as a local one. Titles and names in a shared account are written by whoever
   can write parameters there: an assistant is told to treat them as data, and a person should read
