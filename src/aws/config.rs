@@ -64,6 +64,33 @@ pub struct AwsConfig {
     /// kept here rather than in a tag everybody with access to the account would see.
     #[serde(default)]
     pub favourites: Vec<String>,
+    /// Links shared from AWS vaults, while they can still be opened: to show "1 link ativo" on the
+    /// record, revoke them, and turn what the recipient's page left in the bucket into trail
+    /// events. Sealed with the rest (the recipient's address is personal data).
+    #[serde(default)]
+    pub shares: Vec<SharedLink>,
+}
+
+/// One link shared from an AWS vault.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct SharedLink {
+    pub id: String,
+    pub vault_id: String,
+    pub record_id: String,
+    pub bucket: String,
+    /// `<segment>/.keyhold/shares/<id>/`
+    pub prefix: String,
+    pub created_at: u64,
+    pub expires_at: u64,
+    pub first_access: bool,
+    pub password: bool,
+    #[serde(default)]
+    pub recipient: Option<String>,
+    /// The objects written, with their versions, to delete for good on revocation.
+    pub objects: Vec<(String, Option<String>)>,
+    /// Markers already turned into trail events.
+    #[serde(default)]
+    pub seen: Vec<String>,
 }
 
 impl AwsConfig {
