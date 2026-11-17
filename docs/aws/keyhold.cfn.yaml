@@ -1,0 +1,236 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Keyhold reference infrastructure for one AWS account and region: the attachments bucket (private,
+  SSE-KMS, versioned, lifecycle for shared links), its access log bucket, and the audit log groups.
+  Parameter Store needs nothing created: Keyhold writes SecureString parameters under the paths your
+  IAM policies allow. See docs/AWS.md.
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Attachments bucket. Keyhold suggests keyhold-<vault name>; it never creates one.
+    AllowedPattern: "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+  PrimarySegment:
+    Type: String
+    Description: >-
+      First segment of the parameter paths your people use, without slashes (for /team/db/main it
+      is "team"). Each segment is one permission boundary with its own audit log group.
+    Default: team
+    AllowedPattern: "^[A-Za-z0-9_.-]+$"
+  SecondarySegment:
+    Type: String
+    Description: Optional second boundary (for example "admins"). Leave empty for one.
+    Default: ""
+    AllowedPattern: "^[A-Za-z0-9_.-]*$"
+  AuditRetentionDays:
+    Type: Number
+    Description: How long CloudWatch Logs keeps the audit trail.
+    Default: 365
+    AllowedValues: [30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653]
+  AccessLogRetentionDays:
+    Type: Number
+    Description: How long the S3 access logs (investigation of shared links) are kept.
+    Default: 365
+    MinValue: 1
+
+Conditions:
+  HasSecondary: !Not [!Equals [!Ref SecondarySegment, ""]]
+
+Resources:
+  # ── attachments and shared links ────────────────────────────────────────────────────────────────
+
+  Bucket:
+    Type: AWS::S3::Bucket
+    # The log bucket must accept the logging service before access logging is switched on.
+    DependsOn: AccessLogBucketPolicy
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+            BucketKeyEnabled: true
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref AccessLogBucket
+        LogFilePrefix: !Sub "${BucketName}/"
+      LifecycleConfiguration:
+        Rules:
+          - Id: abort-incomplete-multipart-uploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+          # A deleted or overwritten attachment stays recoverable for 30 days.
+          - Id: old-versions-30-days
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+            ExpiredObjectDeleteMarker: true
+          # Shared links: the page, the ciphertext and the markers. Keyhold deletes them on first
+          # access or revocation; this is the safety net. Lifecycle filters are literal prefixes, so
+          # there is one rule per segment. S3 can take up to about 48 hours to apply a rule.
+          - Id: shares-primary
+            Status: Enabled
+            Prefix: !Sub "${PrimarySegment}/.keyhold/shares/"
+            ExpirationInDays: 3
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 1
+          - !If
+            - HasSecondary
+            - Id: shares-secondary
+              Status: Enabled
+              Prefix: !Sub "${SecondarySegment}/.keyhold/shares/"
+              ExpirationInDays: 3
+              NoncurrentVersionExpiration:
+                NoncurrentDays: 1
+            - !Ref AWS::NoValue
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt Bucket.Arn
+              - !Sub "${Bucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          # No signed request older than 12 hours, which is also the longest link the S3 console
+          # makes, so the console keeps working. Presigned links are not denied elsewhere: whoever
+          # can read an attachment can download and pass it on anyway.
+          - Sid: DenyOldSignatures
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt Bucket.Arn
+              - !Sub "${Bucket.Arn}/*"
+            Condition:
+              NumericGreaterThan:
+                s3:signatureAge: 43200000
+          # The bucket never becomes a CDN origin, not even by a configuration mistake.
+          - Sid: DenyCloudFront
+            Effect: Deny
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: "s3:*"
+            Resource:
+              - !GetAtt Bucket.Arn
+              - !Sub "${Bucket.Arn}/*"
+
+  AccessLogBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${BucketName}-access-logs"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-access-logs
+            Status: Enabled
+            ExpirationInDays: !Ref AccessLogRetentionDays
+
+  AccessLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AccessLogBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3ServerAccessLogs
+            Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "${AccessLogBucket.Arn}/*"
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:s3:::${BucketName}"
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt AccessLogBucket.Arn
+              - !Sub "${AccessLogBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  # ── audit trail ─────────────────────────────────────────────────────────────────────────────────
+  # One log group per permission boundary, because CloudWatch Logs grants reading per log group,
+  # never per stream. Inside each, one stream per person, named by the policy (see docs/AWS.md).
+
+  AuditPrimary:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub "/keyhold/audit/${PrimarySegment}"
+      RetentionInDays: !Ref AuditRetentionDays
+
+  AuditSecondary:
+    Type: AWS::Logs::LogGroup
+    Condition: HasSecondary
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub "/keyhold/audit/${SecondarySegment}"
+      RetentionInDays: !Ref AuditRetentionDays
+
+  # Parameters directly at the root of the account ("/db" rather than "/team/db"). "#" cannot appear
+  # in a parameter name, so this never collides with a segment.
+  AuditRoot:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: "/keyhold/audit/#root"
+      RetentionInDays: !Ref AuditRetentionDays
+
+Outputs:
+  BucketName:
+    Description: Give this to Keyhold when creating the AWS vault.
+    Value: !Ref Bucket
+  AccessLogBucketName:
+    Description: Where S3 records every request to the bucket, for investigating a shared link.
+    Value: !Ref AccessLogBucket
+  AuditPrimaryLogGroup:
+    Value: !Ref AuditPrimary
+  AuditSecondaryLogGroup:
+    Condition: HasSecondary
+    Value: !Ref AuditSecondary
+  AuditRootLogGroup:
+    Value: !Ref AuditRoot

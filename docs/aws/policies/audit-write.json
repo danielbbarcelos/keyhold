@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "WriteOwnAuditStream",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:REGION:ACCOUNT_ID:log-group:/keyhold/audit/SEGMENT:log-stream:${aws:PrincipalTag/keyhold-user}"
+    }
+  ]
+}
