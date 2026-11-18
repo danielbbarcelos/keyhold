@@ -172,8 +172,11 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
   }
 
   return (
-    <div className="kh-wide grid min-h-0 flex-1 grid-cols-[232px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6 max-xl:grid-cols-[200px_minmax(0,1fr)]">
-      <nav aria-label={t('Seções dos ajustes')} className="h-fit space-y-0.5 rounded-[14px] border bg-card p-2.5">
+    // One scroll for the whole page, so the footer ends both columns; the section list stays put.
+    <div ref={page} className="kh-wide min-h-0 flex-1 overflow-y-auto">
+      <div className="flex min-h-full flex-col p-6">
+    <div className="grid flex-1 grid-cols-[232px_minmax(0,1fr)] items-start gap-5 max-xl:grid-cols-[200px_minmax(0,1fr)]">
+      <nav aria-label={t('Seções dos ajustes')} className="sticky top-0 h-fit space-y-0.5 rounded-[14px] border bg-card p-2.5">
         {SECTIONS.map(({ id, label, icon: Icon }) => (
           <TabMenu key={id} to={{ place: 'settings', section: id }}>
           <button
@@ -193,17 +196,15 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
         ))}
       </nav>
 
-      <div ref={page} className="min-h-0 overflow-y-auto">
-        <div className="flex min-h-full flex-col">
-        <div className={cn('flex-1 pb-8', FLAT)}>
+      <div className={cn('min-w-0 pb-8', FLAT)}>
           {SECTIONS.filter(({ id }) => opened.has(id)).map(({ id }) => (
             <section key={id} hidden={id !== active}>
               {sections[id]}
             </section>
           ))}
-        </div>
+      </div>
+    </div>
         <PageFooter />
-        </div>
       </div>
     </div>
   )
