@@ -94,8 +94,11 @@ export function Customise({
   }, [request])
 
   return (
-    <div className="kh-wide grid min-h-0 flex-1 grid-cols-[232px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6 max-xl:grid-cols-[200px_minmax(0,1fr)]">
-      <nav aria-label={t('Seções da personalização')} className="h-fit space-y-0.5 rounded-[14px] border bg-card p-2.5">
+    // One scroll for the whole page, so the footer ends both columns; the section list stays put.
+    <div ref={page} className="kh-wide min-h-0 flex-1 overflow-y-auto">
+      <div className="flex min-h-full flex-col p-6">
+    <div className="grid flex-1 grid-cols-[232px_minmax(0,1fr)] items-start gap-5 max-xl:grid-cols-[200px_minmax(0,1fr)]">
+      <nav aria-label={t('Seções da personalização')} className="sticky top-0 h-fit space-y-0.5 rounded-[14px] border bg-card p-2.5">
         {SECTIONS.map(({ id, label, icon: Icon }) => (
           <TabMenu key={id} to={{ place: 'custom', section: id }}>
             <button
@@ -115,16 +118,14 @@ export function Customise({
         ))}
       </nav>
 
-      <div ref={page} className="min-h-0 overflow-y-auto">
-        <div className="flex min-h-full flex-col">
-        <div className={cn('flex-1 pb-8', FLAT)}>
+      <div className={cn('min-w-0 pb-8', FLAT)}>
           {active === 'aparencia' && <AppearanceSettings appearance={status.appearance} onChanged={onChanged} />}
           {active === 'tipos' && <RecordTypes />}
           {active === 'icones' && <IconLibrary />}
           {active === 'alertas' && <AlertPresetsPanel />}
-        </div>
+      </div>
+    </div>
         <PageFooter />
-        </div>
       </div>
     </div>
   )
