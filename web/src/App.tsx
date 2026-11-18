@@ -1,3 +1,4 @@
+import { setAbout } from '@/i18n/Language'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { TooltipProvider } from '@/components/ui/tooltip'
 
@@ -28,6 +29,7 @@ import { fromTag, getLang, setLang, t, useLang } from './i18n'
  */
 export function App() {
   const { status, offline, refresh } = useStatus()
+  if (status) setAbout({ version: status.version, homepage: status.homepage })
 
   // The whole tree re-renders when the language changes: this component subscribes, and nothing
   // below it is wrapped in React.memo, so every child renders again and every t() is read anew.
@@ -95,7 +97,7 @@ export function App() {
     }
 
     if (!status.identity.initialised) {
-      return <Setup version={status.version} homepage={status.homepage} onDone={refresh} />
+      return <Setup onDone={refresh} />
     }
 
     if (!status.lock.unlocked) {

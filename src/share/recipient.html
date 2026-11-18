@@ -41,7 +41,7 @@
   .icon svg { width: 16px; height: 16px; }
   .after { margin: 12px 0 0; color: var(--muted); font-size: 13px; }
   main > footer { margin-top: 20px; color: var(--faint); font-size: 12px; text-align: center; }
-  .page-foot { margin-top: 24px; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--faint); font-size: 12px; }
+  .page-foot { margin-top: 24px; width: 100%; max-width: 28rem; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; color: var(--faint); font-size: 12px; }
   .page-foot p { margin: 0; }
   .page-foot a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
   .page-foot a:hover { color: var(--fg); }
@@ -87,11 +87,11 @@
   <footer data-t="local">Os campos são decifrados aqui, no seu navegador.</footer>
 </main>
 <div class="page-foot">
+  <p><span data-t="with">Compartilhado com o</span> <a href="https://github.com/danielbbarcelos/keyhold" target="_blank" rel="noopener noreferrer">Keyhold</a></p>
   <div class="lang" id="lang" role="group" aria-label="Idioma">
     <button type="button" data-lang="pt-BR" lang="pt-BR" title="Português (Brasil)">PT</button>
     <button type="button" data-lang="en" lang="en" title="English (US)">EN</button>
   </div>
-  <p><span data-t="with">Compartilhado com o</span> <a href="https://github.com/danielbbarcelos/keyhold" target="_blank" rel="noopener noreferrer">Keyhold</a></p>
 </div>
 <script>
 (function () {

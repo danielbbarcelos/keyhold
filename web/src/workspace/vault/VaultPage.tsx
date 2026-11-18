@@ -1,3 +1,4 @@
+import { PageFooter } from '@/i18n/Language'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Copy,
@@ -1063,7 +1064,7 @@ export function VaultPage({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {bar}
-      <div className="kh-wide grid min-h-0 flex-1 grid-cols-[var(--kh-tree,300px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 p-6">
+      <div className="kh-wide grid min-h-0 flex-1 grid-cols-[var(--kh-tree,300px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-5 px-6 pt-6">
         <div className="relative grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
         {loaded && unavailable ? (
           <aside className="grid min-h-0 place-items-center rounded-[14px] border bg-card p-6 text-center text-[13px] text-faint">
@@ -1120,6 +1121,8 @@ export function VaultPage({
         </div>
         <div className="min-h-0 min-w-0">{main()}</div>
       </div>
+      {/* Two columns scroll on their own here, so the page's end is the window's. */}
+      <PageFooter className="kh-wide shrink-0 px-6 pt-4 pb-4" />
 
       {renewDialog}
 

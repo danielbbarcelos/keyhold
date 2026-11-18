@@ -140,7 +140,7 @@ export function Unlock({ status, onUnlocked }: { status: Status; onUnlocked: () 
         )}
       </form>
       </div>
-      <PageFooter version={status.version} homepage={status.homepage} />
+      <PageFooter className="w-full max-w-5xl" />
     </main>
   )
 }

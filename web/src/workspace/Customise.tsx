@@ -1,4 +1,4 @@
-import { LanguageSettings } from './LanguageSettings'
+import { PageFooter } from '@/i18n/Language'
 import { useEffect, useRef, useState } from 'react'
 import {
   ArrowDown,
@@ -13,7 +13,6 @@ import {
   Search,
   ShieldAlert,
   Trash2,
-  Languages,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -52,7 +51,6 @@ import { toast, toastError } from './toast'
  */
 const sections = (): Array<{ id: string; label: string; icon: LucideIcon }> => [
   { id: 'aparencia', label: t('Aparência'), icon: Palette },
-  { id: 'idioma', label: t('Idioma'), icon: Languages },
   { id: 'tipos', label: t('Tipos de registro'), icon: LayoutList },
   { id: 'icones', label: t('Ícones'), icon: Images },
   { id: 'alertas', label: t('Alertas padrão'), icon: ShieldAlert },
@@ -118,12 +116,14 @@ export function Customise({
       </nav>
 
       <div ref={page} className="min-h-0 overflow-y-auto">
-        <div className={cn('pb-24', FLAT)}>
+        <div className="flex min-h-full flex-col">
+        <div className={cn('flex-1 pb-8', FLAT)}>
           {active === 'aparencia' && <AppearanceSettings appearance={status.appearance} onChanged={onChanged} />}
-          {active === 'idioma' && <LanguageSettings onChanged={onChanged} />}
           {active === 'tipos' && <RecordTypes />}
           {active === 'icones' && <IconLibrary />}
           {active === 'alertas' && <AlertPresetsPanel />}
+        </div>
+        <PageFooter />
         </div>
       </div>
     </div>

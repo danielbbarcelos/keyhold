@@ -4,6 +4,11 @@
 
 ### Changed
 
+- **A footer on every page.** Keyhold's version and the link to its code on the left, the
+  language on the right: on the first screens, the lock screen, every page of an open Keyhold and the
+  page of a shared link. It sits after the content, at the end of the scroll, and a short page still
+  has it at the bottom of the window. The language is chosen there, so Personalizar no longer has an
+  Idioma section.
 - **Revealing or copying a secret shows it is working.** In an AWS vault each reveal and copy is a
   fresh read and a trail event, so it can take a moment: the icon clicked turns into a spinner and
   holds still until the answer arrives, so a second click does not send a second request. After 10
