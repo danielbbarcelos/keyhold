@@ -99,7 +99,7 @@ export function PageFooter({ className }: { className?: string }) {
   const [before, after] = t('Keyhold {version} · código aberto no {link}', { version: about.version ?? '' }).split('{link}')
 
   return (
-    <footer className={cn('mt-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pt-8 text-xs text-faint', className)}>
+    <footer className={cn('mt-auto flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t pt-3 text-xs text-faint', className)}>
       <p>
         {before}
         {about.homepage ? (
