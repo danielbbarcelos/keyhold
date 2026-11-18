@@ -1,3 +1,4 @@
+import { PageFooter } from '@/i18n/Language'
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowLeftRight,
@@ -193,12 +194,15 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
       </nav>
 
       <div ref={page} className="min-h-0 overflow-y-auto">
-        <div className={cn('pb-24', FLAT)}>
+        <div className="flex min-h-full flex-col">
+        <div className={cn('flex-1 pb-8', FLAT)}>
           {SECTIONS.filter(({ id }) => opened.has(id)).map(({ id }) => (
             <section key={id} hidden={id !== active}>
               {sections[id]}
             </section>
           ))}
+        </div>
+        <PageFooter />
         </div>
       </div>
     </div>

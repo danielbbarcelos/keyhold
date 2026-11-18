@@ -82,17 +82,28 @@ export function LanguageToggle({ onChanged }: { onChanged?: () => void }) {
   )
 }
 
-/** The foot of the screens before the vault opens: the language, the version, where the code is. */
-export function PageFooter({ version, homepage, onChanged }: { version?: string; homepage?: string; onChanged?: () => void }) {
-  const [before, after] = t('Keyhold {version} · código aberto no {link}', { version: version ?? '' }).split('{link}')
+/** What the footer says about Keyhold, from /api/status (the interface carries no address of its own). */
+let about: { version?: string; homepage?: string } = {}
+
+/** Called by the app whenever the status arrives, so every footer has the version and the link. */
+export function setAbout(next: { version?: string; homepage?: string }): void {
+  about = next
+}
+
+/**
+ * The foot of every page: Keyhold on the left, the language on the right. It sits after the
+ * content, at the end of the scroll; a page with little content still has it at the bottom of the
+ * window, because the column it ends is at least as tall as the window.
+ */
+export function PageFooter({ className }: { className?: string }) {
+  const [before, after] = t('Keyhold {version} · código aberto no {link}', { version: about.version ?? '' }).split('{link}')
 
   return (
-    <footer className="mt-auto flex flex-col items-center gap-2 pt-6 text-xs text-faint">
-      <LanguageToggle onChanged={onChanged} />
+    <footer className={cn('mt-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pt-8 text-xs text-faint', className)}>
       <p>
         {before}
-        {homepage ? (
-          <a href={homepage} target="_blank" rel="noopener noreferrer" className="text-link hover:underline">
+        {about.homepage ? (
+          <a href={about.homepage} target="_blank" rel="noopener noreferrer" className="text-link hover:underline">
             GitHub
           </a>
         ) : (
@@ -100,6 +111,7 @@ export function PageFooter({ version, homepage, onChanged }: { version?: string;
         )}
         {after}
       </p>
+      <LanguageToggle />
     </footer>
   )
 }

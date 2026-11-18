@@ -1,3 +1,4 @@
+import { PageFooter } from '@/i18n/Language'
 import { useCallback, useEffect, useState } from 'react'
 import {
   Check,
@@ -539,7 +540,15 @@ export function VaultSwitcher({
 
 /** A page's body: the same padding everywhere, scrolling inside. */
 export function Body({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn('kh-wide min-h-0 flex-1 overflow-auto p-6', className)}>{children}</div>
+  return (
+    <div className="kh-wide min-h-0 flex-1 overflow-auto">
+      {/* At least as tall as the window, so a short page still has its footer at the bottom. */}
+      <div className="flex min-h-full flex-col p-6">
+        <div className={cn('min-h-0 flex-1', className)}>{children}</div>
+        <PageFooter />
+      </div>
+    </div>
+  )
 }
 
 /** A card: the one container every screen is made of. */
