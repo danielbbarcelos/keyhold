@@ -1122,7 +1122,9 @@ export function VaultPage({
         <div className="min-h-0 min-w-0">{main()}</div>
       </div>
       {/* Two columns scroll on their own here, so the page's end is the window's. */}
-      <PageFooter className="kh-wide shrink-0 px-6 pt-4 pb-4" />
+      <div className="kh-wide shrink-0 px-6 pt-6 pb-3">
+        <PageFooter />
+      </div>
 
       {renewDialog}
 

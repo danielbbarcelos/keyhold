@@ -543,8 +543,8 @@ export function Body({ children, className }: { children: React.ReactNode; class
   return (
     <div className="kh-wide min-h-0 flex-1 overflow-auto">
       {/* At least as tall as the window, so a short page still has its footer at the bottom. */}
-      <div className="flex min-h-full flex-col p-6">
-        <div className={cn('min-h-0 flex-1', className)}>{children}</div>
+      <div className="flex min-h-full flex-col px-6 pt-6 pb-3">
+        <div className={cn('min-h-0 flex-1 pb-6', className)}>{children}</div>
         <PageFooter />
       </div>
     </div>
