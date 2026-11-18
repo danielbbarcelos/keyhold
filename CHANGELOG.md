@@ -2,6 +2,13 @@
 
 ## 1.1.1 (unreleased)
 
+### Changed
+
+- **Revealing or copying a secret shows it is working.** In an AWS vault each reveal and copy is a
+  fresh read and a trail event, so it can take a moment: the icon clicked turns into a spinner and
+  holds still until the answer arrives, so a second click does not send a second request. After 10
+  seconds without an answer the request is dropped and a toast says the connection is slow.
+
 ## 1.1.0
 
 A one-time code instead of a token in the address, sealed secrets, an audit trail and shared links

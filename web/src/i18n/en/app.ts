@@ -93,4 +93,5 @@ export const APP: Record<string, string> = {
     "Applies to this Keyhold, to every vault and to Keyhold's messages. The page a shared link opens follows the language of the browser that opens it.",
   'Vale imediatamente. Nomes de registros, pastas e campos continuam como estão.':
     'Changes right away. Item, folder and field names stay as they are.',
+  'A conexão está lenta: nenhuma resposta em {n} segundos. Tente de novo.': 'The connection is slow: no answer in {n} seconds. Try again.',
 }

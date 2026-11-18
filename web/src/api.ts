@@ -1,4 +1,4 @@
-import { locale } from './i18n'
+import { locale, t } from './i18n'
 import { authHeaders, disown } from './session'
 
 /**
@@ -295,17 +295,42 @@ function sentence(text: string): string {
   return /[.!?…:]$/.test(capital) ? capital : `${capital}.`
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const response = await fetch(path, {
-    method,
-    credentials: 'same-origin',
-    headers: {
-      Accept: 'application/json',
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      ...authHeaders(),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+/**
+ * The request was given up after `timeoutMs` without an answer. An `ApiError` (status 0), so every
+ * place that shows `cause.message` says the connection is slow without knowing about timeouts.
+ */
+export class SlowError extends ApiError {
+  constructor(readonly seconds: number) {
+    super(0, t('A conexão está lenta: nenhuma resposta em {n} segundos. Tente de novo.', { n: seconds }))
+  }
+}
+
+/** How long a reveal or a copy waits: in an AWS vault each one is a fresh read and a trail event. */
+export const SECRET_TIMEOUT_MS = 10_000
+
+async function call<T>(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<T> {
+  const abort = timeoutMs ? new AbortController() : null
+  const timer = abort ? window.setTimeout(() => abort.abort(), timeoutMs) : 0
+
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...authHeaders(),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: abort?.signal,
+    })
+  } catch (cause) {
+    if (abort?.signal.aborted) throw new SlowError(Math.round((timeoutMs ?? 0) / 1000))
+    throw cause
+  } finally {
+    window.clearTimeout(timer)
+  }
 
   const text = await response.text()
   const payload = text ? JSON.parse(text) : {}
@@ -898,7 +923,7 @@ export const api = {
    */
   /** One secret field, read again by the binary and noted in the trail before it is returned. */
   secret: (recordId: string, index: number, intent: 'reveal' | 'copy', version?: number) =>
-    call<{ secret: SecretValue }>('POST', `/api/records/${recordId}/secret`, { index, intent, version }).then(
+    call<{ secret: SecretValue }>('POST', `/api/records/${recordId}/secret`, { index, intent, version }, SECRET_TIMEOUT_MS).then(
       (answer) => answer.secret,
     ),
 
