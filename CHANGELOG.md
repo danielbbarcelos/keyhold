@@ -1,5 +1,7 @@
 # Changelog
 
+## 1.1.1 (unreleased)
+
 ## 1.1.0
 
 A one-time code instead of a token in the address, sealed secrets, an audit trail and shared links
