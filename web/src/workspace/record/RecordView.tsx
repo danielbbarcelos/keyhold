@@ -14,6 +14,7 @@ import {
   Star,
   Trash2,
   Vault,
+  Loader2,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -21,7 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { locale, t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
-import { api, ApiError, type FolderNode, type OpenRecord, type SharedLink, type VersionEntry } from '../../api'
+import { api, ApiError, SlowError, type FolderNode, type OpenRecord, type SharedLink, type VersionEntry } from '../../api'
 import { copyForSeconds } from '../../clipboard'
 import { Attachments } from '../Attachments'
 import { primaryField, subtitleField } from '../fields'
@@ -84,6 +85,7 @@ export function RecordView({
   const [files, setFiles] = useState<number | null>(null)
   const [viewing, setViewing] = useState<number | null>(null)
   const [copied, setCopied] = useState(0)
+  const [copying, setCopying] = useState(false)
   const [sharing, setSharing] = useState(false)
   // AWS records: links still open, when the session that would sign a new one ends, and whether
   // the bucket switched sharing off.
@@ -215,13 +217,17 @@ export function RecordView({
       <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-4">
         {primary ? (
           <Button
+            disabled={copying}
+            aria-busy={copying}
             onClick={() => {
+              if (copying) return
               // A sealed secret is fetched inside the click (the binary notes the copy as it hands
               // it over); one the page already has is reported as before.
               const sealedAt = primary.sealed
               // A refusal from the binary (a trail that could not be written, a session that
               // ended) is kept apart: the clipboard only reports that its write failed.
               let refused: unknown = null
+              if (sealedAt !== undefined) setCopying(true)
               const value =
                 sealedAt === undefined
                   ? primary.value
@@ -241,16 +247,17 @@ export function RecordView({
                 })
                 .catch(() =>
                   toast(
-                    t('Não foi possível copiar'),
+                    refused instanceof SlowError ? t('A conexão está lenta') : t('Não foi possível copiar'),
                     refused instanceof ApiError
                       ? refused.message
                       : t('O navegador bloqueou o acesso à área de transferência nesta página.'),
                     'error',
                   ),
                 )
+                .finally(() => setCopying(false))
             }}
           >
-            <Copy />
+            {copying ? <Loader2 className="animate-spin" /> : <Copy />}
             {copied > 0 ? t('Copiado, limpa em {n}s', { n: copied }) : t('Copiar {label}', { label: primary.label.toLowerCase() })}
           </Button>
         ) : null}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, ExternalLink, Eye, EyeOff } from 'lucide-react'
+import { Check, Copy, ExternalLink, Eye, EyeOff, Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 
 import { Clip, Splitter } from '../Splitter'
 
-import { api, ApiError, type Field, type SecretValue } from '../../api'
+import { api, ApiError, SlowError, type Field, type SecretValue } from '../../api'
 import { copyForSeconds } from '../../clipboard'
 import { CARD_PARTS, fieldType } from '../fields'
 import { toast } from '../toast'
@@ -187,7 +187,7 @@ function Secret({
   multiline?: boolean
   mono?: boolean
 }) {
-  const [shown, remaining, toggle] = useReveal(source, label)
+  const [shown, remaining, toggle, busy] = useReveal(source, label)
   const present = source.field.value !== '' || sealed(source)
   const value = shown?.value ?? ''
 
@@ -211,8 +211,9 @@ function Secret({
           <IconButton
             label={shown ? t('Ocultar ({n}s restantes)', { n: remaining }) : t('Revelar por 20 segundos')}
             onClick={toggle}
+            busy={busy}
           >
-            {shown ? <EyeOff /> : <Eye />}
+            {busy ? <Loader2 className="animate-spin" /> : shown ? <EyeOff /> : <Eye />}
           </IconButton>
         )}
         {present && <CopyButton value={copyOf(source)} label={label} recordId={source.recordId} report={!sealed(source)} />}
@@ -223,7 +224,7 @@ function Secret({
 }
 
 function Card({ source, label }: { source: Source; label: string }) {
-  const [shown, remaining, toggle] = useReveal(source, label)
+  const [shown, remaining, toggle, busy] = useReveal(source, label)
   const field = source.field
   const number = (shown?.value ?? field.value).replace(/\s+/g, '')
   const last = field.hint ?? number.slice(-4)
@@ -259,8 +260,8 @@ function Card({ source, label }: { source: Source; label: string }) {
       </span>
       <Ops>
         {present && (
-          <IconButton label={shown ? t('Ocultar ({n}s restantes)', { n: remaining }) : t('Revelar por 20 segundos')} onClick={toggle}>
-            {shown ? <EyeOff /> : <Eye />}
+          <IconButton label={shown ? t('Ocultar ({n}s restantes)', { n: remaining }) : t('Revelar por 20 segundos')} onClick={toggle} busy={busy}>
+            {busy ? <Loader2 className="animate-spin" /> : shown ? <EyeOff /> : <Eye />}
           </IconButton>
         )}
         {(number || isSealed) && (
@@ -369,8 +370,9 @@ function Totp({ recordId, trail, index, label }: { recordId?: string; trail?: st
  * Reveal for twenty seconds. For a sealed field the value is fetched on the click and dropped when
  * the twenty seconds end, so the page holds a secret only while it is on screen.
  */
-function useReveal(source: Source, label: string): [SecretValue | null, number, () => void] {
+function useReveal(source: Source, label: string): [SecretValue | null, number, () => void, boolean] {
   const [shown, setShown] = useState<SecretValue | null>(null)
+  const [busy, setBusy] = useState(false)
   const [remaining, setRemaining] = useState(0)
   const timer = useRef<number | undefined>(undefined)
 
@@ -401,12 +403,14 @@ function useReveal(source: Source, label: string): [SecretValue | null, number, 
       return
     }
 
+    if (busy) return
+
     if (sealed(source)) {
+      setBusy(true)
       fetchSecret(source, 'reveal')
         .then(setShown)
-        .catch((cause) =>
-          toast(t('Não foi possível revelar'), cause instanceof ApiError ? cause.message : t('Tente de novo.'), 'error'),
-        )
+        .catch((cause) => failed(cause, t('Não foi possível revelar'), t('Tente de novo.')))
+        .finally(() => setBusy(false))
       return
     }
 
@@ -418,7 +422,17 @@ function useReveal(source: Source, label: string): [SecretValue | null, number, 
     setShown({ label, value: source.field.value, extra: source.field.extra ?? {} })
   }
 
-  return [shown, remaining, toggle]
+  return [shown, remaining, toggle, busy]
+}
+
+/** A refused or slow reveal or copy, said in a toast. */
+function failed(cause: unknown, title: string, fallback: string) {
+  if (cause instanceof SlowError) {
+    toast(t('A conexão está lenta'), cause.message, 'error')
+    return
+  }
+
+  toast(title, cause instanceof ApiError ? cause.message : fallback, 'error')
 }
 
 export function CopyButton({
@@ -436,6 +450,7 @@ export function CopyButton({
   seconds?: number
 }) {
   const [copied, setCopied] = useState(0)
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (copied <= 0) {
@@ -450,9 +465,12 @@ export function CopyButton({
   return (
     <IconButton
       label={copied > 0 ? t('A área de transferência é limpa em {n}s', { n: copied }) : t('Copiar (limpa em {n}s)', { n: seconds })}
+      busy={busy}
       onClick={() => {
+        if (busy) return
         // A refusal from the binary is kept apart from a clipboard that would not take the value.
         let refused: unknown = null
+        if (typeof value !== 'string') setBusy(true)
         const handed =
           typeof value === 'string'
             ? value
@@ -470,17 +488,14 @@ export function CopyButton({
             toast(t('{label} copiado', { label }), t('A área de transferência é limpa em {n} segundos.', { n: seconds }))
           })
           .catch(() =>
-            toast(
-              t('Não foi possível copiar'),
-              refused instanceof ApiError
-                ? refused.message
-                : t('O navegador bloqueou o acesso à área de transferência nesta página.'),
-              'error',
-            ),
+            refused
+              ? failed(refused, t('Não foi possível copiar'), t('Tente de novo.'))
+              : toast(t('Não foi possível copiar'), t('O navegador bloqueou o acesso à área de transferência nesta página.'), 'error'),
           )
+          .finally(() => setBusy(false))
       }}
     >
-      {copied > 0 ? <Check className="text-primary" /> : <Copy />}
+      {busy ? <Loader2 className="animate-spin" /> : copied > 0 ? <Check className="text-primary" /> : <Copy />}
     </IconButton>
   )
 }
@@ -493,11 +508,22 @@ function Ops({ children }: { children?: React.ReactNode }) {
   )
 }
 
-function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+function IconButton({
+  label,
+  onClick,
+  busy = false,
+  children,
+}: {
+  label: string
+  onClick: () => void
+  /** Waiting for the binary: the button holds still (one request per click) and says so. */
+  busy?: boolean
+  children: React.ReactNode
+}) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button tooltip={false} variant="ghost" size="icon" aria-label={label} onClick={onClick}>
+        <Button tooltip={false} variant="ghost" size="icon" aria-label={label} aria-busy={busy} disabled={busy} onClick={onClick}>
           {children}
         </Button>
       </TooltipTrigger>

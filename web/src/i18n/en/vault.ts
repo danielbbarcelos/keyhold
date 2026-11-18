@@ -563,4 +563,6 @@ export const VAULT: Record<string, string> = {
   'nome repetido': 'repeated name',
   'já existe, String': 'already exists, String',
   'já existe': 'already exists',
+  // A reveal or a copy that took too long.
+  'A conexão está lenta': 'The connection is slow',
 }
