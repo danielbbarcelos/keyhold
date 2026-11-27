@@ -1,6 +1,9 @@
 # Changelog
 
-## 1.2.0 (unreleased)
+## 1.2.0
+
+A Cofres tab and a carousel on Início, the agent's policy per vault, AWS vaults that open at once
+from their last listing, and a note on any field.
 
 ### Added
 
@@ -40,6 +43,13 @@
 - **Every list with actions per row lights up under the pointer**: key rotation (now also with
   dividers, like the list of vaults), default alerts, instances, both trails, a record's fields and
   the fields of the editor.
+
+## 1.1.1
+
+A footer on every page, and a spinner while a reveal or a copy waits for AWS.
+
+### Changed
+
 - **A footer on every page.** Keyhold's version and the link to its code on the left, the
   language on the right: on the first screens, the lock screen, every page of an open Keyhold and the
   page of a shared link. It sits after the content, at the end of the scroll, and a short page still
