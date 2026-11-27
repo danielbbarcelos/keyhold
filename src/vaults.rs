@@ -225,6 +225,11 @@ pub struct VaultSummary {
     pub aws: Option<AwsVault>,
     /// The vault's own icon; `null` shows its initial.
     pub icon: Option<crate::records::Icon>,
+    /// Favourite, openings and the agent's policy (see [`crate::vault_prefs`]).
+    pub favorite: bool,
+    pub opened: u64,
+    pub last_opened_at: Option<u64>,
+    pub agent_policy: crate::vault_prefs::AgentPolicy,
 }
 
 #[derive(Debug, Serialize)]
@@ -308,6 +313,7 @@ pub fn list_vaults(store: &Store, master: &SecretKey) -> Result<Vec<VaultSummary
         };
 
         let Some(meta) = meta else { continue };
+        let prefs = crate::vault_prefs::read(store, master, &id);
 
         found.push(VaultSummary {
             id,
@@ -322,6 +328,10 @@ pub fn list_vaults(store: &Store, master: &SecretKey) -> Result<Vec<VaultSummary
             kind: meta.kind,
             aws: meta.aws,
             icon: meta.icon,
+            favorite: prefs.favorite,
+            opened: prefs.opened,
+            last_opened_at: prefs.last_opened_at,
+            agent_policy: prefs.agent,
         });
     }
 

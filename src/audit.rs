@@ -113,6 +113,7 @@ pub mod action {
     pub const AGENT_GRANTED: &str = "agent.granted";
     pub const AUDIT_RESEALED: &str = "audit.resealed";
     pub const AGENT_GRANT_REVOKED: &str = "agent.grant.revoked";
+    pub const AGENT_POLICY_CHANGED: &str = "agent.policy";
     pub const PROTECTION_CHANGED: &str = "identity.protection.changed";
     pub const SECOND_FACTOR_CHANGED: &str = "identity.second-factor.changed";
 }

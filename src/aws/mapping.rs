@@ -464,8 +464,8 @@ pub struct Decoded {
 /// What a record's value becomes, and whether that is Keyhold's JSON.
 ///
 /// Plain only when there is nothing a plain value could not carry back: exactly one field, of the
-/// kind a plain value reads back as (a password), with no composite parts, no marks, no icon and
-/// no notes. The single field's label is not kept in that case; it reads back as "Valor". Anything
+/// kind a plain value reads back as (a password), with no composite parts, no marks, no note of its
+/// own, no icon and no notes. The single field's label is not kept in that case; it reads back as "Valor". Anything
 /// else is JSON, so nothing the person set up is lost on the round trip, and notes always have
 /// somewhere encrypted to go instead of the description.
 pub fn encode_value(payload: &Payload) -> Result<(String, bool), String> {
@@ -477,6 +477,7 @@ pub fn encode_value(payload: &Payload) -> Result<(String, bool), String> {
                 && only.extra.is_empty()
                 && !only.list
                 && !only.primary
+                && only.note.trim().is_empty()
                 && !only.value.is_empty()
                 && payload.icon.is_none()
                 && payload.alerts.is_empty()

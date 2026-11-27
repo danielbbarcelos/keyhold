@@ -149,6 +149,16 @@ anything running as this user. The control against that is the person, which is 
 Approving `sh -c` or any interpreter, for any length of time, is approving whatever that
 interpreter is told to do with the value.
 
+**A vault let through** (since 1.2.0) removes the person from that control for the whole vault. A
+vault available to agents can be set to let every request through, until a date or for good: any
+record, any field, any program, with no dialog. This is a decision to trust the assistant with
+everything `keyhold_run` and `keyhold_copy` can do in that vault, and the settings screen says so
+where it is chosen. What still holds: a secret is never returned as a value, every use is in the
+trail with "política do cofre" as the reason nobody was asked, changing the policy is in the trail,
+the policy is sealed to its vault under the master key, a policy past its date asks again, and a
+locked vault ignores it. Keep it for vaults whose contents an assistant could run with
+unsupervised, never for the vault with everything.
+
 The environment is used rather than the command line because a command line is visible to every
 user of the machine (`ps`), and the environment only to processes of this user. The `{{secret}}`
 placeholder exists for programs that take a secret only as an argument, and has that cost.
@@ -246,9 +256,18 @@ What that exception rests on, and what it does not claim:
   them to go. A login or refresh that completes after a lock is discarded, not stored for the next
   unlock. Removing a login logs it out of Identity Center first. The logins and connections that
   are remembered are sealed under the master key like everything else.
-- **No local copy.** Values read from AWS are not written to the vault file. Two caches of a few
-  seconds live in memory while the vault is open; stale entries are removed (not just skipped),
-  editing, archiving or deleting a vault clears its entries, and everything is dropped on lock.
+- **No local copy of a value.** Values read from AWS are not written to the vault file. Two caches
+  of a few seconds live in memory while the vault is open; stale entries are removed (not just
+  skipped), editing, archiving or deleting a vault clears its entries, and everything is dropped on
+  lock.
+- **The last listing is kept, sealed** (since 1.2.0). So that opening an AWS vault draws at once,
+  the answers of its two listing routes (folders, and record previews: titles, folders, icons, the
+  non-secret field shown in lists, marks) are sealed with the master key into `aws_listing_cache`,
+  with the vault and the part as authenticated data. That is exactly what the page was given, never
+  a secret value and never the raw parameters. The file says only that a listing exists and when it
+  was taken; with the key, it says what the tree said. Nothing that writes to AWS or decides a KMS
+  key reads it, the page reads AWS again seconds after drawing it, editing the vault forgets it and
+  deleting the vault takes it along.
 - **Signed requests go only to AWS's own endpoints** for the configured regions, over rustls with
   compiled-in roots, with redirects off (a signed request is never replayed to another host), with
   any system proxy ignored, and HTTPS only: the endpoint overrides the tests use do not exist in a

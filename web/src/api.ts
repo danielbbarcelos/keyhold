@@ -40,6 +40,8 @@ export interface Status {
   log_reads: boolean
   /** Whether the browser may fill in and save a record's password and hidden fields. */
   field_autocomplete?: boolean
+  /** How often an open AWS vault reads its account again; 0 is only on opening and on focus. */
+  aws_sync_minutes?: number
   /** The hint shown when Keyhold opens on 127.0.0.1 was dismissed on this machine. */
   set_host_hint_dismissed?: boolean
   appearance: Appearance
@@ -403,7 +405,22 @@ export interface VaultSummary {
   created_at: string
   key_version: number
   key_rotated_at: string | null
+  /** Starred, to go first on Início. */
+  favorite?: boolean
+  /** How many times its page was opened, and the last time (unix seconds). */
+  opened?: number
+  last_opened_at?: number | null
+  /** What an agent asking for something in this vault gets. */
+  agent_policy?: AgentPolicy
 }
+
+/** Ask every time, let through until a moment (unix seconds), or let through for good. */
+export type AgentPolicy = { mode: 'ask' } | { mode: 'until'; at: number } | { mode: 'always' }
+
+/** The last listing of an AWS vault kept in the file, drawn before AWS answers. */
+export type CachedListing =
+  | { cached: false }
+  | { cached: true; synced_at: number; folders: FolderNode[]; records: RecordPreview[]; audit?: AuditSummary | null }
 
 export interface FolderNode {
   id: string
@@ -457,6 +474,8 @@ export interface Field {
   list?: boolean
   /** Copied by the record's main button. */
   primary?: boolean
+  /** Free text about the field, shown as an info mark by its label. */
+  note?: string
   /**
    * Set by the binary on a secret it did not send: the field's position when the record was opened.
    * The value is fetched with `api.secret` when somebody reveals or copies it, and a save sends this
@@ -704,6 +723,17 @@ export const api = {
   setAgentAccess: (id: string, on: boolean) =>
     call<{ agent_access: boolean }>('POST', `/api/vaults/${id}/agent-access`, { on }),
 
+  vaultPrefs: (id: string, change: { favorite?: boolean; agent?: AgentPolicy }) =>
+    call<{ prefs: { favorite: boolean; opened: number; last_opened_at: number | null; agent: AgentPolicy } }>(
+      'PUT',
+      `/api/vaults/${id}/prefs`,
+      change,
+    ),
+
+  vaultOpened: (id: string) => call<{ opened: number }>('POST', `/api/vaults/${id}/opened`),
+
+  cachedListing: (id: string) => call<CachedListing>('GET', `/api/vaults/${id}/cached`),
+
   folders: (vaultId: string) =>
     call<{ folders: FolderNode[] }>('GET', `/api/vaults/${vaultId}/folders`),
 
@@ -914,6 +944,10 @@ export const api = {
 
   setFieldAutocomplete: (on: boolean) =>
     call<{ field_autocomplete: boolean }>('PUT', '/api/settings/field-autocomplete', { on }),
+
+  setAwsSync: (minutes: number) => call<{ aws_sync_minutes: number }>('PUT', '/api/settings/aws-sync', { minutes }),
+
+  forgetListing: (id: string) => call<{ forgotten: boolean }>('DELETE', `/api/vaults/${id}/cached`),
 
   /**
    * Tell the binary that a secret was looked at.

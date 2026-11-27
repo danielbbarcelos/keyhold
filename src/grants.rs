@@ -22,7 +22,8 @@
 //! One field of one record, for one kind of use (reading it, copying it, or running one program
 //! with it). If the person chose "todos os campos deste registro", every field of that one record,
 //! still for that one use. Never a vault, never "everything this process asks for": the answer
-//! means what the question showed.
+//! means what the question showed. A vault as a whole is a separate decision, made in the settings
+//! rather than in answer to one request: see [`crate::vault_prefs`].
 //!
 //! # The three windows
 //!

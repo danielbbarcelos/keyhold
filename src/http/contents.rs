@@ -20,6 +20,7 @@ use serde_json::json;
 
 use super::aws;
 use super::{bad_request, locked, Answer, AppState};
+use crate::aws::listing_cache;
 use crate::aws::mapping::is_aws_id;
 use crate::audit::{self, Detail};
 use crate::attachments;
@@ -27,6 +28,7 @@ use crate::health;
 use crate::records::{self, Payload};
 use crate::tr;
 use crate::transfer;
+use crate::vault_prefs;
 use crate::vaults::{self, FolderMeta, VaultMeta};
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -37,6 +39,9 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/vaults/:id/contents", get(vault_contents))
         .route("/vaults/:id/archive", post(archive_vault))
         .route("/vaults/:id/agent-access", post(agent_access))
+        .route("/vaults/:id/prefs", put(vault_prefs))
+        .route("/vaults/:id/opened", post(vault_opened))
+        .route("/vaults/:id/cached", get(cached_listing).delete(forget_listing))
         .route("/vaults/:id/health", get(vault_health))
         .route("/vaults/:id/rotate", post(rotate))
         .route("/vaults/:id/export", post(export_vault))
@@ -91,6 +96,107 @@ async fn list_vaults(State(state): State<Arc<AppState>>) -> Answer {
     Ok(Json(json!({ "vaults": found })))
 }
 
+#[derive(Deserialize)]
+struct PrefsChange {
+    #[serde(default)]
+    favorite: Option<bool>,
+    #[serde(default)]
+    agent: Option<vault_prefs::AgentPolicy>,
+}
+
+/// Favourite a vault, or change what an agent asking in it gets. A change of policy goes in the
+/// trail: it is a decision to stop (or start) being asked.
+async fn vault_prefs(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<PrefsChange>,
+) -> Answer {
+    if let Some(vault_prefs::AgentPolicy::Until { at }) = &body.agent {
+        if *at <= crate::identity::now_seconds() {
+            return Err(bad_request(tr!("a data de liberação precisa estar no futuro")));
+        }
+    }
+
+    let store = state.store.lock().unwrap();
+
+    let before = with_key!(state, |key| vault_prefs::read(&store, key, &id));
+    let after = with_key!(state, |key| vault_prefs::update(&store, key, &id, |prefs| {
+        if let Some(favorite) = body.favorite {
+            prefs.favorite = favorite;
+        }
+        if let Some(agent) = body.agent.clone() {
+            prefs.agent = agent;
+        }
+    }))
+    .map_err(bad_request)?;
+
+    if before.agent != after.agent {
+        audit::note(
+            &store,
+            &state.lock,
+            audit::action::AGENT_POLICY_CHANGED,
+            Some(&id),
+            Detail::new().with("from", before.agent.describe().as_str()).with("to", after.agent.describe().as_str()),
+        );
+    }
+
+    Ok(Json(json!({ "prefs": after })))
+}
+
+/// One more opening of a vault's page, for "mais acessados".
+async fn vault_opened(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    let prefs = with_key!(state, |key| vault_prefs::opened(&store, key, &id)).map_err(bad_request)?;
+
+    Ok(Json(json!({ "opened": prefs.opened })))
+}
+
+/// The last listing of an AWS vault, as the two listing routes answered it, and when.
+///
+/// `cached: false` when there is none (a local vault never has one). Both parts or neither: a tree
+/// drawn from one listing and a list from another would show records in folders that moved.
+async fn cached_listing(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    let found = with_key!(state, |key| {
+        let folders = listing_cache::get(&store, key, &id, "folders");
+        let records = listing_cache::get(&store, key, &id, "records");
+        folders.zip(records)
+    });
+
+    Ok(Json(match found {
+        Some(((folders, at_f), (records, at_r))) => json!({
+            "cached": true,
+            "synced_at": at_f.min(at_r),
+            "folders": folders.get("folders").cloned().unwrap_or_default(),
+            "records": records.get("records").cloned().unwrap_or_default(),
+            "audit": records.get("audit").cloned().unwrap_or(serde_json::Value::Null),
+        }),
+        None => json!({ "cached": false }),
+    }))
+}
+
+/// Forget a vault's kept listing. The next opening waits for AWS, like before there was one.
+async fn forget_listing(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
+    let store = state.store.lock().unwrap();
+
+    with_key!(state, |_key| listing_cache::forget(&store, &id)).map_err(bad_request)?;
+
+    Ok(Json(json!({ "forgotten": true })))
+}
+
+/// Keep what an AWS listing route answered, and answer it. Failing to keep it is not the request's
+/// problem: the listing is still right, the next opening just waits for AWS.
+fn keep_listing(state: &AppState, id: &str, part: &str, answer: Answer) -> Answer {
+    if let Ok(Json(value)) = &answer {
+        let store = state.store.lock().unwrap();
+        let _ = state.lock.with_key(|key| listing_cache::put(&store, key, id, part, value));
+    }
+
+    answer
+}
+
 async fn create_vault(State(state): State<Arc<AppState>>, Json(meta): Json<VaultMeta>) -> Answer {
     let store = state.store.lock().unwrap();
 
@@ -111,6 +217,7 @@ async fn update_vault(
 
     let updated = with_key!(state, |key| vaults::update_vault(&store, key, &id, meta))
         .map_err(bad_request)?;
+    let _ = listing_cache::forget(&store, &id);
     drop(store);
 
     // Another connection, region or bucket is another view of AWS: nothing cached for the old one
@@ -714,7 +821,7 @@ async fn share_file(
 
 async fn list_folders(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Answer {
     if aws::is_aws_vault(&state, &id) {
-        return aws::list_folders(&state, &id).await;
+        return keep_listing(&state, &id, "folders", aws::list_folders(&state, &id).await);
     }
 
     let store = state.store.lock().unwrap();
@@ -846,6 +953,9 @@ async fn list_records(
     Path(id): Path<String>,
     Query(query): Query<ListQuery>,
 ) -> Answer {
+    if aws::is_aws_vault(&state, &id) && !query.archived {
+        return keep_listing(&state, &id, "records", aws::list_records(&state, &id).await);
+    }
     if aws::is_aws_vault(&state, &id) {
         return aws::list_records(&state, &id).await;
     }

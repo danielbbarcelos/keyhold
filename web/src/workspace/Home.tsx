@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { ArrowRight, Bot, Copy, Folder, Globe, HardDrive, Lock, Plus, ShieldCheck, Star, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ArrowRight, Bot, ChevronLeft, ChevronRight, Copy, Folder, Globe, Lock, Plus, ShieldCheck, Star, Vault, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -15,10 +15,10 @@ import {
 } from '../api'
 import { locale, t } from '../i18n'
 import { RecordTile } from './icons'
-import { AwsMark } from './AwsMark'
 import { linkProps, TabMenu } from './nav'
 import { Body, Panel, PanelHead, TopBar, Title, VaultInitial } from './shell'
 import { when } from './vault/paths'
+import { byUse, useHealthIssues, VaultCard } from './VaultCard'
 import { toast } from './toast'
 
 /**
@@ -38,19 +38,6 @@ const issueOf = (): Record<HealthIssue, { label: string; tone: 'rose' | 'amber' 
   stale: { label: t('senha antiga'), tone: 'amber' },
 })
 
-/** A sentence with a bold number inside: the number goes wherever the language puts `{n}`. */
-function Count({ text, n, className }: { text: string; n: number; className?: string }) {
-  const [before, after = ''] = text.split('{n}')
-
-  return (
-    <>
-      {before}
-      <b className={className}>{n}</b>
-      {after}
-    </>
-  )
-}
-
 export function Home({
   status,
   vaults,
@@ -60,6 +47,8 @@ export function Home({
   onOpen,
   onVault,
   onNewVault,
+  onAllVaults,
+  onVaultsChanged,
   onTrail,
   onSettings,
   onLock,
@@ -74,24 +63,22 @@ export function Home({
   onOpen: (record: RecordPreview) => void
   onVault: (id: string) => void
   onNewVault: () => void
+  /** The Cofres page. */
+  onAllVaults: () => void
+  /** A vault was starred or unstarred. */
+  onVaultsChanged: () => void
   onTrail: () => void
   onSettings: () => void
   onLock: () => void
   onSearch: () => void
 }) {
-  const [issues, setIssues] = useState<Map<string, HealthIssue[]>>(new Map())
+  const issues = useHealthIssues(vaults)
   const [events, setEvents] = useState<AuditEvent[]>([])
   const [grants, setGrants] = useState<AgentGrant[]>([])
   const [tab, setTab] = useState<'tudo' | 'favoritos' | 'atencao'>('tudo')
   const open = vaults.filter((vault) => !vault.archived)
 
   useEffect(() => {
-    void Promise.all(open.map((vault) => api.health(vault.id).catch(() => null)))
-      .then((reports) => {
-        const found = new Map<string, HealthIssue[]>()
-        reports.forEach((report) => report?.health.findings.forEach((one) => found.set(one.record_id, one.issues)))
-        setIssues(found)
-      })
     void api.audit(60).then((answer) => setEvents(answer.events)).catch(() => {})
     void api.agentGrants().then((answer) => setGrants(answer.grants)).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -149,63 +136,15 @@ export function Home({
 
         <SetHostHint dismissed={status.set_host_hint_dismissed ?? false} />
 
-        <div className="mt-6 grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-5">
-          {open.map((vault) => {
-            const inside = records.filter((record) => record.vault_id === vault.id)
-            const flagged = inside.filter((record) => issues.has(record.id) || record.compromised_at).length
-
-            return (
-              <TabMenu key={vault.id} to={{ place: 'vault', vault: vault.id }}>
-              <button
-                type="button"
-                {...linkProps({ place: 'vault', vault: vault.id }, () => onVault(vault.id))}
-                className="rounded-[14px] border bg-card p-[18px] text-left hover:border-line-2"
-              >
-                <span className="flex items-center gap-3">
-                  <VaultInitial vault={vault} size="lg" />
-                  <span className="min-w-0">
-                    <b className="block truncate text-[15px] font-semibold">{vault.name}</b>
-                    <span className="flex items-center gap-1 text-xs text-faint">
-                      {vault.kind === 'aws' ? <AwsMark className="size-3.5" /> : <HardDrive className="size-3" />}
-                      {vault.kind === 'aws' ? `AWS Parameter Store, ${vault.aws?.region ?? ''}` : t('Cofre local')}
-                    </span>
-                  </span>
-                </span>
-                {unreadable.has(vault.id) ? (
-                  <span className="mt-4 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]">
-                    <b className="font-semibold text-amber">{t('Indisponível')}</b>
-                    <span className="text-faint">
-                      {vault.kind === 'aws' ? t('sem sessão na AWS. Abra o cofre para renovar') : t('não foi possível ler este cofre')}
-                    </span>
-                  </span>
-                ) : (
-                <span className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
-                  <span>
-                    <Count text={t('{n} registros')} n={inside.length} className="font-semibold text-foreground" />
-                  </span>
-                  <span className={cn(flagged > 0 && 'text-amber')}>
-                    <Count
-                      text={t('{n} atenção')}
-                      n={flagged}
-                      className={cn('font-semibold', flagged > 0 ? 'text-amber' : 'text-foreground')}
-                    />
-                  </span>
-                  <span>{vault.agent_access ? t('agente liberado') : t('agente bloqueado')}</span>
-                </span>
-                )}
-              </button>
-              </TabMenu>
-            )
-          })}
-          <button
-            type="button"
-            onClick={onNewVault}
-            className="flex min-h-[118px] flex-col items-center justify-center gap-2 rounded-[14px] border border-dashed text-sm text-muted-foreground hover:bg-hover"
-          >
-            <Plus className="size-5" />
-            {t('Novo cofre')}
-          </button>
-        </div>
+        <VaultCarousel
+          vaults={open}
+          records={records}
+          issues={issues}
+          unreadable={unreadable}
+          onVault={onVault}
+          onAll={onAllVaults}
+          onChanged={onVaultsChanged}
+        />
 
         <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-2">
           <Panel>
@@ -489,6 +428,117 @@ function SetHostHint({ dismissed }: { dismissed: boolean }) {
         >
           <X className="size-4" />
         </button>
+      </div>
+    </section>
+  )
+}
+
+/** How many vaults Início shows. The rest are a click away, on Cofres. */
+const CAROUSEL_SIZE = 10
+
+/**
+ * Início's vaults: the starred ones first, then the ones opened the most, in a row that scrolls
+ * sideways. Nothing starred and nothing opened yet is said rather than shown empty.
+ */
+function VaultCarousel({
+  vaults,
+  records,
+  issues,
+  unreadable,
+  onVault,
+  onAll,
+  onChanged,
+}: {
+  vaults: VaultSummary[]
+  records: RecordPreview[]
+  issues: Map<string, HealthIssue[]>
+  unreadable: Set<string>
+  onVault: (id: string) => void
+  onAll: () => void
+  onChanged: () => void
+}) {
+  const track = useRef<HTMLDivElement>(null)
+  const [edges, setEdges] = useState({ start: true, end: true })
+  const shown = [...vaults]
+    .filter((vault) => vault.favorite || (vault.opened ?? 0) > 0)
+    .sort(byUse)
+    .slice(0, CAROUSEL_SIZE)
+
+  const measure = () => {
+    const el = track.current
+    if (!el) return
+    setEdges({ start: el.scrollLeft <= 1, end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 1 })
+  }
+
+  useEffect(() => {
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [shown.length])
+
+  const page = (direction: 1 | -1) => {
+    const el = track.current
+    if (el) el.scrollBy({ left: direction * el.clientWidth * 0.9, behavior: 'smooth' })
+  }
+
+  if (shown.length === 0) {
+    return (
+      <section className="mt-6 flex items-center gap-4 rounded-[14px] border border-dashed px-5 py-4">
+        <span className="grid size-9 shrink-0 place-items-center rounded-[10px] bg-stone-soft text-muted-foreground">
+          <Vault className="size-[18px]" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <b className="block text-sm font-medium">{t('Seus cofres aparecem aqui')}</b>
+          <span className="block text-[13px] text-muted-foreground">
+            {t('Os favoritos primeiro, depois os que você mais abre. Favorite um cofre pela estrela, na aba Cofres.')}
+          </span>
+        </span>
+        <Button variant="outline" size="sm" onClick={onAll}>
+          {t('Abrir Cofres')}
+          <ArrowRight />
+        </Button>
+      </section>
+    )
+  }
+
+  return (
+    <section className="mt-6">
+      <div className="mb-3 flex items-center gap-3">
+        <h2 className="text-[15px] font-semibold">{t('Seus cofres')}</h2>
+        <span className="truncate text-[13px] text-faint">{t('favoritos primeiro, depois os mais acessados')}</span>
+        <span className="flex-1" />
+        <Button variant="outline" size="icon-sm" aria-label={t('Anteriores')} disabled={edges.start} onClick={() => page(-1)}>
+          <ChevronLeft />
+        </Button>
+        <Button variant="outline" size="icon-sm" aria-label={t('Próximos')} disabled={edges.end} onClick={() => page(1)}>
+          <ChevronRight />
+        </Button>
+        <button
+          type="button"
+          onClick={onAll}
+          className="ml-1 inline-flex shrink-0 items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground"
+        >
+          {t('Todos os cofres')}
+          <ArrowRight className="size-4" />
+        </button>
+      </div>
+      <div
+        ref={track}
+        onScroll={measure}
+        className="flex snap-x snap-mandatory gap-5 overflow-x-auto pb-2"
+      >
+        {shown.map((vault) => (
+          <VaultCard
+            key={vault.id}
+            className="w-[280px] shrink-0 snap-start"
+            vault={vault}
+            records={records}
+            issues={issues}
+            unavailable={unreadable.has(vault.id)}
+            onOpen={() => onVault(vault.id)}
+            onChanged={onChanged}
+          />
+        ))}
       </div>
     </section>
   )

@@ -177,7 +177,7 @@ export function AwsTrail({ vault, onOpenVault }: { vault: VaultSummary; onOpenVa
                   .join(', ')
 
                 return (
-                  <tr key={`${event.at_ms}-${index}`} className="border-b last:border-b-0">
+                  <tr key={`${event.at_ms}-${index}`} className="border-b transition-colors last:border-b-0 hover:bg-hover">
                     <td className="px-5 py-3 font-mono text-[13px] whitespace-nowrap text-muted-foreground">
                       {at ? (today ? at.toLocaleTimeString(locale()) : at.toLocaleString(locale(), { dateStyle: 'short', timeStyle: 'short' })) : ''}
                     </td>

@@ -14,6 +14,7 @@ import {
   Settings2,
   Paintbrush,
   SlidersHorizontal,
+  Vault,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -38,10 +39,11 @@ import { LogoIcon } from './Logo'
  * What belongs to a vault (its records, favourites, attention, trash) lives inside the vault page,
  * not on the rail; switching vaults is the first step of the path in the top bar.
  */
-export type Place = 'home' | 'vault' | 'trail' | 'instances' | 'custom' | 'settings'
+export type Place = 'home' | 'vaults' | 'vault' | 'trail' | 'instances' | 'custom' | 'settings'
 
 const RAIL = (): Array<{ id: Exclude<Place, 'vault'>; label: string; icon: LucideIcon }> => [
   { id: 'home', label: t('Início'), icon: Home },
+  { id: 'vaults', label: t('Cofres'), icon: Vault },
   { id: 'trail', label: t('Trilha'), icon: ScrollText },
   { id: 'instances', label: t('Instâncias'), icon: Cpu },
   { id: 'custom', label: t('Personalizar'), icon: Paintbrush },

@@ -7,6 +7,7 @@ import { locale, t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 import { Clip, Splitter } from '../Splitter'
+import { FieldNote } from './FieldNote'
 
 import { api, ApiError, SlowError, type Field, type SecretValue } from '../../api'
 import { copyForSeconds } from '../../clipboard'
@@ -42,10 +43,11 @@ export function FieldRow({ field, index, recordId, badge, live = true, version }
   const Icon = type.icon
 
   return (
-    <div className="group/field relative grid grid-cols-[var(--kh-label,180px)_minmax(0,1fr)_auto] items-center gap-4 border-t px-5 py-3 first:border-t-0">
+    <div className="group/field relative grid grid-cols-[var(--kh-label,180px)_minmax(0,1fr)_auto] items-center gap-4 border-t px-5 py-3 transition-colors first:border-t-0 hover:bg-hover">
       <span className="relative flex min-w-0 items-center gap-2 self-stretch text-[13px] text-muted-foreground">
         <Icon className="size-[15px] shrink-0 text-faint" />
         <Clip>{field.label || type.label}</Clip>
+        {field.note?.trim() && <FieldNote label={field.label || type.label} note={field.note} />}
         {badge && (
           <span
             className={cn(

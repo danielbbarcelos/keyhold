@@ -40,4 +40,5 @@ pub mod settings;
 pub mod share;
 pub mod totp;
 pub mod transfer;
+pub mod vault_prefs;
 pub mod vaults;

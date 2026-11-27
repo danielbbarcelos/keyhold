@@ -322,7 +322,7 @@ export function AlertPresetsPanel() {
               }}
             />
           ) : (
-            <div key={preset.id} className="flex items-center gap-2">
+            <div key={preset.id} className="-mx-2 flex items-center gap-2 rounded-[10px] p-2 transition-colors hover:bg-hover">
               <AlertBanner alert={preset} className="flex-1" />
               <Button variant="outline" size="sm" onClick={() => setEditing(preset.id)}>
                 {t('Editar')}

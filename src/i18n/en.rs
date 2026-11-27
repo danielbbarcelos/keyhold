@@ -4,7 +4,11 @@
 pub const ENTRIES: &[&[(&str, &str)]] = &[CORE, FILES, RECORDS, IDENTITY, CONTENTS, AWS, INSTANCE, AGENT];
 
 /// Messages that belong to no area in particular.
-const CORE: &[(&str, &str)] = &[("o cofre não existe mais", "the vault no longer exists")];
+const CORE: &[(&str, &str)] = &[
+    ("o cofre não existe mais", "the vault no longer exists"),
+    ("o cofre não existe", "the vault does not exist"),
+    ("a data de liberação precisa estar no futuro", "the release date has to be in the future"),
+];
 
 /// Export, import, attachments and the files a local share writes.
 const FILES: &[(&str, &str)] = &[

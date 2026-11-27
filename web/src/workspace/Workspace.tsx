@@ -9,6 +9,7 @@ import { AwsTrail, TrailSource } from './AwsTrail'
 import { CommandPalette } from './CommandPalette'
 import { Customise } from './Customise'
 import { DiscardDialog } from './DiscardDialog'
+import { VaultsPage } from './VaultsPage'
 import { Home, type Seen } from './Home'
 import { InstancesPanel } from './InstancesPanel'
 import { destinationFromLocation, rememberDestination, type Destination } from './nav'
@@ -259,6 +260,20 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
       )
     }
 
+    if (place === 'vaults') {
+      return (
+        <VaultsPage
+          vaults={vaults}
+          records={records}
+          unreadable={unreadable}
+          onVault={(id) => openVault(id)}
+          onNewVault={() => setAskingVault(true)}
+          onChanged={() => void refresh()}
+          onSearch={search}
+        />
+      )
+    }
+
     if (place === 'trail') {
       return (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -345,6 +360,8 @@ export function Workspace({ status, onChanged }: WorkspaceProps) {
         onOpen={openRecord}
         onVault={(id) => openVault(id)}
         onNewVault={() => setAskingVault(true)}
+        onAllVaults={() => setPlace('vaults')}
+        onVaultsChanged={() => void refresh()}
         onTrail={() => setPlace('trail')}
         onSettings={() => goSettings('agentes')}
         onLock={lock}

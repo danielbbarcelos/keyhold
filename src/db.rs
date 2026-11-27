@@ -19,7 +19,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 
 /// The schema this binary understands. A file claiming more than this is not opened.
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 11;
 
 pub struct Store {
     conn: Connection,
@@ -378,6 +378,30 @@ impl Store {
                  CREATE INDEX agent_grants_by_record ON agent_grants (record_id);
 
                  UPDATE meta SET value = '10' WHERE key = 'schema_version';
+                 COMMIT;",
+            )?;
+        }
+
+        // What is decided about a vault as a whole (favourite, openings, the agent's policy), and
+        // the last listing of an AWS vault, so that opening one draws at once and reads AWS after.
+        // Both are sealed with the master key and go with their vault.
+        if found < 11 {
+            self.conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE vault_prefs (
+                     vault_id TEXT PRIMARY KEY REFERENCES vaults(id) ON DELETE CASCADE,
+                     sealed   BLOB NOT NULL
+                 ) STRICT;
+
+                 CREATE TABLE aws_listing_cache (
+                     vault_id  TEXT NOT NULL REFERENCES vaults(id) ON DELETE CASCADE,
+                     part      TEXT NOT NULL,
+                     sealed    BLOB NOT NULL,
+                     synced_at INTEGER NOT NULL,
+                     PRIMARY KEY (vault_id, part)
+                 ) STRICT;
+
+                 UPDATE meta SET value = '11' WHERE key = 'schema_version';
                  COMMIT;",
             )?;
         }

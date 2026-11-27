@@ -1,5 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Folder, FolderOpen, List, ListTree, Search, Star, Trash2 } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  CloudCheck,
+  CloudOff,
+  Folder,
+  FolderOpen,
+  List,
+  ListTree,
+  LoaderCircle,
+  RefreshCw,
+  Search,
+  Star,
+  Trash2,
+} from 'lucide-react'
 
 import { Input } from '@/components/ui/input'
 import { Tip } from '@/components/ui/tip'
@@ -13,7 +29,7 @@ import { MenuButton, RowMenu, type MenuEntry } from '../menu'
 import { linkProps, TabMenu } from '../nav'
 import { Clip } from '../Splitter'
 import { AttentionDot, type Attention } from './Attention'
-import { folderPath } from './paths'
+import { folderPath, when } from './paths'
 
 /**
  * The vault's contents, always on the left while you are inside it: folders and records together
@@ -26,6 +42,17 @@ export type TreeMode = 'tree' | 'list'
 export type TreeFilter = 'all' | 'favourites' | 'attention'
 
 export type Selection = { kind: 'record' | 'folder'; id: string } | { kind: 'trash' } | null
+
+/** Where an AWS vault's listing stands: read from the kept copy, being read, read, or not. */
+export interface SyncState {
+  syncing: boolean
+  /** When the listing on screen was read from AWS (ms), kept or fresh. */
+  at: number | null
+  /** The last read failed; the listing on screen is still the previous one. */
+  failed: { message: string; code: string } | null
+  /** What is on screen came from the kept copy and AWS has not answered since. */
+  cached: boolean
+}
 
 export function TreeCard({
   vaultId,
@@ -50,6 +77,7 @@ export function TreeCard({
   folderEntries,
   recordEntries,
   rootEntries,
+  sync,
 }: {
   folders: FolderNode[]
   records: RecordPreview[]
@@ -80,6 +108,8 @@ export function TreeCard({
   rootEntries: MenuEntry[]
   folderEntries: (folder: FolderNode) => MenuEntry[]
   recordEntries: (record: RecordPreview) => MenuEntry[]
+  /** An AWS vault's sync: the button in the toolbar and the state in the footer. */
+  sync?: SyncState & { minutes: number; onSync: () => void; onRenew: () => void }
 }) {
   const [query, setQuery] = useState('')
   const [closed, setClosed] = useState<Set<string>>(new Set())
@@ -389,6 +419,19 @@ export function TreeCard({
             <List className="size-[15px]" />
           </ModeButton>
         </div>
+        {sync && (
+          <Tip label={sync.at ? t('Sincronizar com a AWS. Última vez {when}', { when: when(new Date(sync.at).toISOString()) }) : t('Sincronizar com a AWS')}>
+            <button
+              type="button"
+              aria-label={t('Sincronizar com a AWS')}
+              disabled={sync.syncing}
+              onClick={sync.onSync}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border bg-raised text-faint hover:text-foreground disabled:cursor-progress"
+            >
+              <RefreshCw className={cn('size-[15px]', sync.syncing && 'animate-spin text-primary')} />
+            </button>
+          </Tip>
+        )}
         {mode === 'tree' && folders.length > 0 && (
 <Tip label={allClosed ? t('Expandir todas as pastas') : t('Recolher todas as pastas')}>
           <button
@@ -485,9 +528,10 @@ export function TreeCard({
       </button>
       </TabMenu>
       ) : (
-        <p className="flex h-11 shrink-0 items-center gap-2 border-t px-4 text-xs text-faint">
-          {t('Na AWS não há lixeira: a exclusão é permanente.')}
-        </p>
+        <div className="flex shrink-0 flex-col gap-1 border-t px-4 py-2.5 text-xs">
+          {sync && <SyncLine sync={sync} />}
+          <span className="text-faint">{t('Na AWS não há lixeira: a exclusão é permanente.')}</span>
+        </div>
       )}
     </aside>
   )
@@ -522,5 +566,57 @@ function FilterChip({ on, count, onClick, children }: { on: boolean; count: numb
       {children}
       <span className={on ? 'opacity-70' : 'text-faint'}>{count}</span>
     </button>
+  )
+}
+
+/** One line on where an AWS vault's listing stands. */
+function SyncLine({ sync }: { sync: SyncState & { minutes: number; onRenew: () => void } }) {
+  // "há 2 min" has to keep moving while nothing else on the page does.
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const timer = window.setInterval(() => tick((n) => n + 1), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const ago = sync.at ? when(new Date(sync.at).toISOString()) : ''
+
+  if (sync.failed) {
+    return (
+      <span className="flex items-start gap-1.5 text-amber">
+        <CloudOff className="mt-px size-3.5 shrink-0" />
+        <span>
+          {t('Não foi possível sincronizar: {reason}.', { reason: sync.failed.message })}{' '}
+          {ago && t('Mostrando a lista de {when}.', { when: ago })}{' '}
+          {sync.failed.code === 'session_expired' && (
+            <button type="button" onClick={sync.onRenew} className="font-medium underline-offset-2 hover:underline">
+              {t('Renovar')}
+            </button>
+          )}
+        </span>
+      </span>
+    )
+  }
+
+  if (sync.syncing) {
+    return (
+      <span className="flex items-center gap-1.5 text-muted-foreground">
+        <LoaderCircle className="size-3.5 shrink-0 animate-spin text-primary" />
+        <span className="truncate">
+          {sync.cached && ago ? t('Lista salva de {when}. Sincronizando com a AWS…', { when: ago }) : t('Sincronizando com a AWS…')}
+        </span>
+      </span>
+    )
+  }
+
+  if (!sync.at) return null
+
+  return (
+    <span className="flex items-center gap-1.5 text-muted-foreground">
+      <CloudCheck className="size-3.5 shrink-0 text-mint" />
+      <span className="truncate">
+        {sync.minutes > 0
+          ? t('Sincronizado {when}. Próxima em {n} min.', { when: ago, n: sync.minutes })
+          : t('Sincronizado {when}.', { when: ago })}
+      </span>
+    </span>
   )
 }

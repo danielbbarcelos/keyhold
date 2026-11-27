@@ -7,6 +7,7 @@ import {
   GripVertical,
   List,
   ListPlus,
+  MessageSquareText,
   Plus,
   Replace,
   Star,
@@ -99,7 +100,8 @@ export function FieldEditor({
             setOver(null)
           }}
           className={cn(
-            'relative grid grid-cols-[16px_32px_minmax(120px,190px)_minmax(0,1fr)_32px] items-start gap-2 border-t px-4 py-2.5 first:border-t-0',
+            'relative grid grid-cols-[16px_32px_minmax(120px,190px)_minmax(0,1fr)_32px] items-start gap-2 border-t px-4 py-2.5 transition-colors first:rounded-t-[11px] first:border-t-0',
+            dragging === null && 'hover:bg-hover',
             over === index && dragging !== null && dragging !== index && 'bg-primary-soft',
             dragging === index && 'opacity-50',
           )}
@@ -190,6 +192,19 @@ export function FieldEditor({
                       [...keys.current.slice(0, index + 1), newKey(), ...keys.current.slice(index + 1)],
                     ),
                 },
+                field.note === undefined
+                  ? {
+                      kind: 'item' as const,
+                      label: t('Adicionar observação'),
+                      icon: MessageSquareText,
+                      onSelect: () => update(index, { note: '' }),
+                    }
+                  : {
+                      kind: 'item' as const,
+                      label: t('Remover observação'),
+                      icon: MessageSquareText,
+                      onSelect: () => update(index, { note: undefined }),
+                    },
                 { kind: 'separator' },
                 {
                   kind: 'item',
@@ -205,6 +220,31 @@ export function FieldEditor({
               ]}
             />
           </span>
+
+          {field.note !== undefined && (
+            <div className="col-start-3 col-end-5">
+              <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <MessageSquareText className="size-3.5" />
+                {t('Observação')}
+                <span className="flex-1" />
+                <button
+                  type="button"
+                  className="text-faint hover:text-foreground"
+                  onClick={() => update(index, { note: undefined })}
+                >
+                  {t('Remover')}
+                </button>
+              </div>
+              <Textarea
+                aria-label={t('Observação do campo {label}', { label: field.label })}
+                className="min-h-16"
+                placeholder={t('Algo que vale saber sobre este campo')}
+                value={field.note}
+                autoFocus={field.note === ''}
+                onChange={(event) => update(index, { note: event.target.value })}
+              />
+            </div>
+          )}
         </div>
       ))}
 
@@ -266,14 +306,20 @@ function ValueEditor({
 }) {
   const type = fieldType(field.kind)
   const [showing, setShowing] = useState(false)
+  // Revealed for editing: the value was fetched so it could be read, so the inputs it turns into
+  // open showing it rather than masked behind a second click.
+  const [revealed, setRevealed] = useState(false)
   const extra = field.extra ?? {}
   const setExtra = (key: string, value: string) => onChange({ extra: { ...extra, [key]: value } })
 
   // A saved secret the page was never given. It stays as it is unless somebody reveals it (fetched
   // and noted in the trail, then editable) or replaces it with a new value.
   if (field.sealed !== undefined && type.secret) {
-    const unseal = (value: string, parts: Record<string, string>) =>
+    const unseal = (value: string, parts: Record<string, string>) => {
+      setRevealed(true)
+      setShowing(true)
       onChange({ value, extra: { ...extra, ...parts }, sealed: undefined, hint: undefined })
+    }
 
     return (
       <div className="space-y-2">
@@ -324,7 +370,7 @@ function ValueEditor({
           value={extra.question ?? ''}
           onChange={(event) => setExtra('question', event.target.value)}
         />
-        <SecretInput value={field.value} placeholder={t('Resposta')} onChange={(value) => onChange({ value })} />
+        <SecretInput startShowing={revealed} value={field.value} placeholder={t('Resposta')} onChange={(value) => onChange({ value })} />
       </div>
     )
   }
@@ -334,6 +380,7 @@ function ValueEditor({
       <div className="grid grid-cols-2 gap-2">
         <div className="col-span-2">
           <SecretInput
+              startShowing={revealed}
             value={field.value}
             placeholder={t('Número do cartão')}
             mono
@@ -343,6 +390,7 @@ function ValueEditor({
         {CARD_PARTS.map((part) =>
           part.secret ? (
             <SecretInput
+              startShowing={revealed}
               key={part.key}
               value={extra[part.key] ?? ''}
               placeholder={part.placeholder ?? part.label}
@@ -412,6 +460,7 @@ function ValueEditor({
   if (type.secret) {
     return (
       <SecretInput
+        startShowing={revealed}
         value={field.value}
         placeholder={type.placeholder}
         mono={field.kind === 'pin' || field.kind === 'totp'}
@@ -485,15 +534,18 @@ function SecretInput({
   placeholder,
   mono,
   generate,
+  startShowing = false,
   onChange,
 }: {
+  /** Open showing the value: it was just revealed on purpose. */
+  startShowing?: boolean
   value: string
   placeholder?: string
   mono?: boolean
   generate?: boolean
   onChange: (value: string) => void
 }) {
-  const [showing, setShowing] = useState(false)
+  const [showing, setShowing] = useState(startShowing)
   const [generating, setGenerating] = useState(false)
   const allow = useFieldAutocomplete()
 

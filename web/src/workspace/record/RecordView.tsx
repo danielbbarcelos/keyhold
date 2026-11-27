@@ -150,9 +150,24 @@ export function RecordView({
             <Pill icon={Folder}>{folderPath(folders, record.folder_id) || t('Raiz do cofre')}</Pill>
             <Pill icon={Clock}>{t('alterado {when}', { when: when(record.updated_at) })}</Pill>
             {record.parameter && (
-              <span title={t('O nome do parâmetro na AWS')} className="inline-flex max-w-full items-center truncate rounded-full border px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
-                {record.parameter}
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void navigator.clipboard.writeText(record.parameter!).then(
+                        () => toast(t('Caminho copiado'), record.parameter!),
+                        () => toast(t('Não foi possível copiar'), undefined, 'error'),
+                      )
+                    }
+                    className="group inline-flex max-w-full cursor-pointer items-center gap-1 truncate rounded-full border px-2 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                  >
+                    <span className="truncate">{record.parameter}</span>
+                    <Copy className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t('O nome do parâmetro na AWS. Clique para copiar.')}</TooltipContent>
+              </Tooltip>
             )}
             {record.compromised_at && (
               <Pill icon={ShieldAlert} tone="rose">

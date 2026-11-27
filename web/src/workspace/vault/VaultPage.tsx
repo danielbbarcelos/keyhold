@@ -63,13 +63,16 @@ import { AuditBadge } from './AuditBadge'
 import { EditVaultDialog } from '../VaultsPanel'
 import { FolderView } from './FolderView'
 import { folderChain, folderPath } from './paths'
-import { TreeCard, type Selection, type TreeFilter, type TreeMode } from './TreeCard'
+import { type SyncState, TreeCard, type Selection, type TreeFilter, type TreeMode } from './TreeCard'
 import type { Attention, Concern } from './Attention'
 
 /**
  * Inside a vault: the tree on the left, always, and on the right whatever was picked in it (a
  * record, its editor, a folder, the trash).
  */
+/** How long an AWS vault drawn from its kept listing waits before reading AWS. */
+const SYNC_DELAY_MS = 3000
+
 export function VaultPage({
   status,
   vault,
@@ -223,9 +226,17 @@ export function VaultPage({
     }
   }
 
+  // An AWS vault draws its last listing at once (kept in the file, sealed) and reads AWS after.
+  // `sync` says where that stands, for the tree's footer and its Sincronizar button.
+  const [sync, setSync] = useState<SyncState>({ syncing: false, at: null, failed: null, cached: false })
+  const showingRef = useRef(false)
+
   const refresh = useCallback(async () => {
+    if (aws) setSync((now) => ({ ...now, syncing: true }))
     try {
       const [tree, list, bin] = await Promise.all([api.folders(vault.id), api.records(vault.id), api.trash(vault.id)])
+      showingRef.current = true
+      if (aws) setSync({ syncing: false, at: Date.now(), failed: null, cached: false })
 
       setFolders(tree.folders)
       setRecords(list.records.filter((record) => !record.archived))
@@ -268,7 +279,12 @@ export function VaultPage({
         .catch(() => {})
     } catch (cause) {
       setLoaded(true)
-      if (cause instanceof ApiError && cause.aws && editingRef.current) {
+      if (aws) setSync((now) => ({ ...now, syncing: false }))
+      if (cause instanceof ApiError && cause.aws && showingRef.current && !editingRef.current) {
+        // A listing is on screen (kept or read a moment ago): it stays, and the footer says why it
+        // could not be read again, rather than swapping the tree for an error page.
+        setSync((now) => ({ ...now, failed: { message: cause.message, code: cause.aws ?? '' } }))
+      } else if (cause instanceof ApiError && cause.aws && editingRef.current) {
         // Never swap an open editor for an error page: the draft would have no way back.
         toastError(cause, t('O cofre na AWS não respondeu'))
       } else if (cause instanceof ApiError && cause.aws) {
@@ -277,32 +293,72 @@ export function VaultPage({
         toastError(cause, t('Não foi possível carregar o cofre'))
       }
     }
-  }, [vault.id])
+  }, [vault.id, aws])
 
   refreshRef.current = refresh
+
+  // One more opening, for "mais acessados" on Início and Cofres.
+  useEffect(() => {
+    void api.vaultOpened(vault.id).catch(() => undefined)
+  }, [vault.id])
 
   useEffect(() => {
     setOpen(null)
     setEditing(null)
     setFilter('all')
     setLoaded(false)
-    void refresh()
-  }, [refresh])
+    showingRef.current = false
+
+    if (!aws) {
+      void refresh()
+      return
+    }
+
+    // The kept listing first, then AWS a few seconds later: the tree is usable at once, and the
+    // read that may take seconds happens behind it.
+    let gone = false
+    let timer = 0
+    void api
+      .cachedListing(vault.id)
+      .catch(() => ({ cached: false as const }))
+      .then((kept) => {
+        if (gone) return
+        if (!kept.cached) {
+          void refresh()
+          return
+        }
+        setFolders(kept.folders)
+        setRecords(kept.records.filter((record) => !record.archived))
+        setAudit(kept.audit ?? null)
+        setTrash([])
+        setUnavailable(null)
+        setLoaded(true)
+        showingRef.current = true
+        setSync({ syncing: true, at: kept.synced_at * 1000, failed: null, cached: true })
+        timer = window.setTimeout(() => void refresh(), SYNC_DELAY_MS)
+      })
+
+    return () => {
+      gone = true
+      window.clearTimeout(timer)
+    }
+  }, [refresh, aws, vault.id])
 
   // An AWS vault is shared with whoever else IAM lets in: read it again when the window comes
-  // back, and every minute while it is in front of somebody.
+  // back, and at the interval set in Ajustes while it is in front of somebody.
+  const syncMinutes = status.aws_sync_minutes ?? 5
   useEffect(() => {
     if (!aws) return
 
     const again = () => document.visibilityState === 'visible' && void refresh()
-    const timer = window.setInterval(again, 60_000)
+    const timer = syncMinutes > 0 ? window.setInterval(again, syncMinutes * 60_000) : 0
     window.addEventListener('focus', again)
 
     return () => {
       window.clearInterval(timer)
       window.removeEventListener('focus', again)
     }
-  }, [aws, refresh])
+  }, [aws, refresh, syncMinutes])
 
   const openId = selection?.kind === 'record' ? selection.id : null
 
@@ -1096,6 +1152,16 @@ export function VaultPage({
           filter={filter}
           trashCount={trash.length}
           showTrash={!aws}
+          sync={
+            aws
+              ? {
+                  ...sync,
+                  minutes: syncMinutes,
+                  onSync: () => void refresh(),
+                  onRenew: () => void renewHere(),
+                }
+              : undefined
+          }
           onMode={setMode}
           onFilter={setFilter}
           onRecord={(id) => select({ kind: 'record', id })}

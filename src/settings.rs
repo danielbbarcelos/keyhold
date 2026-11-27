@@ -131,6 +131,29 @@ pub fn set_field_autocomplete(vault: &Store, on: bool) -> Result<bool> {
     Ok(on)
 }
 
+const AWS_SYNC_MINUTES: &str = "aws_sync_minutes";
+
+/// How often an open AWS vault reads its account again, in minutes, while the window is visible.
+/// Zero is "only when it opens and when the window comes back". Five by default: the listing is
+/// kept in the file now, so opening never waits, and a minute was more reads than anybody needed.
+pub const DEFAULT_AWS_SYNC_MINUTES: i64 = 5;
+
+pub fn aws_sync_minutes(vault: &Store) -> i64 {
+    read(vault, AWS_SYNC_MINUTES)
+        .ok()
+        .flatten()
+        .and_then(|raw| raw.parse().ok())
+        .map(|minutes: i64| minutes.clamp(0, 120))
+        .unwrap_or(DEFAULT_AWS_SYNC_MINUTES)
+}
+
+pub fn set_aws_sync_minutes(vault: &Store, minutes: i64) -> Result<i64> {
+    let clamped = minutes.clamp(0, 120);
+    write(vault, AWS_SYNC_MINUTES, &clamped.to_string())?;
+
+    Ok(clamped)
+}
+
 const SET_HOST_HINT: &str = "set_host_hint_dismissed";
 
 /// Whether the person dismissed the hint shown when Keyhold opens on 127.0.0.1 (see `docs/AWS.md`

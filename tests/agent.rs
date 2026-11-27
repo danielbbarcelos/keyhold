@@ -698,3 +698,79 @@ fn redaction_catches_the_usual_encodings_of_a_value() {
     assert!(!clean.contains("s3cr%20et%2F%2B"), "{clean}");
     assert!(!clean.contains("733363722065742f2b"), "{clean}");
 }
+
+impl Fixture {
+    fn set_policy(&self, policy: keyhold::vault_prefs::AgentPolicy) {
+        let store = self.state.store.lock().unwrap();
+
+        self.state
+            .lock
+            .with_key(|key| keyhold::vault_prefs::update(&store, key, &self.vault, |prefs| prefs.agent = policy))
+            .unwrap()
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_vault_let_through_answers_without_asking_and_says_why_in_the_trail() {
+    let app = fixture();
+    app.allow_agents();
+    app.allow_reveal();
+    app.set_policy(keyhold::vault_prefs::AgentPolicy::Always);
+
+    let answer = app.ask(Request::Get { record: app.record.clone(), field: "Host".into() }).await;
+
+    assert!(matches!(answer, Response::Value { .. }), "a vault let through still asked: {answer:?}");
+    assert!(app.state.agent.waiting().is_empty());
+
+    let last = &app.trail(5)[0];
+    assert_eq!(last.detail.get("via").and_then(|v| v.as_str()), Some("política do cofre"));
+}
+
+#[tokio::test]
+async fn a_vault_let_through_still_never_hands_over_a_secret() {
+    let app = fixture();
+    app.allow_agents();
+    app.allow_reveal();
+    app.set_policy(keyhold::vault_prefs::AgentPolicy::Always);
+
+    let answer = app.ask(Request::Get { record: app.record.clone(), field: "Senha".into() }).await;
+
+    assert!(matches!(answer, Response::Refused { .. }), "a secret left as a value: {answer:?}");
+}
+
+#[tokio::test]
+async fn a_vault_let_through_is_still_closed_to_an_agent_when_not_available() {
+    let app = fixture();
+    app.allow_reveal();
+    app.set_policy(keyhold::vault_prefs::AgentPolicy::Always);
+
+    let answer = app.ask(Request::Get { record: app.record.clone(), field: "Host".into() }).await;
+
+    assert!(matches!(answer, Response::Refused { .. }));
+}
+
+#[tokio::test]
+async fn a_policy_past_its_date_asks_again() {
+    let app = fixture();
+    app.allow_agents();
+    app.allow_reveal();
+    app.set_policy(keyhold::vault_prefs::AgentPolicy::Until { at: keyhold::identity::now_seconds() - 1 });
+
+    let state = app.state.clone();
+    let record = app.record.clone();
+    let asking = tokio::spawn(async move {
+        keyhold::agent::handle_for_tests(Request::Get { record, field: "Host".into() }, &state).await
+    });
+
+    let waiting = loop {
+        let waiting = app.state.agent.waiting();
+        if !waiting.is_empty() {
+            break waiting;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    };
+
+    app.state.agent.answer(&waiting[0].id, false);
+    assert!(matches!(asking.await.unwrap(), Response::Refused { .. }));
+}

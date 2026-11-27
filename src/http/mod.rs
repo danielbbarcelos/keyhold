@@ -107,6 +107,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/settings/set-host-hint", delete(dismiss_set_host_hint))
         .route("/settings/generator", put(set_generator))
         .route("/settings/layout", put(set_layout))
+        .route("/settings/aws-sync", put(set_aws_sync))
         .route("/alerts", get(alert_presets))
         .route("/alerts", put(set_alert_presets))
         .route("/custom/icons", get(custom_icons))
@@ -395,6 +396,7 @@ async fn status(State(state): State<Arc<AppState>>) -> Answer {
         "retention_days": settings::retention_days(&store),
         "log_reads": settings::log_reads(&store),
         "field_autocomplete": settings::field_autocomplete(&store),
+        "aws_sync_minutes": settings::aws_sync_minutes(&store),
         "set_host_hint_dismissed": settings::set_host_hint_dismissed(&store),
         "appearance": settings::appearance(&store),
         "language": settings::language(&store).map(|lang| lang.tag()),
@@ -594,6 +596,19 @@ async fn set_log_reads(State(state): State<Arc<AppState>>, Json(body): Json<LogR
 
 /// Whether the browser may fill in and save a record's secret fields. A matter of how the editor
 /// behaves, like the appearance, so it does not need the vault open.
+#[derive(Deserialize)]
+struct AwsSync {
+    minutes: i64,
+}
+
+/// How often an open AWS vault is read again. Not secret, and asked for before the vault opens.
+async fn set_aws_sync(State(state): State<Arc<AppState>>, Json(body): Json<AwsSync>) -> Answer {
+    let store = state.store.lock().unwrap();
+    let saved = settings::set_aws_sync_minutes(&store, body.minutes).map_err(bad_request)?;
+
+    Ok(Json(json!({ "aws_sync_minutes": saved })))
+}
+
 async fn dismiss_set_host_hint(State(state): State<Arc<AppState>>) -> Answer {
     let store = state.store.lock().unwrap();
     settings::dismiss_set_host_hint(&store).map_err(bad_request)?;

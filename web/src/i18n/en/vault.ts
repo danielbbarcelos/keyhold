@@ -276,7 +276,8 @@ export const VAULT: Record<string, string> = {
   'Apenas o título muda.': 'Only the title changes.',
   // record/RecordView
   'alterado {when}': 'changed {when}',
-  'O nome do parâmetro na AWS': 'The parameter\'s name in AWS',
+  'O nome do parâmetro na AWS. Clique para copiar.': "The parameter's name in AWS. Click to copy.",
+  'Caminho copiado': 'Path copied',
   'comprometido desde {date}': 'compromised since {date}',
   'sem trilha na AWS': 'no AWS activity log',
   'O que se faz neste registro não fica registrado na AWS: {reason}. O Keyhold funciona normalmente. Quem administra a conta resolve isso.': 'What happens to this item isn\'t logged in AWS: {reason}. Keyhold works normally. Whoever manages the account can fix this.',

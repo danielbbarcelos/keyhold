@@ -97,6 +97,10 @@ pub struct Field {
     /// Copied by the record's main button. Without one marked, the first secret is.
     #[serde(default, skip_serializing_if = "is_false")]
     pub primary: bool,
+    /// A note about the field, free text over as many lines as it needs: what the value is for,
+    /// where it came from, who to ask. Never secret, and shown as an info mark by the label.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
     /// Only ever read from the interface, never written anywhere: "this secret is the one that was
     /// at this position when the record was opened, unchanged". The page is not given secret values
     /// (see [`sealed_json`]), so a save sends this instead and [`unseal`] puts the stored value back.

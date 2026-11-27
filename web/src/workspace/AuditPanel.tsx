@@ -176,7 +176,7 @@ export function AuditPanel({
                   .join(', ')
 
                 return (
-                  <tr key={event.seq} className="border-b last:border-b-0">
+                  <tr key={event.seq} className="border-b transition-colors last:border-b-0 hover:bg-hover">
                     <td className="px-5 py-3 font-mono text-[13px] whitespace-nowrap text-muted-foreground">
                       {today ? at.toLocaleTimeString(locale()) : at.toLocaleString(locale(), { dateStyle: 'short', timeStyle: 'short' })}
                     </td>

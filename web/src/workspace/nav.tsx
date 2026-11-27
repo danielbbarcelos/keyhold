@@ -12,7 +12,7 @@ import { RowMenu, type MenuEntry } from './menu'
  * place it cannot find (a vault since deleted, a record in the trash) simply shows Início.
  */
 export type Destination =
-  | { place: 'home' | 'trail' | 'instances' }
+  | { place: 'home' | 'vaults' | 'trail' | 'instances' }
   | { place: 'settings' | 'custom'; section?: string }
   | { place: 'vault'; vault: string; record?: string; folder?: string; trash?: boolean }
 
@@ -35,7 +35,7 @@ export function destinationFromLocation(): Destination {
   const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
   const at = params.get('at')
 
-  if (at === 'trail' || at === 'instances') return { place: at }
+  if (at === 'trail' || at === 'instances' || at === 'vaults') return { place: at }
   if (at === 'settings' || at === 'custom') return { place: at, section: params.get('s') ?? undefined }
   if (at === 'vault' && params.get('v')) {
     return {

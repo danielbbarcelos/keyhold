@@ -482,9 +482,9 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
 
             match approved(state, peer, &record, &field, "get", None).await {
                 Err(refusal) => refusal,
-                Ok(()) => match value_of(state, &record, &field).await {
+                Ok(via) => match value_of(state, &record, &field).await {
                     Some(value) => {
-                        note_agent(state, peer, audit::action::SECRET_REVEALED, &record, &field, true);
+                        note_allowed(state, peer, audit::action::SECRET_REVEALED, &record, &field, via);
 
                         Response::Value { value }
                     }
@@ -496,19 +496,12 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
         Request::Copy { record, field } => {
             match approved(state, peer, &record, &field, "copy", None).await {
                 Err(refusal) => refusal,
-                Ok(()) => match value_of(state, &record, &field).await {
+                Ok(via) => match value_of(state, &record, &field).await {
                     None => Response::refused("o campo não existe neste registro"),
                     Some(value) => match crate::clipboard::copy_for_a_while(&value) {
                         Err(error) => Response::refused(error.to_string()),
                         Ok(seconds) => {
-                            note_agent(
-                                state,
-                                peer,
-                                audit::action::SECRET_COPIED,
-                                &record,
-                                &field,
-                                true,
-                            );
+                            note_allowed(state, peer, audit::action::SECRET_COPIED, &record, &field, via);
 
                             Response::Copied { field, seconds }
                         }
@@ -524,10 +517,10 @@ async fn handle(request: Request, state: &Arc<AppState>, peer: &Peer) -> Respons
 
             match approved(state, peer, &record, &field, "run", Some(&command)).await {
                 Err(refusal) => refusal,
-                Ok(()) => match value_of(state, &record, &field).await {
+                Ok(via) => match value_of(state, &record, &field).await {
                     None => Response::refused("o campo não existe neste registro"),
                     Some(value) => {
-                        note_run(state, peer, &record, &field, &command);
+                        note_run(state, peer, &record, &field, &command, via);
 
                         run_with(&command, &variable, &value).await
                     }
@@ -620,6 +613,20 @@ fn reachable(state: &Arc<AppState>, record_id: &str) -> bool {
     }
 }
 
+/// The vault a record lives in: named by an AWS id, read from the file for a local one.
+fn vault_of(state: &Arc<AppState>, record_id: &str) -> Option<String> {
+    if crate::aws::mapping::is_aws_id(record_id) {
+        return match crate::aws::mapping::decode_id(record_id) {
+            Some((crate::aws::mapping::IdKind::Record, vault, _)) => Some(vault),
+            _ => None,
+        };
+    }
+
+    let store = state.store.lock().unwrap();
+
+    records::header(&store, record_id).ok().map(|header| header.vault_id)
+}
+
 /// A record's payload, from the file or from AWS. `Err` carries why an AWS record did not open
 /// (an expired session, most often), for the agent to pass on.
 async fn payload_of(state: &Arc<AppState>, record_id: &str) -> std::result::Result<records::Payload, String> {
@@ -693,7 +700,7 @@ async fn approved(
     field: &str,
     intent: &str,
     command: Option<&[String]>,
-) -> std::result::Result<(), Response> {
+) -> std::result::Result<Via, Response> {
     if !reachable(state, record_id) {
         note_agent(state, peer, audit::action::SECRET_REVEALED, record_id, field, false);
 
@@ -721,7 +728,25 @@ async fn approved(
     };
 
     if standing {
-        return Ok(());
+        return Ok(Via::Standing);
+    }
+
+    // The vault's own policy: somebody decided an assistant may work in this vault without being
+    // asked, until a date or for good. Read fresh, like the permissions above. The use is still in
+    // the trail, with the policy as the reason nobody was asked.
+    if let Some(vault_id) = vault_of(state, record_id) {
+        let lets_through = {
+            let store = state.store.lock().unwrap();
+
+            state
+                .lock
+                .with_key(|key| crate::vault_prefs::agent_lets_through(&store, key, &vault_id))
+                .unwrap_or(false)
+        };
+
+        if lets_through {
+            return Ok(Via::VaultPolicy);
+        }
     }
 
     // Asked only about something that exists. A question about a field the record does not have
@@ -757,7 +782,7 @@ async fn approved(
     while now_seconds() < deadline {
         if let Some(allowed) = state.agent.answers.lock().unwrap().remove(&id) {
             if allowed {
-                return Ok(());
+                return Ok(Via::Asked);
             }
 
             note_agent(state, peer, audit::action::SECRET_REVEALED, record_id, field, false);
@@ -993,7 +1018,42 @@ pub fn redact(output: &str, value: &str) -> String {
 
 /// A command run with a secret, written down with the command itself: the trail has to be able to
 /// say what was done with the value, not only that it was used.
-fn note_run(state: &Arc<AppState>, peer: &Peer, record_id: &str, field: &str, command: &[String]) {
+/// Why nobody was asked, or that somebody was. Goes in the trail with every use an agent made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Via {
+    /// The person answered this request.
+    Asked,
+    /// A standing permission for this field covered it.
+    Standing,
+    /// The vault lets an agent through without asking.
+    VaultPolicy,
+}
+
+impl Via {
+    fn describe(self) -> &'static str {
+        match self {
+            Via::Asked => "aprovado agora",
+            Via::Standing => "permissão do campo",
+            Via::VaultPolicy => "política do cofre",
+        }
+    }
+}
+
+fn note_allowed(state: &Arc<AppState>, peer: &Peer, action: &str, record_id: &str, field: &str, via: Via) {
+    let store = state.store.lock().unwrap();
+
+    let _ = audit::record(
+        &store,
+        &state.lock,
+        audit::Actor::Agent { process: peer.process.clone(), pid: peer.pid },
+        action,
+        Some(record_id),
+        audit::Outcome::Allowed,
+        Detail::new().with("field", field).with("asked_by", peer.describe()).with("via", via.describe()),
+    );
+}
+
+fn note_run(state: &Arc<AppState>, peer: &Peer, record_id: &str, field: &str, command: &[String], via: Via) {
     let store = state.store.lock().unwrap();
     let shown: String = command.join(" ").chars().take(400).collect();
 
@@ -1008,7 +1068,8 @@ fn note_run(state: &Arc<AppState>, peer: &Peer, record_id: &str, field: &str, co
             .with("field", field)
             .with("intent", "run")
             .with("command", shown.as_str())
-            .with("asked_by", peer.describe()),
+            .with("asked_by", peer.describe())
+            .with("via", via.describe()),
     );
 }
 

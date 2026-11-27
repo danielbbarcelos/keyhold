@@ -146,8 +146,8 @@ export function InstancesPanel() {
               <li
                 key={one.pid}
                 className={cn(
-                  'flex items-start gap-3 px-5 py-4',
-                  one.is_this_one && 'bg-primary-soft/40',
+                  'flex items-start gap-3 px-5 py-4 transition-colors',
+                  one.is_this_one ? 'bg-primary-soft/40' : 'hover:bg-hover',
                 )}
               >
                 <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />

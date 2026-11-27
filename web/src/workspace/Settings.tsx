@@ -73,12 +73,15 @@ import {
 import { locale, t } from '../i18n'
 import { askToNotify, notifyState, type NotifyState } from '../notify'
 import { AwsAccounts } from './AwsAccounts'
+import { AwsSyncSettings } from './AwsSyncSettings'
 import { toastError } from './toast'
 import { GeneratorControls, StrengthBar } from './PasswordGenerator'
 import { AwsMark } from './AwsMark'
 import { linkProps, TabMenu } from './nav'
 import { TransferPanel } from './TransferPanel'
 import { VaultsPanel } from './VaultsPanel'
+import { VaultInitial } from './shell'
+import { AgentPolicyLine, AgentPolicySelect } from './AgentPolicy'
 
 /**
  * Everything the vault decides about itself: the two clocks, the second factor, the master
@@ -163,7 +166,12 @@ export function Settings({ status, vaults, onChanged, onVaultsChanged, onSection
     cofres: <VaultsPanel vaults={vaults} onChanged={onVaultsChanged} />,
     gerador: <GeneratorSettings recipe={status.generator} onChanged={onChanged} />,
     campos: <FieldAutocomplete on={status.field_autocomplete ?? false} onChanged={onChanged} />,
-    aws: <AwsAccounts vaults={vaults} />,
+    aws: (
+      <div className="space-y-5">
+        <AwsAccounts vaults={vaults} />
+        <AwsSyncSettings status={status} vaults={vaults} onChanged={onChanged} />
+      </div>
+    ),
     chaves: <Rotation vaults={vaults} onChanged={onVaultsChanged} />,
     lixeira: <Retention days={status.retention_days} onChanged={onChanged} />,
     trilha: <TrailSettings on={status.log_reads} onChanged={onChanged} />,
@@ -744,12 +752,15 @@ function Rotation({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged: ()
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="space-y-3 px-6">
+      <CardContent className="px-6">
+        <div className="divide-y overflow-hidden rounded-xl border">
         {vaults
           .filter((vault) => !vault.archived)
           .map((vault) => (
-            <div key={vault.id} className="flex items-center justify-between gap-4">
-              <span className="min-w-0">
+            <div key={vault.id} className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-hover">
+              <span className="flex min-w-0 items-center gap-2.5">
+                <VaultInitial vault={vault} />
+                <span className="min-w-0">
                 <span className="block truncate text-sm">{vault.name}</span>
                 <span className="block text-xs text-muted-foreground">
                   {vault.key_rotated_at
@@ -759,6 +770,7 @@ function Rotation({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged: ()
                       })
                     : t('na chave original')}
                 </span>
+                </span>
               </span>
 
               <Button variant="outline" size="sm" onClick={() => setRotating(vault)}>
@@ -766,6 +778,7 @@ function Rotation({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged: ()
               </Button>
             </div>
           ))}
+        </div>
       </CardContent>
 
       <AlertDialog open={rotating !== null} onOpenChange={(open) => !open && setRotating(null)}>
@@ -1148,7 +1161,7 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
         </CardTitle>
         <CardDescription>
           {t(
-            'Um assistente em execução nesta máquina pode buscar e solicitar segredos dos cofres marcados abaixo. Cada pedido de valor exige aprovação nesta janela, com o processo e o PID visíveis.',
+            'Um assistente em execução nesta máquina pode buscar e solicitar segredos dos cofres marcados abaixo. Cada pedido de valor exige aprovação nesta janela, com o processo e o PID visíveis, a não ser que o cofre esteja liberado.',
           )}
         </CardDescription>
       </CardHeader>
@@ -1222,13 +1235,15 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
           {vaults
             .filter((vault) => !vault.archived)
             .map((vault) => (
-              <div key={vault.id} className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-hover">
-                <Label htmlFor={`agent-${vault.id}`} className="flex-1 cursor-pointer py-1 font-normal">
+              <div key={vault.id} className="flex items-center justify-between gap-3 px-4 py-3.5 transition-colors hover:bg-hover">
+                <Label htmlFor={`agent-${vault.id}`} className="block min-w-0 flex-1 cursor-pointer py-1 font-normal">
                   {vault.name}
                   {vault.kind === 'aws' && (
                     <span className="ml-2 text-xs text-faint">{t('cofre AWS, lido com a sessão aberta no Keyhold')}</span>
                   )}
+                  <AgentPolicyLine vault={vault} />
                 </Label>
+                {vault.agent_access && <AgentPolicySelect vault={vault} onChanged={onChanged} />}
                 <Switch
                   id={`agent-${vault.id}`}
                   checked={vault.agent_access}
@@ -1242,6 +1257,12 @@ function AgentAccess({ vaults, onChanged }: { vaults: VaultSummary[]; onChanged:
               </div>
             ))}
           </div>
+
+          <p className="text-sm text-muted-foreground">
+            {t(
+              'Num cofre liberado o Keyhold não pergunta, mas continua sem entregar senha ao assistente: ele só usa o segredo dentro de um comando ou copia para você. Cada uso fica na Trilha com o motivo "política do cofre". Com o Keyhold trancado, nada passa.',
+            )}
+          </p>
         </div>
 
         <StandingGrants onChanged={refresh} />

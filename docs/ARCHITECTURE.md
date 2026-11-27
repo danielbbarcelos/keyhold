@@ -52,6 +52,7 @@ src/aws/
   mapping.rs   record <-> parameter: ids, names, folders, value format, description, tags, keys
   config.rs    logins, connections, favourites: sealed under the master key, in `settings`
   state.rs     tokens, credentials, short caches: memory only, tied to the lock's generation
+  listing_cache.rs  the last listing of each vault, sealed in the file, drawn before AWS answers
 src/http/
   aws.rs       the /aws routes, and the AWS side of every vault, folder, record and attachment route
 ```

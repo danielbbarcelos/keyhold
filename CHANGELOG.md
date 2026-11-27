@@ -1,9 +1,45 @@
 # Changelog
 
-## 1.1.1 (unreleased)
+## 1.2.0 (unreleased)
+
+### Added
+
+- **A Cofres tab.** Every vault, with a filter by name, Todos, Favoritos, Locais and AWS, ordered by
+  most opened or by name, and a star on each card to favourite it. Início no longer lists every
+  vault: it shows a carousel of the favourites first and then the most opened, up to ten.
+- **Vault cards with one layout.** The icon and the name at the top (one line, truncated), local or
+  AWS under it (no region), then the counts and the state (the agent, or why the vault cannot be
+  read) at the foot, always in the same place.
+- **An AWS vault opens at once.** It draws its last listing and reads AWS three seconds later; a
+  Sincronizar button sits on the tree, its foot says when the list was read and when the next read
+  is, and a failed read keeps the list on screen with the reason. Ajustes → Contas AWS sets the
+  interval (1, 5, 15 or 30 minutes, or only when opening; 5 by default, it was 1) and deletes a
+  vault's saved list.
+- **Copy an AWS parameter's path.** The path under a record's title in an AWS vault is a button:
+  a click copies it, and a copy icon shows on hover.
+- **A note on any field.** "Adicionar observação" in a field's menu. On the record, an info mark
+  right after the field's name (after the ellipsis when the name is cut) shows it on hover, with the
+  lines it was written with, and a click pins it. In an AWS
+  vault it goes in the parameter's JSON with the rest of the field, so a record with a noted
+  password is no longer a plain parameter.
+- **Favourite vaults and how often each is opened**, kept per vault, sealed with the master key.
+- **The agent's policy per vault.** In Ajustes → Agentes, a vault available to an assistant can ask
+  every time (as before), let requests through for 1, 7 or 30 days, until a date, or for good. A
+  release past its date asks again and says so. A request let through
+  goes in the trail saying why nobody was asked, and changing the policy is in the trail too. A
+  secret field is still never handed to an agent.
+- **The last listing of an AWS vault is kept**, sealed with the master key in the vault file, so
+  the tree can draw before AWS answers. It holds what the page was given (titles, folders, icons,
+  the field shown in lists), never a secret value, and goes when the vault does or its connection
+  changes.
 
 ### Changed
 
+- **Revealing a secret to edit it shows it.** It used to come back masked and needed a second
+  click.
+- **Every list with actions per row lights up under the pointer**: key rotation (now also with
+  dividers, like the list of vaults), default alerts, instances, both trails, a record's fields and
+  the fields of the editor.
 - **A footer on every page.** Keyhold's version and the link to its code on the left, the
   language on the right: on the first screens, the lock screen, every page of an open Keyhold and the
   page of a shared link. It sits after the content, at the end of the scroll, and a short page still
